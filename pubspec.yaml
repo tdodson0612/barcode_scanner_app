@@ -1,4 +1,4 @@
-name: barcode_scanner_app
+name: liver_wise
 description: A Flutter app to scan food barcodes and show nutrition info.
 version: 1.0.0+1
 
@@ -8,19 +8,25 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  shared_preferences: ^2.2.3 
   image_picker: ^1.0.7
   google_mlkit_barcode_scanning: ^0.14.1
   http: ^1.2.1
   path_provider: ^2.1.1
-  flutter_lints: ^6.0.0
+  supabase_flutter: ^2.3.4
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_launcher_icons: ^0.13.1  # <-- moved here correctly
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/background.png
+    - assets/icon/liverlogo.png  # Add this since it's referenced in flutter_launcher_icons
 
 flutter_launcher_icons:
   android: true
