@@ -1,13 +1,16 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-// import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../widgets/app_drawer.dart';
+import '../widgets/premium_gate.dart';
+import '../controllers/premium_gate_controller.dart';
 import 'liverhealthbar.dart';
-import 'profile_screen.dart';
+import '../pages/profile_screen.dart';
 import 'contact_screen.dart';
 
 /// --- NutritionInfo Data Model ---
@@ -219,18 +222,22 @@ class BarcodeScannerService {
   }
 }
 
-/// --- Home Screen ---
-class HomeScreen extends StatefulWidget {
+/// --- Combined Home Page with Premium Features ---
+class HomePage extends StatefulWidget {
   final bool isPremium;
 
-  const HomeScreen({super.key, required this.isPremium});
+  const HomePage({super.key, this.isPremium = false});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  _HomePageState createState() => _HomePageState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  // State variables
+class _HomePageState extends State<HomePage> {
+  // Premium scanning state
+  bool _isScanning = false;
+  List<Map<String, String>> _scannedRecipes = [];
+  
+  // Nutrition scanner state
   File? _imageFile;
   String _nutritionText = '';
   int? _liverHealthScore;
@@ -239,6 +246,13 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Recipe> _recipeSuggestions = [];
   List<String> _favoriteRecipes = [];
   bool _showInitialView = true;
+  NutritionInfo? _currentNutrition;
+
+  // Ad state
+  InterstitialAd? _interstitialAd;
+  bool _isAdReady = false;
+  RewardedAd? _rewardedAd;
+  bool _isRewardedAdReady = false;
 
   // Image picker
   final ImagePicker _picker = ImagePicker();
@@ -246,7 +260,130 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    PremiumGateController().refresh();
     _loadFavoriteRecipes();
+    _loadInterstitialAd();
+    _loadRewardedAd();
+  }
+
+  @override
+  void dispose() {
+    _interstitialAd?.dispose();
+    _rewardedAd?.dispose();
+    super.dispose();
+  }
+
+  /// Load interstitial ad for free users
+  void _loadInterstitialAd() {
+    InterstitialAd.load(
+      adUnitId: Platform.isAndroid
+          ? 'ca-app-pub-3940256099942544/1033173712' // Test ad unit ID
+          : 'ca-app-pub-3940256099942544/4411468910',
+      request: AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          _interstitialAd = ad;
+          _isAdReady = true;
+          
+          ad.setImmersiveMode(true);
+        },
+        onAdFailedToLoad: (error) {
+          debugPrint('InterstitialAd failed to load: $error');
+          _isAdReady = false;
+        },
+      ),
+    );
+  }
+
+  /// Load rewarded ad for free users to earn extra scans
+  void _loadRewardedAd() {
+    RewardedAd.load(
+      adUnitId: Platform.isAndroid
+          ? 'ca-app-pub-3940256099942544/5224354917' // Test ad unit ID
+          : 'ca-app-pub-3940256099942544/1712485313',
+      request: AdRequest(),
+      rewardedAdLoadCallback: RewardedAdLoadCallback(
+        onAdLoaded: (ad) {
+          _rewardedAd = ad;
+          _isRewardedAdReady = true;
+        },
+        onAdFailedToLoad: (error) {
+          debugPrint('RewardedAd failed to load: $error');
+          _isRewardedAdReady = false;
+        },
+      ),
+    );
+  }
+
+  /// Show interstitial ad before allowing scan for free users
+  void _showInterstitialAd(VoidCallback onAdClosed) {
+    if (_isAdReady && _interstitialAd != null) {
+      _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
+        onAdShowedFullScreenContent: (ad) {
+          debugPrint('Interstitial ad showed full screen content');
+        },
+        onAdDismissedFullScreenContent: (ad) {
+          debugPrint('Interstitial ad dismissed');
+          ad.dispose();
+          _loadInterstitialAd(); // Load next ad
+          onAdClosed(); // Continue with scan
+        },
+        onAdFailedToShowFullScreenContent: (ad, error) {
+          debugPrint('Interstitial ad failed to show: $error');
+          ad.dispose();
+          _loadInterstitialAd();
+          onAdClosed(); // Continue with scan even if ad fails
+        },
+      );
+      _interstitialAd!.show();
+      _isAdReady = false;
+    } else {
+      onAdClosed(); // Continue with scan if no ad available
+    }
+  }
+
+  /// Show rewarded ad to earn extra scans
+  void _showRewardedAd() {
+    if (_isRewardedAdReady && _rewardedAd != null) {
+      _rewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
+        onAdShowedFullScreenContent: (ad) {
+          debugPrint('Rewarded ad showed full screen content');
+        },
+        onAdDismissedFullScreenContent: (ad) {
+          debugPrint('Rewarded ad dismissed');
+          ad.dispose();
+          _loadRewardedAd(); // Load next ad
+        },
+        onAdFailedToShowFullScreenContent: (ad, error) {
+          debugPrint('Rewarded ad failed to show: $error');
+          ad.dispose();
+          _loadRewardedAd();
+        },
+      );
+      
+      _rewardedAd!.show(
+        onUserEarnedReward: (ad, reward) {
+          debugPrint('User earned reward: ${reward.amount} ${reward.type}');
+          // Award extra scan to user
+          final controller = PremiumGateController();
+          controller.addBonusScans(1);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Bonus scan earned! You now have ${controller.remainingScans + 1} scans remaining.'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        },
+      );
+      _isRewardedAdReady = false;
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Ad not ready yet. Please try again in a moment.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
   }
 
   /// Load favorite recipes from SharedPreferences
@@ -288,11 +425,102 @@ class _HomeScreenState extends State<HomeScreen> {
       _recipeSuggestions = [];
       _liverHealthScore = null;
       _isLoading = false;
+      _scannedRecipes = [];
+      _currentNutrition = null;
     });
   }
 
-  /// Take photo from camera
+  /// Premium scan method (simulated) - Free users must watch ad first
+  Future<void> _performScan() async {
+    final controller = PremiumGateController();
+    
+    // Check if user can scan
+    if (!controller.canAccessFeature(PremiumFeature.scan)) {
+      Navigator.pushNamed(context, '/premium');
+      return;
+    }
+
+    // Free users must watch interstitial ad before scanning
+    if (!controller.isPremium) {
+      _showInterstitialAd(() => _executePerformScan());
+    } else {
+      _executePerformScan();
+    }
+  }
+
+  /// Execute the actual scan after ad is watched (or for premium users)
+  Future<void> _executePerformScan() async {
+    final controller = PremiumGateController();
+
+    setState(() {
+      _isScanning = true;
+    });
+
+    try {
+      // Use a scan (for free users)
+      final success = await controller.useScan();
+      
+      if (!success) {
+        Navigator.pushNamed(context, '/premium');
+        return;
+      }
+
+      // Simulate scanning delay
+      await Future.delayed(Duration(seconds: 2));
+
+      // Simulate scan results
+      setState(() {
+        _scannedRecipes = [
+          {
+            'name': 'Tomato Pasta',
+            'ingredients': '2 cups pasta, 4 tomatoes, 1 onion, garlic, olive oil',
+            'directions': '1. Cook pasta. 2. Sauté onion and garlic. 3. Add tomatoes. 4. Mix with pasta.',
+          },
+          {
+            'name': 'Vegetable Stir Fry',
+            'ingredients': '2 cups mixed vegetables, soy sauce, ginger, garlic, oil',
+            'directions': '1. Heat oil in pan. 2. Add ginger and garlic. 3. Add vegetables. 4. Stir fry with soy sauce.',
+          },
+        ];
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Scan successful! ${controller.remainingScans} scans remaining today.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error scanning: $e')),
+      );
+    } finally {
+      setState(() {
+        _isScanning = false;
+      });
+    }
+  }
+
+  /// Take photo from camera (Real nutrition scanner) - Free users must watch ad first
   Future<void> _takePhoto() async {
+    final controller = PremiumGateController();
+    
+    // Check if user can scan (premium feature)
+    if (!controller.canAccessFeature(PremiumFeature.scan)) {
+      Navigator.pushNamed(context, '/premium');
+      return;
+    }
+
+    // Free users must watch interstitial ad before taking photo
+    if (!controller.isPremium) {
+      _showInterstitialAd(() => _executeTakePhoto());
+    } else {
+      _executeTakePhoto();
+    }
+  }
+
+  /// Execute taking photo after ad is watched (or for premium users)
+  Future<void> _executeTakePhoto() async {
     try {
       setState(() {
         _showInitialView = false;
@@ -301,6 +529,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _imageFile = null;
         _recipeSuggestions = [];
         _isLoading = false;
+        _scannedRecipes = [];
       });
 
       final pickedFile = await _picker.pickImage(
@@ -320,9 +549,18 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Submit photo for analysis
+  /// Submit photo for analysis (Real nutrition analysis)
   Future<void> _submitPhoto() async {
     if (_imageFile == null) return;
+
+    final controller = PremiumGateController();
+    
+    // Use a scan for analysis
+    final success = await controller.useScan();
+    if (!success) {
+      Navigator.pushNamed(context, '/premium');
+      return;
+    }
 
     setState(() {
       _isLoading = true;
@@ -358,7 +596,15 @@ class _HomeScreenState extends State<HomeScreen> {
         _showLiverBar = true;
         _isLoading = false;
         _recipeSuggestions = suggestions;
+        _currentNutrition = nutrition;
       });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Analysis successful! ${controller.remainingScans} scans remaining today.'),
+          backgroundColor: Colors.green,
+        ),
+      );
     } catch (e) {
       setState(() {
         _nutritionText = "Error processing image: ${e.toString()}";
@@ -394,44 +640,49 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Build recipe suggestions widget
-  Widget _buildRecipeSuggestions() {
+  /// Build recipe suggestions widget for real nutrition analysis
+  Widget _buildNutritionRecipeSuggestions() {
     if (_recipeSuggestions.isEmpty) return const SizedBox.shrink();
 
-    return Container(
-      margin: const EdgeInsets.all(20),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.blue.shade800,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Recipe Suggestions:',
-            style: TextStyle(
-              fontSize: 20,
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
+    return PremiumGate(
+      feature: PremiumFeature.viewRecipes,
+      featureName: 'Recipe Details',
+      featureDescription: 'View full recipe details with ingredients and directions.',
+      child: Container(
+        margin: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.blue.shade800,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
             ),
-          ),
-          const SizedBox(height: 16),
-          ..._recipeSuggestions.map((recipe) => _buildRecipeCard(recipe)),
-        ],
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Health-Based Recipe Suggestions:',
+              style: TextStyle(
+                fontSize: 20,
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ..._recipeSuggestions.map((recipe) => _buildNutritionRecipeCard(recipe)),
+          ],
+        ),
       ),
     );
   }
 
-  /// Build individual recipe card
-  Widget _buildRecipeCard(Recipe recipe) {
+  /// Build individual recipe card for nutrition analysis
+  Widget _buildNutritionRecipeCard(Recipe recipe) {
     final isFavorite = _favoriteRecipes.contains(recipe.title);
     
     return Container(
@@ -457,12 +708,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-              IconButton(
-                icon: Icon(
-                  isFavorite ? Icons.favorite : Icons.favorite_border,
-                  color: isFavorite ? Colors.red : Colors.white,
+              PremiumGate(
+                feature: PremiumFeature.favoriteRecipes,
+                featureName: 'Favorite Recipes',
+                child: IconButton(
+                  icon: Icon(
+                    isFavorite ? Icons.favorite : Icons.favorite_border,
+                    color: isFavorite ? Colors.red : Colors.white,
+                  ),
+                  onPressed: () => _toggleFavoriteRecipe(recipe.title),
                 ),
-                onPressed: () => _toggleFavoriteRecipe(recipe.title),
               ),
             ],
           ),
@@ -481,6 +736,60 @@ class _HomeScreenState extends State<HomeScreen> {
               color: Colors.white60,
             ),
           ),
+          const SizedBox(height: 8),
+          Text(
+            'Instructions: ${recipe.instructions}',
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.white60,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Premium action buttons
+          Row(
+            children: [
+              Expanded(
+                child: PremiumGate(
+                  feature: PremiumFeature.favoriteRecipes,
+                  featureName: 'Favorite Recipes',
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      _toggleFavoriteRecipe(recipe.title);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Added to favorites!')),
+                      );
+                    },
+                    icon: Icon(Icons.favorite),
+                    label: Text('Save Recipe'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: PremiumGate(
+                  feature: PremiumFeature.groceryList,
+                  featureName: 'Grocery List',
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Added to grocery list!')),
+                      );
+                    },
+                    icon: Icon(Icons.add_shopping_cart),
+                    label: Text('Add to List'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -488,168 +797,540 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Build initial welcome view
   Widget _buildInitialView() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.camera_alt,
-            size: 80,
-            color: Colors.white.withValues(alpha: 0.8),
+    return Stack(
+      children: [
+        // Background
+        Positioned.fill(
+          child: Image.asset(
+            'assets/background.png',
+            fit: BoxFit.cover,
           ),
-          const SizedBox(height: 24),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Text(
-              'Scan a product barcode',
-              style: TextStyle(
-                fontSize: 24,
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
+        ),
+        
+        // Content
+        SingleChildScrollView(
+          padding: EdgeInsets.all(16),
+          child: Column(
+            children: [
+              // Welcome Section
+              Container(
+                padding: EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.scanner,
+                      size: 48,
+                      color: Colors.green,
+                    ),
+                    SizedBox(height: 12),
+                    Text(
+                      'Welcome to Recipe Scanner',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'Scan products to discover amazing recipes and get nutrition insights!',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey.shade600,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
               ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Text(
-              'Take a photo of a product barcode to get nutrition information and health recommendations',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.white70,
+              
+              SizedBox(height: 30),
+              
+              // Scan Button Section
+              Center(
+                child: AnimatedBuilder(
+                  animation: PremiumGateController(),
+                  builder: (context, _) {
+                    final controller = PremiumGateController();
+                    
+                    return Column(
+                      children: [
+                        // Main Scan Button
+                        GestureDetector(
+                          onTap: _isScanning ? null : _takePhoto,
+                          child: Container(
+                            width: 200,
+                            height: 200,
+                            decoration: BoxDecoration(
+                              color: _isScanning 
+                                  ? Colors.grey 
+                                  : (controller.canAccessFeature(PremiumFeature.scan) 
+                                      ? Colors.blue 
+                                      : Colors.red),
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black26,
+                                  blurRadius: 10,
+                                  offset: Offset(0, 5),
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: _isScanning
+                                  ? Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        CircularProgressIndicator(color: Colors.white),
+                                        SizedBox(height: 16),
+                                        Text(
+                                          'Scanning...',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          controller.canAccessFeature(PremiumFeature.scan)
+                                              ? Icons.camera_alt
+                                              : Icons.lock,
+                                          color: Colors.white,
+                                          size: 60,
+                                        ),
+                                        SizedBox(height: 12),
+                                        Text(
+                                          controller.canAccessFeature(PremiumFeature.scan)
+                                              ? 'Tap to Scan'
+                                              : 'Upgrade to Scan',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                        ),
+                        
+                        SizedBox(height: 20),
+                        
+                        // Scan Status
+                        Container(
+                          padding: EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            children: [
+                              if (!controller.isPremium) ...[
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      controller.canAccessFeature(PremiumFeature.scan)
+                                          ? Icons.check_circle
+                                          : Icons.warning,
+                                      color: controller.canAccessFeature(PremiumFeature.scan)
+                                          ? Colors.green
+                                          : Colors.red,
+                                      size: 20,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      controller.canAccessFeature(PremiumFeature.scan)
+                                          ? 'Free scans remaining: ${controller.remainingScans}/3'
+                                          : 'Daily scan limit reached!',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: controller.canAccessFeature(PremiumFeature.scan)
+                                            ? Colors.green.shade700
+                                            : Colors.red.shade700,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                SizedBox(height: 12),
+                                ElevatedButton.icon(
+                                  onPressed: () {
+                                    Navigator.pushNamed(context, '/premium');
+                                  },
+                                  icon: Icon(Icons.star),
+                                  label: Text('Upgrade for Unlimited Scans'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.amber,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                ),
+                                
+                                // Watch ad for bonus scan button
+                                SizedBox(height: 8),
+                                ElevatedButton.icon(
+                                  onPressed: _showRewardedAd,
+                                  icon: Icon(Icons.play_circle_fill),
+                                  label: Text('Watch Ad for Bonus Scan'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.purple,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                ),
+                              ] else ...[
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.star, color: Colors.amber, size: 20),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Premium: Unlimited Scans',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: Colors.amber.shade700,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        
+                        // Quick Scan Demo Button (for premium demo)
+                        SizedBox(height: 20),
+                        ElevatedButton.icon(
+                          onPressed: _performScan,
+                          icon: Icon(Icons.qr_code_scanner),
+                          label: Text('Quick Recipe Scan Demo'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
               ),
-              textAlign: TextAlign.center,
-            ),
+              
+              SizedBox(height: 30),
+              
+              // Recipe Results from Demo Scan (PREMIUM GATED)
+              if (_scannedRecipes.isNotEmpty) ...[
+                PremiumGate(
+                  feature: PremiumFeature.viewRecipes,
+                  featureName: 'Recipe Details',
+                  featureDescription: 'View full recipe details with ingredients and directions.',
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.restaurant, color: Colors.green, size: 24),
+                            SizedBox(width: 12),
+                            Text(
+                              'Recipe Suggestions',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                      SizedBox(height: 16),
+                      
+                      ..._scannedRecipes.map((recipe) => Container(
+                        margin: EdgeInsets.only(bottom: 16),
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.restaurant, color: Colors.green),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    recipe['name']!,
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: 16),
+                            
+                            Text(
+                              'Ingredients:',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            SizedBox(height: 8),
+                            Text(recipe['ingredients']!),
+                            
+                            SizedBox(height: 16),
+                            
+                            Text(
+                              'Directions:',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            SizedBox(height: 8),
+                            Text(recipe['directions']!),
+                            
+                            SizedBox(height: 16),
+                            
+                            // Premium action buttons
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: PremiumGate(
+                                    feature: PremiumFeature.favoriteRecipes,
+                                    featureName: 'Favorite Recipes',
+                                    child: ElevatedButton.icon(
+                                      onPressed: () {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('Added to favorites!')),
+                                        );
+                                      },
+                                      icon: Icon(Icons.favorite),
+                                      label: Text('Save Recipe'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.red,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(width: 12),
+                                Expanded(
+                                  child: PremiumGate(
+                                    feature: PremiumFeature.groceryList,
+                                    featureName: 'Grocery List',
+                                    child: ElevatedButton.icon(
+                                      onPressed: () {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(content: Text('Added to grocery list!')),
+                                        );
+                                      },
+                                      icon: Icon(Icons.add_shopping_cart),
+                                      label: Text('Add to List'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.green,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      )),
+                    ],
+                  ),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 40),
-          ElevatedButton.icon(
-            onPressed: _takePhoto,
-            icon: const Icon(Icons.camera_alt),
-            label: const Text('Take Photo'),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              textStyle: const TextStyle(fontSize: 18),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
   /// Build scanning view with results
   Widget _buildScanningView() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          const SizedBox(height: 20),
+    return Container(
+      decoration: const BoxDecoration(
+        image: DecorationImage(
+          image: AssetImage('assets/background.png'),
+          fit: BoxFit.cover,
+        ),
+      ),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            const SizedBox(height: 20),
 
-          // Image preview
-          if (_imageFile != null)
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.2),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
+            // Image preview
+            if (_imageFile != null)
+              Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.file(
+                    _imageFile!,
+                    width: 200,
+                    height: 200,
+                    fit: BoxFit.cover,
                   ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.file(
-                  _imageFile!,
-                  width: 200,
-                  height: 200,
-                  fit: BoxFit.cover,
                 ),
               ),
-            ),
 
-          const SizedBox(height: 20),
+            const SizedBox(height: 20),
 
-          // Action buttons
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              ElevatedButton.icon(
-                onPressed: _takePhoto,
-                icon: const Icon(Icons.camera_alt),
-                label: const Text('Retake'),
-              ),
-              if (_imageFile != null && !_isLoading)
-                ElevatedButton.icon(
-                  onPressed: _submitPhoto,
-                  icon: const Icon(Icons.send),
-                  label: const Text('Analyze'),
-                ),
-            ],
-          ),
-
-          const SizedBox(height: 20),
-
-          // Loading indicator
-          if (_isLoading)
-            const Column(
+            // Action buttons
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 16),
-                Text(
-                  'Analyzing image...',
-                  style: TextStyle(color: Colors.white),
+                ElevatedButton.icon(
+                  onPressed: _takePhoto,
+                  icon: const Icon(Icons.camera_alt),
+                  label: const Text('Retake'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+                if (_imageFile != null && !_isLoading)
+                  ElevatedButton.icon(
+                    onPressed: _submitPhoto,
+                    icon: const Icon(Icons.send),
+                    label: const Text('Analyze'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ElevatedButton.icon(
+                  onPressed: _resetToHome,
+                  icon: const Icon(Icons.home),
+                  label: const Text('Home'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    foregroundColor: Colors.white,
+                  ),
                 ),
               ],
             ),
 
-          // Nutrition information
-          if (_nutritionText.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.all(16),
-              margin: const EdgeInsets.symmetric(horizontal: 20),
-              decoration: BoxDecoration(
-                color: Colors.green.shade700,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Text(
-                _nutritionText,
-                style: const TextStyle(
-                  fontSize: 16,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
+            const SizedBox(height: 20),
+
+            // Loading indicator
+            if (_isLoading)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                textAlign: TextAlign.left,
+                child: const Column(
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text(
+                      'Analyzing nutrition information...',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
 
-          const SizedBox(height: 20),
+            // Nutrition information
+            if (_nutritionText.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.all(16),
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade700,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.1),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.info, color: Colors.white, size: 24),
+                        SizedBox(width: 12),
+                        Text(
+                          'Nutrition Information',
+                          style: TextStyle(
+                            fontSize: 20,
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 12),
+                    Text(
+                      _nutritionText,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.left,
+                    ),
+                  ],
+                ),
+              ),
 
-          // Liver health bar
-          if (_showLiverBar && _liverHealthScore != null)
-            LiverHealthBar(healthScore: _liverHealthScore!),
+            const SizedBox(height: 20),
 
-          const SizedBox(height: 20),
+            // Liver health bar
+            if (_showLiverBar && _liverHealthScore != null)
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                child: LiverHealthBar(healthScore: _liverHealthScore!),
+              ),
 
-          // Recipe suggestions
-          _buildRecipeSuggestions(),
-        ],
+            const SizedBox(height: 20),
+
+            // Recipe suggestions from nutrition analysis
+            _buildNutritionRecipeSuggestions(),
+          ],
+        ),
       ),
     );
   }
@@ -658,16 +1339,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color.fromARGB(255, 1, 110, 32),
+        title: Text('Recipe Scanner'),
+        backgroundColor: Colors.green,
         foregroundColor: Colors.white,
-        title: const Text('LiverWise Scanner'),
-        elevation: 0,
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: const Icon(Icons.menu),
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
-        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.shopping_cart),
@@ -678,42 +1352,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       drawer: _buildDrawer(),
-      body: Container(
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/background.png'),
-            fit: BoxFit.cover,
-          ),
-        ),
-        child: Column(
-          children: [
-            Expanded(
-              child: _showInitialView ? _buildInitialView() : _buildScanningView(),
-            ),
-            // Welcome message
-            Container(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                widget.isPremium
-                    ? 'Welcome, Premium User!'
-                    : 'Welcome, Free User!',
-                style: TextStyle(
-                  fontSize: 18,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
-                  shadows: [
-                    Shadow(
-                      color: Colors.black.withValues(alpha: 0.5),
-                      offset: const Offset(1, 1),
-                      blurRadius: 2,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+      body: _showInitialView ? _buildInitialView() : _buildScanningView(),
     );
   }
 
@@ -725,19 +1364,19 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           const DrawerHeader(
             decoration: BoxDecoration(
-              color: Color.fromARGB(255, 1, 110, 32),
+              color: Colors.green,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(
-                  Icons.local_hospital,
+                  Icons.restaurant_menu,
                   color: Colors.white,
                   size: 48,
                 ),
                 SizedBox(height: 16),
                 Text(
-                  'LiverWise Menu:',
+                  'Recipe Scanner Menu',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 24,
@@ -777,6 +1416,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 context,
                 MaterialPageRoute(builder: (context) => const ContactScreen()),
               );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.star),
+            title: const Text('Premium Features'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.pushNamed(context, '/premium');
             },
           ),
           ListTile(

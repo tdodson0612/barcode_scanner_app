@@ -6,13 +6,114 @@ import '../models/submitted_recipe.dart';
 class DatabaseService {
   static final SupabaseClient _supabase = Supabase.instance.client;
 
-  // Get current user ID
+  // ==================================================
+  // CURRENT USER ID & AUTH CHECK
+  // ==================================================
   static String? get currentUserId => _supabase.auth.currentUser?.id;
+
+  /// Throws an exception if no user is signed in
+  static void ensureUserAuthenticated() {
+    if (currentUserId == null) {
+      throw Exception('Please sign in to continue');
+    }
+  }
+
+  static bool get isUserLoggedIn => currentUserId != null;
+
+  // ==================================================
+  // USER PROFILE MANAGEMENT
+  // ==================================================
+  static Future<void> createUserProfile(
+    String userId, 
+    String email, 
+    {bool isPremium = false}
+  ) async {
+    try {
+      await _supabase.from('user_profiles').insert({
+        'id': userId,
+        'email': email,
+        'is_premium': isPremium,
+        'daily_scans_used': 0,
+        'last_scan_date': DateTime.now().toIso8601String().split('T')[0],
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print('Error creating user profile: $e');
+      rethrow;
+    }
+  }
+
+  static Future<Map<String, dynamic>?> getUserProfile() async {
+    if (currentUserId == null) return null;
+
+    try {
+      final response = await _supabase
+          .from('user_profiles')
+          .select()
+          .eq('id', currentUserId!)
+          .single();
+      return response;
+    } catch (e) {
+      print('Error getting user profile: $e');
+      return null;
+    }
+  }
+
+  static Future<void> setPremiumStatus(bool isPremium) async {
+    ensureUserAuthenticated();
+    
+    await _supabase.from('user_profiles').update({
+      'is_premium': isPremium,
+      'updated_at': DateTime.now().toIso8601String(),
+    }).eq('id', currentUserId!);
+  }
+
+  static Future<bool> isPremiumUser() async {
+    final profile = await getUserProfile();
+    return profile?['is_premium'] ?? false;
+  }
+
+  // ==================================================
+  // SCAN COUNT MANAGEMENT
+  // ==================================================
+  static Future<int> getDailyScanCount() async {
+    final profile = await getUserProfile();
+    if (profile == null) return 0;
+
+    final today = DateTime.now().toIso8601String().split('T')[0];
+    final lastScanDate = profile['last_scan_date'] ?? '';
+
+    // Reset count if it's a new day
+    if (lastScanDate != today) {
+      await _supabase.from('user_profiles').update({
+        'daily_scans_used': 0,
+        'last_scan_date': today,
+      }).eq('id', currentUserId!);
+      return 0;
+    }
+
+    return profile['daily_scans_used'] ?? 0;
+  }
+
+  static Future<bool> canPerformScan() async {
+    if (await isPremiumUser()) return true;
+    
+    final dailyCount = await getDailyScanCount();
+    return dailyCount < 3; // Free users get 3 scans per day
+  }
+
+  static Future<void> incrementScanCount() async {
+    if (await isPremiumUser()) return; // Premium users have unlimited scans
+
+    final currentCount = await getDailyScanCount();
+    await _supabase.from('user_profiles').update({
+      'daily_scans_used': currentCount + 1,
+    }).eq('id', currentUserId!);
+  }
 
   // ==================================================
   // FAVORITE RECIPES
   // ==================================================
-
   static Future<List<FavoriteRecipe>> getFavoriteRecipes() async {
     if (currentUserId == null) return [];
 
@@ -32,29 +133,56 @@ class DatabaseService {
     }
   }
 
-  static Future<void> addFavoriteRecipe(String recipeName, String ingredients, String directions) async {
-    if (currentUserId == null) throw Exception('User not logged in');
+  static Future<void> addFavoriteRecipe(
+      String recipeName, String ingredients, String directions) async {
+    ensureUserAuthenticated();
 
-    await _supabase.from('favorite_recipes').insert({
-      'user_id': currentUserId!,
-      'recipe_name': recipeName,
-      'ingredients': ingredients,
-      'directions': directions,
-      'created_at': DateTime.now().toIso8601String(),
-    });
+    try {
+      await _supabase.from('favorite_recipes').insert({
+        'user_id': currentUserId!,
+        'recipe_name': recipeName,
+        'ingredients': ingredients,
+        'directions': directions,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print('Error adding favorite recipe: $e');
+      rethrow;
+    }
   }
 
   static Future<void> removeFavoriteRecipe(int recipeId) async {
-    await _supabase
-        .from('favorite_recipes')
-        .delete()
-        .eq('id', recipeId);
+    ensureUserAuthenticated();
+
+    try {
+      await _supabase.from('favorite_recipes').delete().eq('id', recipeId);
+    } catch (e) {
+      print('Error removing favorite recipe: $e');
+      rethrow;
+    }
+  }
+
+  static Future<bool> isRecipeFavorited(String recipeName) async {
+    if (currentUserId == null) return false;
+
+    try {
+      final response = await _supabase
+          .from('favorite_recipes')
+          .select('id')
+          .eq('user_id', currentUserId!)
+          .eq('recipe_name', recipeName)
+          .maybeSingle();
+
+      return response != null;
+    } catch (e) {
+      print('Error checking if recipe is favorited: $e');
+      return false;
+    }
   }
 
   // ==================================================
   // GROCERY LIST
   // ==================================================
-
   static Future<List<GroceryItem>> getGroceryList() async {
     if (currentUserId == null) return [];
 
@@ -75,23 +203,23 @@ class DatabaseService {
   }
 
   static Future<void> saveGroceryList(List<String> items) async {
-    if (currentUserId == null) throw Exception('User not logged in');
+    ensureUserAuthenticated();
 
     try {
-      // Clear existing items
+      // Delete existing items
       await _supabase
           .from('grocery_items')
           .delete()
           .eq('user_id', currentUserId!);
 
-      // Insert new items
+      // Insert new items if any
       if (items.isNotEmpty) {
         final groceryItems = items.asMap().entries.map((entry) => {
-          'user_id': currentUserId!,
-          'item': entry.value,
-          'order_index': entry.key,
-          'created_at': DateTime.now().toIso8601String(),
-        }).toList();
+              'user_id': currentUserId!,
+              'item': entry.value,
+              'order_index': entry.key,
+              'created_at': DateTime.now().toIso8601String(),
+            }).toList();
 
         await _supabase.from('grocery_items').insert(groceryItems);
       }
@@ -102,7 +230,7 @@ class DatabaseService {
   }
 
   static Future<void> clearGroceryList() async {
-    if (currentUserId == null) return;
+    ensureUserAuthenticated();
 
     try {
       await _supabase
@@ -115,10 +243,118 @@ class DatabaseService {
     }
   }
 
+  static Future<void> addToGroceryList(String item) async {
+    ensureUserAuthenticated();
+
+    try {
+      final currentItems = await getGroceryList();
+      final newOrderIndex = currentItems.length;
+
+      await _supabase.from('grocery_items').insert({
+        'user_id': currentUserId!,
+        'item': item,
+        'order_index': newOrderIndex,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print('Error adding to grocery list: $e');
+      rethrow;
+    }
+  }
+
+  // Enhanced shopping list methods from your existing code
+  static List<String> _parseIngredients(String ingredientsText) {
+    final items = ingredientsText
+        .split(RegExp(r'[,\n•\-\*]|\d+\.'))
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .map((item) {
+          item = item.replaceAll(RegExp(r'^\d+\s*(cups?|tbsp|tsp|lbs?|oz|grams?|kg|ml|liters?)?\s*'), '');
+          item = item.replaceAll(RegExp(r'^\d+/\d+\s*(cups?|tbsp|tsp|lbs?|oz|grams?|kg|ml|liters?)?\s*'), '');
+          item = item.replaceAll(RegExp(r'^(a\s+)?(pinch\s+of\s+|dash\s+of\s+)?'), '');
+          return item.trim();
+        })
+        .where((item) => item.isNotEmpty && item.length > 2)
+        .toList();
+    return items;
+  }
+
+  static bool _areItemsSimilar(String item1, String item2) {
+    final clean1 = item1.toLowerCase().replaceAll(RegExp(r'[^a-z\s]'), '').trim();
+    final clean2 = item2.toLowerCase().replaceAll(RegExp(r'[^a-z\s]'), '').trim();
+    
+    if (clean1 == clean2) return true;
+    if (clean1.contains(clean2) || clean2.contains(clean1)) return true;
+    
+    return false;
+  }
+
+  static Future<Map<String, dynamic>> addRecipeToShoppingList(
+    String recipeName,
+    String ingredients,
+  ) async {
+    ensureUserAuthenticated();
+
+    try {
+      final currentItems = await getGroceryList();
+      final currentItemNames = currentItems.map((item) => item.item).toList();
+      final newIngredients = _parseIngredients(ingredients);
+      
+      final itemsToAdd = <String>[];
+      final skippedItems = <String>[];
+      
+      for (final newItem in newIngredients) {
+        bool isDuplicate = false;
+        
+        for (final existingItem in currentItemNames) {
+          if (_areItemsSimilar(newItem, existingItem)) {
+            isDuplicate = true;
+            skippedItems.add(newItem);
+            break;
+          }
+        }
+        
+        if (!isDuplicate) {
+          bool isDuplicateInNewItems = false;
+          for (final addedItem in itemsToAdd) {
+            if (_areItemsSimilar(newItem, addedItem)) {
+              isDuplicateInNewItems = true;
+              break;
+            }
+          }
+          
+          if (!isDuplicateInNewItems) {
+            itemsToAdd.add(newItem);
+          } else {
+            skippedItems.add(newItem);
+          }
+        }
+      }
+
+      final updatedList = [...currentItemNames, ...itemsToAdd];
+      await saveGroceryList(updatedList);
+
+      return {
+        'added': itemsToAdd.length,
+        'skipped': skippedItems.length,
+        'addedItems': itemsToAdd,
+        'skippedItems': skippedItems,
+        'recipeName': recipeName,
+      };
+    } catch (e) {
+      print('Error adding recipe to shopping list: $e');
+      rethrow;
+    }
+  }
+
+  static Future<int> getShoppingListCount() async {
+    final items = await getGroceryList();
+    return items.length;
+  }
+
   // ==================================================
   // SUBMITTED RECIPES
   // ==================================================
-
   static Future<List<SubmittedRecipe>> getSubmittedRecipes() async {
     if (currentUserId == null) return [];
 
@@ -138,100 +374,54 @@ class DatabaseService {
     }
   }
 
-  static Future<void> submitRecipe(String recipeName, String ingredients, String directions) async {
-    if (currentUserId == null) throw Exception('User not logged in');
+  static Future<void> submitRecipe(
+      String recipeName, String ingredients, String directions) async {
+    ensureUserAuthenticated();
 
-    await _supabase.from('submitted_recipes').insert({
-      'user_id': currentUserId!,
-      'recipe_name': recipeName,
-      'ingredients': ingredients,
-      'directions': directions,
-      'created_at': DateTime.now().toIso8601String(),
-    });
+    try {
+      await _supabase.from('submitted_recipes').insert({
+        'user_id': currentUserId!,
+        'recipe_name': recipeName,
+        'ingredients': ingredients,
+        'directions': directions,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print('Error submitting recipe: $e');
+      rethrow;
+    }
   }
 
   static Future<void> deleteSubmittedRecipe(int recipeId) async {
-    await _supabase
-        .from('submitted_recipes')
-        .delete()
-        .eq('id', recipeId);
+    ensureUserAuthenticated();
+
+    try {
+      await _supabase.from('submitted_recipes').delete().eq('id', recipeId);
+    } catch (e) {
+      print('Error deleting submitted recipe: $e');
+      rethrow;
+    }
   }
 
   // ==================================================
-  // AUTH HELPER METHODS
+  // CONTACT MESSAGES
   // ==================================================
-
-  static bool get isUserLoggedIn => currentUserId != null;
-
-  static Future<void> signInAnonymously() async {
-    if (currentUserId == null) {
-      await _supabase.auth.signInAnonymously();
+  static Future<void> submitContactMessage({
+    required String name,
+    required String email,
+    required String message,
+  }) async {
+    try {
+      await _supabase.from('contact_messages').insert({
+        'name': name,
+        'email': email,
+        'message': message,
+        'user_id': currentUserId, // Optional: link to user if logged in
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print('Error submitting contact message: $e');
+      rethrow;
     }
   }
 }
-
-// ==================================================
-// 3. SQL COMMANDS FOR SUPABASE
-// ==================================================
-
-/*
-Run these commands in your Supabase SQL Editor:
-
--- Enable Row Level Security (RLS) and create tables
--- Favorite recipes table
-CREATE TABLE favorite_recipes (
-    id BIGSERIAL PRIMARY KEY,
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-    recipe_name TEXT NOT NULL,
-    ingredients TEXT NOT NULL,
-    directions TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Enable RLS
-ALTER TABLE favorite_recipes ENABLE ROW LEVEL SECURITY;
-
--- Create policy so users can only access their own data
-CREATE POLICY "Users can insert their own favorite recipes" ON favorite_recipes
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can view their own favorite recipes" ON favorite_recipes
-    FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete their own favorite recipes" ON favorite_recipes
-    FOR DELETE USING (auth.uid() = user_id);
-
--- Grocery items table
-CREATE TABLE grocery_items (
-    id BIGSERIAL PRIMARY KEY,
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-    item TEXT NOT NULL,
-    order_index INTEGER NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Enable RLS
-ALTER TABLE grocery_items ENABLE ROW LEVEL SECURITY;
-
--- Create policies
-CREATE POLICY "Users can manage their own grocery items" ON grocery_items
-    FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-
--- Submitted recipes table
-CREATE TABLE submitted_recipes (
-    id BIGSERIAL PRIMARY KEY,
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-    recipe_name TEXT NOT NULL,
-    ingredients TEXT NOT NULL,
-    directions TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Enable RLS
-ALTER TABLE submitted_recipes ENABLE ROW LEVEL SECURITY;
-
--- Create policies
-CREATE POLICY "Users can manage their own submitted recipes" ON submitted_recipes
-    FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
-
-*/

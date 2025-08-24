@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
-// import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'home_screen.dart';
 import 'purchase_screen.dart';
-import 'premium_screen.dart'; // Add this import
+import 'login.dart';
+import 'pages/premium_page.dart'; // Updated import
+import 'pages/grocery_list.dart';
+import 'pages/submit_recipe.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // await MobileAds.instance.initialize();
   await Supabase.initialize(
     url: 'https://jmnwyzearnndhlitruyu.supabase.co',
     anonKey: 'sb_publishable_l8QycOjdSgpUwI0vJBkHLw_Zxflwo_w',
@@ -42,17 +43,23 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
+    final supabase = Supabase.instance.client;
+
     return MaterialApp(
-      title: 'LiverWise',
       debugShowCheckedModeBanner: false,
+      title: 'LiverWise',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: HomeScreen(isPremium: _isPremium),
+      initialRoute: supabase.auth.currentUser != null ? '/home' : '/login',
       routes: {
-        '/purchase': (_) => const PurchaseScreen(),
-        '/premium': (_) => const PremiumScreen(), // Add this line
+        '/login': (context) => const LoginPage(),
+        '/home': (context) => HomeScreen(isPremium: _isPremium),
+        '/purchase': (context) => const PurchaseScreen(),
+        '/premium': (context) => PremiumPage(), // Fixed to match the widget
+        '/grocery-list': (context) => const GroceryListPage(),
+        '/submit-recipe': (context) => const SubmitRecipePage(),
       },
     );
   }

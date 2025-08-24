@@ -17,30 +17,38 @@ class _GroceryListPageState extends State<GroceryListPage> {
   @override
   void initState() {
     super.initState();
-    _loadGroceryList();
+    _initializeUser();
+  }
+
+  Future<void> _initializeUser() async {
+    setState(() {
+      isLoading = true;
+    });
+
+    try {
+      DatabaseService.ensureUserAuthenticated();
+      await _loadGroceryList();
+    } catch (e) {
+      Navigator.pushReplacementNamed(context, '/login');
+    } finally {
+      setState(() {
+        isLoading = false;
+      });
+    }
   }
 
   Future<void> _loadGroceryList() async {
     try {
-      // Use real database calls
       final List<GroceryItem> groceryItems = await DatabaseService.getGroceryList();
       setState(() {
-        controllers = groceryItems.map((item) => 
-          TextEditingController(text: item.item)).toList();
-        
-        // Add empty controllers if list is empty or add one more for new entries
-        if (controllers.isEmpty) {
-          controllers.add(TextEditingController());
-        }
+        controllers = groceryItems
+            .map((item) => TextEditingController(text: item.item))
+            .toList();
+        if (controllers.isEmpty) controllers.add(TextEditingController());
         controllers.add(TextEditingController()); // Always have one empty at the end
-        
-        isLoading = false;
       });
-      
-      // REMOVED: Temporary code that was overriding the real database calls
     } catch (e) {
       setState(() {
-        isLoading = false;
         controllers = [TextEditingController()];
       });
       ScaffoldMessenger.of(context).showSnackBar(
@@ -76,18 +84,14 @@ class _GroceryListPageState extends State<GroceryListPage> {
     setState(() {
       isSaving = true;
     });
-
     try {
       List<String> items = controllers
           .map((controller) => controller.text.trim())
           .where((text) => text.isNotEmpty)
           .toList();
-
-      // Use real database calls
       await DatabaseService.saveGroceryList(items);
-      
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        const SnackBar(
           content: Text('Grocery list saved!'),
           backgroundColor: Colors.green,
         ),
@@ -107,30 +111,21 @@ class _GroceryListPageState extends State<GroceryListPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Clear Grocery List'),
-        content: Text('Are you sure you want to clear your entire grocery list?'),
+        title: const Text('Clear Grocery List'),
+        content: const Text('Are you sure you want to clear your entire grocery list?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
               try {
-                // Use real database calls
                 await DatabaseService.clearGroceryList();
-                
-                // Clear all controllers
                 setState(() {
-                  for (var controller in controllers) {
-                    controller.dispose();
-                  }
+                  for (var controller in controllers) controller.dispose();
                   controllers = [TextEditingController()];
                 });
-                
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
+                  const SnackBar(
                     content: Text('Grocery list cleared!'),
                     backgroundColor: Colors.orange,
                   ),
@@ -141,7 +136,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
                 );
               }
             },
-            child: Text('Clear'),
+            child: const Text('Clear'),
           ),
         ],
       ),
@@ -152,37 +147,33 @@ class _GroceryListPageState extends State<GroceryListPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('My Grocery List'),
+        title: const Text('My Grocery List'),
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
-            icon: Icon(Icons.delete_outline),
+            icon: const Icon(Icons.delete_outline),
             onPressed: _clearGroceryList,
             tooltip: 'Clear List',
           ),
         ],
       ),
-      body: Stack(
-        children: [
-          // Background Image (matching your app's style)
-          Positioned.fill(
-            child: Image.asset(
-              'assets/background.png',
-              fit: BoxFit.cover,
-            ),
-          ),
-          
-          // Content
-          isLoading
-              ? Center(child: CircularProgressIndicator())
-              : Padding(
-                  padding: EdgeInsets.all(16),
+      body: isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Stack(
+              children: [
+                Positioned.fill(
+                  child: Image.asset(
+                    'assets/background.png',
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16),
                   child: Column(
                     children: [
-                      // Title Section
                       Container(
-                        padding: EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: Colors.white.withAlpha((0.9 * 255).toInt()),
                           borderRadius: BorderRadius.circular(10),
@@ -194,8 +185,8 @@ class _GroceryListPageState extends State<GroceryListPage> {
                               size: 28,
                               color: Colors.green,
                             ),
-                            SizedBox(width: 12),
-                            Text(
+                            const SizedBox(width: 12),
+                            const Text(
                               'My Grocery List',
                               style: TextStyle(
                                 fontSize: 20,
@@ -206,13 +197,10 @@ class _GroceryListPageState extends State<GroceryListPage> {
                           ],
                         ),
                       ),
-                      
-                      SizedBox(height: 16),
-                      
-                      // List Items
+                      const SizedBox(height: 16),
                       Expanded(
                         child: Container(
-                          padding: EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
                             color: Colors.white.withAlpha((0.9 * 255).toInt()),
                             borderRadius: BorderRadius.circular(10),
@@ -224,10 +212,9 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                   itemCount: controllers.length,
                                   itemBuilder: (context, index) {
                                     return Padding(
-                                      padding: EdgeInsets.only(bottom: 12),
+                                      padding: const EdgeInsets.only(bottom: 12),
                                       child: Row(
                                         children: [
-                                          // Number
                                           Container(
                                             width: 35,
                                             height: 35,
@@ -250,9 +237,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                               ),
                                             ),
                                           ),
-                                          SizedBox(width: 12),
-                                          
-                                          // Text Field
+                                          const SizedBox(width: 12),
                                           Expanded(
                                             child: TextField(
                                               controller: controllers[index],
@@ -266,33 +251,26 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                                   borderRadius: BorderRadius.circular(8),
                                                   borderSide: BorderSide(color: Colors.blue, width: 2),
                                                 ),
-                                                contentPadding: EdgeInsets.symmetric(
-                                                  horizontal: 12,
-                                                  vertical: 8,
-                                                ),
+                                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                                 filled: true,
                                                 fillColor: Colors.grey.shade50,
                                               ),
                                               onChanged: (text) {
-                                                // Add a new empty field if this is the last one and has text
                                                 if (index == controllers.length - 1 && text.isNotEmpty) {
                                                   _addNewItem();
                                                 }
                                               },
                                             ),
                                           ),
-                                          
-                                          // Remove Button
                                           if (controllers.length > 1)
                                             Padding(
-                                              padding: EdgeInsets.only(left: 8),
+                                              padding: const EdgeInsets.only(left: 8),
                                               child: IconButton(
                                                 icon: Icon(
                                                   Icons.remove_circle,
                                                   color: Colors.red.shade400,
                                                 ),
                                                 onPressed: () => _removeItem(index),
-                                                tooltip: 'Remove item',
                                               ),
                                             ),
                                         ],
@@ -305,25 +283,21 @@ class _GroceryListPageState extends State<GroceryListPage> {
                           ),
                         ),
                       ),
-                      
-                      SizedBox(height: 16),
-                      
-                      // Action Buttons
+                      const SizedBox(height: 16),
                       Container(
-                        padding: EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: Colors.white.withAlpha((0.9 * 255).toInt()),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Column(
                           children: [
-                            // Save Button
                             SizedBox(
                               width: double.infinity,
                               height: 48,
                               child: ElevatedButton.icon(
                                 onPressed: isSaving ? null : _saveGroceryList,
-                                icon: isSaving 
+                                icon: isSaving
                                     ? SizedBox(
                                         width: 16,
                                         height: 16,
@@ -332,11 +306,8 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                           valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                         ),
                                       )
-                                    : Icon(Icons.save),
-                                label: Text(
-                                  isSaving ? 'Saving...' : 'Save Grocery List',
-                                  style: TextStyle(fontSize: 16),
-                                ),
+                                    : const Icon(Icons.save),
+                                label: Text(isSaving ? 'Saving...' : 'Save Grocery List'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.blue,
                                   foregroundColor: Colors.white,
@@ -346,20 +317,14 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                 ),
                               ),
                             ),
-                            
-                            SizedBox(height: 12),
-                            
-                            // Add Item Button
+                            const SizedBox(height: 12),
                             SizedBox(
                               width: double.infinity,
                               height: 48,
                               child: ElevatedButton.icon(
                                 onPressed: _addNewItem,
-                                icon: Icon(Icons.add),
-                                label: Text(
-                                  'Add New Item',
-                                  style: TextStyle(fontSize: 16),
-                                ),
+                                icon: const Icon(Icons.add),
+                                label: const Text('Add New Item'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.green,
                                   foregroundColor: Colors.white,
@@ -375,8 +340,8 @@ class _GroceryListPageState extends State<GroceryListPage> {
                     ],
                   ),
                 ),
-        ],
-      ),
+              ],
+            ),
     );
   }
 }
