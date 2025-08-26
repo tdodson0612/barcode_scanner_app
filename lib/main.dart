@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'home_screen.dart';
-import 'purchase_screen.dart';
 import 'login.dart';
 import 'pages/premium_page.dart'; // Updated import
 import 'pages/grocery_list.dart';
@@ -55,9 +54,8 @@ class _MyAppState extends State<MyApp> {
       initialRoute: supabase.auth.currentUser != null ? '/home' : '/login',
       routes: {
         '/login': (context) => const LoginPage(),
-        '/home': (context) => HomeScreen(isPremium: _isPremium),
-        '/purchase': (context) => const PurchaseScreen(),
-        '/premium': (context) => PremiumPage(), // Fixed to match the widget
+        '/home': (context) => HomePage(isPremium: _isPremium),
+        '/purchase': (context) => const PremiumPage(),
         '/grocery-list': (context) => const GroceryListPage(),
         '/submit-recipe': (context) => const SubmitRecipePage(),
       },

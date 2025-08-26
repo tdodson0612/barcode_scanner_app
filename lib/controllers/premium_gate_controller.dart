@@ -4,6 +4,18 @@ import '../services/premium_service.dart';
 import '../services/auth_service.dart';
 import '../logger.dart';
 
+// Premium features enum - must be defined BEFORE the class that uses it
+enum PremiumFeature {
+  basicProfile,    // Name and profile picture only
+  purchase,        // Purchase premium page
+  scan,            // Product scanning (3 max for free)
+  viewRecipes,     // View recipe suggestions after scan
+  groceryList,     // Grocery list feature
+  fullRecipes,     // Full recipe details with ingredients/directions
+  submitRecipes,   // Submit own recipes
+  favoriteRecipes, // Save favorite recipes
+}
+
 class PremiumGateController extends ChangeNotifier {
   static final PremiumGateController _instance = PremiumGateController._internal();
   factory PremiumGateController() => _instance;
@@ -35,16 +47,19 @@ class PremiumGateController extends ChangeNotifier {
         _totalScansUsed = 0;
       }
     } catch (e, stackTrace) {
-        logger.e(
-          'Error initializing premium status',
-          error: e,
-          stackTrace: stackTrace,
-        );
-        _isPremium = false;
-        _remainingScans = 0;
-        _totalScansUsed = 0;
-      }
+      logger.e(
+        'Error initializing premium status',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      _isPremium = false;
+      _remainingScans = 0;
+      _totalScansUsed = 0;
+    }
 
+    _isLoading = false;
+    notifyListeners();
+  }
 
   // Update premium status (call after purchase or login)
   Future<void> refresh() async {
@@ -90,35 +105,23 @@ class PremiumGateController extends ChangeNotifier {
 
   // Award bonus scans (from rewarded ads)
   Future<void> addBonusScans(int count) async {
-  if (_isPremium) {
-    // Premium users don't need bonus scans
-    return;
-  }
-
-  try {
-    _remainingScans += count;
-
-    // Make sure it never goes above the free limit (optional rule)
-    if (_remainingScans > 3) {
-      _remainingScans = 3;
+    if (_isPremium) {
+      // Premium users don't need bonus scans
+      return;
     }
 
-    _totalScansUsed = 3 - _remainingScans;
-    notifyListeners();
-  } catch (e, stackTrace) {
-    logger.e("Error adding bonus scans", error: e, stackTrace: stackTrace);
+    try {
+      _remainingScans += count;
+
+      // Make sure it never goes above the free limit (optional rule)
+      if (_remainingScans > 3) {
+        _remainingScans = 3;
+      }
+
+      _totalScansUsed = 3 - _remainingScans;
+      notifyListeners();
+    } catch (e, stackTrace) {
+      logger.e("Error adding bonus scans", error: e, stackTrace: stackTrace);
+    }
   }
-}
-
-
-// Premium features enum
-enum PremiumFeature {
-  basicProfile,    // Name and profile picture only
-  purchase,        // Purchase premium page
-  scan,            // Product scanning (3 max for free)
-  viewRecipes,     // View recipe suggestions after scan
-  groceryList,     // Grocery list feature
-  fullRecipes,     // Full recipe details with ingredients/directions
-  submitRecipes,   // Submit own recipes
-  favoriteRecipes, // Save favorite recipes
 }
