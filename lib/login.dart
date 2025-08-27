@@ -36,59 +36,76 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _submitForm() async {
-    if (_formKey.currentState!.validate()) {
-      _formKey.currentState!.save();
+  if (_formKey.currentState!.validate()) {
+    _formKey.currentState!.save();
 
-      setState(() => _isLoading = true);
+    setState(() => _isLoading = true);
 
-      try {
-        if (_isLogin) {
-          final response = await AuthService.signIn(
-            email: _email,
-            password: _password,
-          );
+    try {
+      if (_isLogin) {
+        final response = await AuthService.signIn(
+          email: _email,
+          password: _password,
+        );
 
-          if (response.user != null) {
-            logger.i('Login successful: ${response.user?.email}');
+        if (response.user != null) {
+          logger.i('Login successful: ${response.user?.email}');
+          Navigator.pushReplacementNamed(context, '/home');
+        }
+      } else {
+        if (_password != _confirmPassword) {
+          throw Exception('Passwords do not match!');
+        }
+
+        final response = await AuthService.signUp(
+          email: _email,
+          password: _password,
+        );
+
+        if (response.user != null) {
+          logger.i('Sign up successful: ${response.user?.email}');
+
+          try {
+            await Supabase.instance.client.from('user_profiles').insert({
+              'id': response.user!.id, // must match auth.uid()
+              'daily_scans_used': 0,
+              'last_scan_date': DateTime.now().toIso8601String().split('T').first,
+            });
+            logger.i('User profile created for ${response.user?.email}');
+          } catch (e) {
+            logger.e('Error creating user profile: $e');
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Error creating profile: $e'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+
+          if (response.session == null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Please check your email to confirm your account!'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          } else {
             Navigator.pushReplacementNamed(context, '/home');
           }
-        } else {
-          if (_password != _confirmPassword) {
-            throw Exception('Passwords do not match!');
-          }
-
-          final response = await AuthService.signUp(
-            email: _email,
-            password: _password,
-          );
-
-          if (response.user != null) {
-            logger.i('Sign up successful: ${response.user?.email}');
-
-            if (response.session == null) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Please check your email to confirm your account!'),
-                  backgroundColor: Colors.orange,
-                ),
-              );
-            } else {
-              Navigator.pushReplacementNamed(context, '/home');
-            }
-          }
         }
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      } finally {
-        setState(() => _isLoading = false);
       }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
+}
 
   Future<void> _sendPasswordResetEmail() async {
     if (_email.isEmpty) {
