@@ -60,12 +60,13 @@ class AuthService {
     try {
       final currentProfile = await DatabaseService.getUserProfile(userId);
       if (currentProfile != null && currentProfile['is_premium'] != true) {
-        await DatabaseService.setPremiumStatus(userId, true);
+        await DatabaseService.setPremiumStatus(userId, true); // Add userId parameter
       }
     } catch (e) {
       print('Error ensuring premium status: $e');
     }
   }
+  
 
 
   static Future<void> signOut() async {

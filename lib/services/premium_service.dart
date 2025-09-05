@@ -12,7 +12,7 @@ class PremiumService {
     if (!AuthService.isLoggedIn) return false;
 
     try {
-      final profile = await DatabaseService.getUserProfile();
+      final profile = await DatabaseService.getUserProfile(AuthService.currentUserId!);
       return profile?['is_premium'] ?? false;
     } catch (e) {
       print('Error checking premium status: $e');
@@ -26,8 +26,13 @@ class PremiumService {
   }
 
   // Set premium status
+  // Set premium status
   static Future<void> setPremiumStatus(bool isPremium) async {
-    await DatabaseService.setPremiumStatus(isPremium);
+    if (!AuthService.isLoggedIn) {
+      throw Exception('User must be logged in to set premium status');
+    }
+  
+    await DatabaseService.setPremiumStatus(AuthService.currentUserId!, isPremium);
   }
 
   // Get remaining scan count for free users

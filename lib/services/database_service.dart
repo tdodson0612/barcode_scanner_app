@@ -5,7 +5,6 @@ import '../models/grocery_item.dart';
 import '../models/submitted_recipe.dart';
 import 'auth_service.dart';
 
-
 class DatabaseService {
   static final SupabaseClient _supabase = Supabase.instance.client;
 
@@ -39,6 +38,7 @@ class DatabaseService {
         'daily_scans_used': 0,
         'last_scan_date': DateTime.now().toIso8601String().split('T')[0],
         'created_at': DateTime.now().toIso8601String(),
+        'username': email.split('@')[0], // Default username from email
       });
     } catch (e) {
       print('Error creating user profile: $e');
@@ -51,7 +51,7 @@ class DatabaseService {
       final response = await _supabase
           .from('user_profiles')
           .select()
-          .eq('id', userId) // use the one passed in
+          .eq('id', userId)
           .single();
       return response;
     } catch (e) {
@@ -60,35 +60,37 @@ class DatabaseService {
     }
   }
 
-static Future<void> setPremiumStatus(String userId, bool isPremium) async {
-  // Optionally, you can still check authentication if you want:
-  ensureUserAuthenticated();
+  // Set premium status - FIXED: Remove circular call
+  static Future<void> setPremiumStatus(String userId, bool isPremium) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase.from('user_profiles').update({
+        'is_premium': isPremium,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', userId);
+    } catch (e) {
+      print('Error setting premium status: $e');
+      rethrow;
+    }
+  }
 
-  await _supabase.from('user_profiles').update({
-    'is_premium': isPremium,
-    'updated_at': DateTime.now().toIso8601String(),
-  }).eq('id', userId);
-}
+  static Future<bool> isPremiumUser() async {
+    final userId = AuthService.currentUserId;
+    if (userId == null) return false;
 
-
-
-static Future<bool> isPremiumUser() async {
-  final userId = AuthService.currentUserId; // get current logged-in user
-  if (userId == null) return false;         // not logged in
-
-  final profile = await getUserProfile(userId); // ✅ pass userId
-  return profile?['is_premium'] ?? false;
-}
-
+    final profile = await getUserProfile(userId);
+    return profile?['is_premium'] ?? false;
+  }
 
   // ==================================================
   // SCAN COUNT MANAGEMENT
   // ==================================================
   static Future<int> getDailyScanCount() async {
-    final userId = AuthService.currentUserId; // get current logged-in user
-    if (userId == null) return 0;             // handle not logged in
+    final userId = AuthService.currentUserId;
+    if (userId == null) return 0;
 
-    final profile = await getUserProfile(userId); // ✅ pass userId
+    final profile = await getUserProfile(userId);
     if (profile == null) return 0;
 
     final today = DateTime.now().toIso8601String().split('T')[0];
@@ -99,13 +101,12 @@ static Future<bool> isPremiumUser() async {
       await _supabase.from('user_profiles').update({
         'daily_scans_used': 0,
         'last_scan_date': today,
-      }).eq('id', userId); // use userId here too
+      }).eq('id', userId);
       return 0;
     }
 
     return profile['daily_scans_used'] ?? 0;
   }
-
 
   static Future<bool> canPerformScan() async {
     if (await isPremiumUser()) return true;

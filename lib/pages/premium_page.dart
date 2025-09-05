@@ -74,55 +74,54 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
     }
   }
 
-  Future<void> _checkPremiumStatus() async {
-    try {
-      final userId = DatabaseService.currentUserId;
-      if (userId == null) return;
+Future<void> _checkPremiumStatus() async {
+  try {
+    final userId = DatabaseService.currentUserId;
+    if (userId == null || userId.isEmpty) return;
 
-      // Check local cache first
-      final prefs = await SharedPreferences.getInstance();
-      final localPremium = prefs.getBool('isPremiumUser') ?? false;
-      final localTester = prefs.getBool('isTesterUser') ?? false;
+    // Check local cache first
+    final prefs = await SharedPreferences.getInstance();
+    final localPremium = prefs.getBool('isPremiumUser') ?? false;
+    final localTester = prefs.getBool('isTesterUser') ?? false;
 
-      if (localPremium || localTester) {
-        setState(() {
-          _isPremium = localPremium;
-          _isTester = localTester;
-        });
-      }
-
-      // Fetch from Supabase to ensure sync
-      final supabase = Supabase.instance.client;
-      final response = await supabase
-          .from('users')
-          .select('is_premium')
-          .eq('id', userId)
-          .single();
-
-      final premiumStatus = response['is_premium'] as bool? ?? false;
-      
-      // Update local cache
-      await prefs.setBool('isPremiumUser', premiumStatus);
-
-      final dailyScans = await DatabaseService.getDailyScanCount();
-      final remainingScans = (premiumStatus || localTester) ? -1 : (3 - dailyScans);
-
+    if (localPremium || localTester) {
       setState(() {
-        _isPremium = premiumStatus;
-        _isTester = localTester && !premiumStatus; // Tester only if not premium
-        _dailyScans = dailyScans;
-        _remainingScans = remainingScans;
+        _isPremium = localPremium;
+        _isTester = localTester;
       });
-    } catch (e) {
-      debugPrint('Error checking premium status: $e');
     }
-  }
 
-  Future<void> _initializeInAppPurchase() async {
-    final bool isAvailable = await _inAppPurchase.isAvailable();
+    // Fetch from Supabase to ensure sync
+    final supabase = Supabase.instance.client;
+    final response = await supabase
+        .from('users')
+        .select('is_premium')
+        .eq('id', userId.toString()) // Explicitly convert to string
+        .single();
+
+    final premiumStatus = response['is_premium'] as bool? ?? false;
+    
+    // Update local cache
+    await prefs.setBool('isPremiumUser', premiumStatus);
+
+    final dailyScans = await DatabaseService.getDailyScanCount();
+    final remainingScans = (premiumStatus || localTester) ? -1 : (3 - dailyScans);
+
     setState(() {
-      _isAvailable = isAvailable;
-      _isLoading = false;
+      _isPremium = premiumStatus;
+      _isTester = localTester && !premiumStatus; // Tester only if not premium
+      _dailyScans = dailyScans;
+      _remainingScans = remainingScans;
+    });
+  } catch (e) {
+    debugPrint('Error checking premium status: $e');
+  }
+}
+Future<void> _initializeInAppPurchase() async {
+  final bool isAvailable = await _inAppPurchase.isAvailable();
+  setState(() {
+    _isAvailable = isAvailable;
+    _isLoading = false;
     });
 
     if (!isAvailable) return;
@@ -174,83 +173,90 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
     }
   }
 
-  Future<void> _handleSuccessfulPurchase(PurchaseDetails purchaseDetails) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final userId = DatabaseService.currentUserId;
-      
-      if (userId == null) throw Exception('User not authenticated');
-
-      String planName;
-      final supabase = Supabase.instance.client;
-
-      if (purchaseDetails.productID == premiumProductId) {
-        // Update Supabase database
-        await supabase.from('users').update({'is_premium': true}).eq('id', userId);
-        
-        // Update DatabaseService
-        await DatabaseService.setPremiumStatus(true);
-        
-        // Update local cache
-        await prefs.setBool('isPremiumUser', true);
-        await prefs.setBool('isTesterUser', false);
-        
-        planName = 'Premium';
-        setState(() {
-          _isPremium = true;
-          _isTester = false;
-        });
-      } else if (purchaseDetails.productID == testerProductId) {
-        // Testers don't get database premium status, just local
-        await prefs.setBool('isTesterUser', true);
-        await prefs.setBool('isPremiumUser', false);
-        
-        planName = 'Tester';
-        setState(() {
-          _isTester = true;
-          _isPremium = false;
-        });
-      } else {
-        throw Exception('Unknown product ID: ${purchaseDetails.productID}');
-      }
-
-      // Store detailed purchase information
-      await prefs.setString('purchaseDate', DateTime.now().toIso8601String());
-      final String computedPlan = _selectedPlan ?? (purchaseDetails.productID == premiumProductId
-          ? 'premium'
-          : (purchaseDetails.productID == testerProductId ? 'tester' : 'unknown'));
-      await prefs.setString('planType', computedPlan);
-      await prefs.setString('productId', purchaseDetails.productID);
-      await prefs.setString('transactionId', purchaseDetails.transactionDate ?? DateTime.now().millisecondsSinceEpoch.toString());
-
-      // Refresh premium controller
-      await PremiumGateController().refresh();
-
-      setState(() {
-        _remainingScans = -1;
-        _isPurchasing = false;
-      });
-
-      if (mounted) {
-        _showSuccessSnackBar('Welcome to $planName! Purchase successful.');
-        
-        // Navigate back and reload the app to ensure all features are available
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(builder: (_) => const ReloadApp()),
-              (route) => false,
-            );
-          }
-        });
-      }
-    } catch (e) {
-      setState(() => _isPurchasing = false);
-      
-      // Show specific error for purchase success but account update failure
-      _showErrorSnackBar('Purchase successful, but failed to update account: $e. Please contact support.');
+Future<void> _handleSuccessfulPurchase(PurchaseDetails purchaseDetails) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = DatabaseService.currentUserId;
+    
+    // Check if userId is valid string, not null or wrong type
+    if (userId == null || userId.isEmpty) {
+      throw Exception('User not authenticated - invalid user ID');
     }
+
+    String planName;
+    final supabase = Supabase.instance.client;
+
+    if (purchaseDetails.productID == premiumProductId) {
+      // Update Supabase database - ensure userId is a String
+      await supabase.from('users').update({
+        'is_premium': true
+      }).eq('id', userId.toString()); // Explicitly convert to string
+      
+      // Update DatabaseService
+      await DatabaseService.setPremiumStatus(userId, true);
+      
+      // Update local cache
+      await prefs.setBool('isPremiumUser', true);
+      await prefs.setBool('isTesterUser', false);
+      
+      planName = 'Premium';
+      setState(() {
+        _isPremium = true;
+        _isTester = false;
+      });
+    } else if (purchaseDetails.productID == testerProductId) {
+      // Testers don't get database premium status, just local
+      await prefs.setBool('isTesterUser', true);
+      await prefs.setBool('isPremiumUser', false);
+      
+      planName = 'Tester';
+      setState(() {
+        _isTester = true;
+        _isPremium = false;
+      });
+    } else {
+      throw Exception('Unknown product ID: ${purchaseDetails.productID}');
+    }
+
+    // Store detailed purchase information
+    await prefs.setString('purchaseDate', DateTime.now().toIso8601String());
+    final String computedPlan = _selectedPlan ?? (purchaseDetails.productID == premiumProductId
+        ? 'premium'
+        : (purchaseDetails.productID == testerProductId ? 'tester' : 'unknown'));
+    await prefs.setString('planType', computedPlan);
+    await prefs.setString('productId', purchaseDetails.productID);
+    await prefs.setString('transactionId', purchaseDetails.transactionDate ?? DateTime.now().millisecondsSinceEpoch.toString());
+
+    // Refresh premium controller
+    await PremiumGateController().refresh();
+
+    setState(() {
+      _remainingScans = -1;
+      _isPurchasing = false;
+    });
+
+    if (mounted) {
+      _showSuccessSnackBar('Welcome to $planName! Purchase successful.');
+      
+      // Navigate back and reload the app to ensure all features are available
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const ReloadApp()),
+            (route) => false,
+          );
+        }
+      });
+    }
+  } catch (e) {
+    setState(() => _isPurchasing = false);
+    
+    // Show specific error for purchase success but account update failure
+    _showErrorSnackBar('Purchase successful, but failed to update account: $e. Please contact support.');
   }
+}
+
+
 
   void _selectPlan(String plan) {
     setState(() {
