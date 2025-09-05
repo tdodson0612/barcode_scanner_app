@@ -13,6 +13,8 @@ class AuthService {
   static bool get isLoggedIn => _supabase.auth.currentUser != null;
   static User? get currentUser => _supabase.auth.currentUser;
 
+  static String? get currentUserId => currentUser?.id;
+
   static bool _isDefaultPremiumEmail(String email) {
     return _premiumEmails.contains(email.toLowerCase().trim());
   }
@@ -56,14 +58,15 @@ class AuthService {
 
   static Future<void> _ensurePremiumStatus(String userId) async {
     try {
-      final currentProfile = await DatabaseService.getUserProfile();
+      final currentProfile = await DatabaseService.getUserProfile(userId);
       if (currentProfile != null && currentProfile['is_premium'] != true) {
-        await DatabaseService.setPremiumStatus(true);
+        await DatabaseService.setPremiumStatus(userId, true);
       }
     } catch (e) {
       print('Error ensuring premium status: $e');
     }
   }
+
 
   static Future<void> signOut() async {
     await _supabase.auth.signOut();

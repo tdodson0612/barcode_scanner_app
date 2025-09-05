@@ -3,6 +3,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/favorite_recipe.dart';
 import '../models/grocery_item.dart';
 import '../models/submitted_recipe.dart';
+import 'auth_service.dart';
+
 
 class DatabaseService {
   static final SupabaseClient _supabase = Supabase.instance.client;
@@ -44,14 +46,12 @@ class DatabaseService {
     }
   }
 
-  static Future<Map<String, dynamic>?> getUserProfile() async {
-    if (currentUserId == null) return null;
-
+  static Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     try {
       final response = await _supabase
           .from('user_profiles')
           .select()
-          .eq('id', currentUserId!)
+          .eq('id', userId) // use the one passed in
           .single();
       return response;
     } catch (e) {
@@ -60,25 +60,35 @@ class DatabaseService {
     }
   }
 
-  static Future<void> setPremiumStatus(bool isPremium) async {
-    ensureUserAuthenticated();
-    
-    await _supabase.from('user_profiles').update({
-      'is_premium': isPremium,
-      'updated_at': DateTime.now().toIso8601String(),
-    }).eq('id', currentUserId!);
-  }
+static Future<void> setPremiumStatus(String userId, bool isPremium) async {
+  // Optionally, you can still check authentication if you want:
+  ensureUserAuthenticated();
 
-  static Future<bool> isPremiumUser() async {
-    final profile = await getUserProfile();
-    return profile?['is_premium'] ?? false;
-  }
+  await _supabase.from('user_profiles').update({
+    'is_premium': isPremium,
+    'updated_at': DateTime.now().toIso8601String(),
+  }).eq('id', userId);
+}
+
+
+
+static Future<bool> isPremiumUser() async {
+  final userId = AuthService.currentUserId; // get current logged-in user
+  if (userId == null) return false;         // not logged in
+
+  final profile = await getUserProfile(userId); // ✅ pass userId
+  return profile?['is_premium'] ?? false;
+}
+
 
   // ==================================================
   // SCAN COUNT MANAGEMENT
   // ==================================================
   static Future<int> getDailyScanCount() async {
-    final profile = await getUserProfile();
+    final userId = AuthService.currentUserId; // get current logged-in user
+    if (userId == null) return 0;             // handle not logged in
+
+    final profile = await getUserProfile(userId); // ✅ pass userId
     if (profile == null) return 0;
 
     final today = DateTime.now().toIso8601String().split('T')[0];
@@ -89,12 +99,13 @@ class DatabaseService {
       await _supabase.from('user_profiles').update({
         'daily_scans_used': 0,
         'last_scan_date': today,
-      }).eq('id', currentUserId!);
+      }).eq('id', userId); // use userId here too
       return 0;
     }
 
     return profile['daily_scans_used'] ?? 0;
   }
+
 
   static Future<bool> canPerformScan() async {
     if (await isPremiumUser()) return true;

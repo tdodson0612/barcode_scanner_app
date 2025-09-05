@@ -1,4 +1,3 @@
-// lib/pages/chat_page.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/database_service.dart';

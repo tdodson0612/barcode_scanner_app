@@ -17,7 +17,7 @@ class PremiumPage extends StatefulWidget {
 
 class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin {
   final InAppPurchase _inAppPurchase = InAppPurchase.instance;
-  late StreamSubscription<List<PurchaseDetails>> _subscription;
+  StreamSubscription<List<PurchaseDetails>>? _subscription;
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   
@@ -57,7 +57,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
 
   @override
   void dispose() {
-    _subscription.cancel();
+    _subscription?.cancel();
     _animationController.dispose();
     _testerKeyController.dispose();
     super.dispose();
@@ -131,7 +131,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
     final Stream<List<PurchaseDetails>> purchaseUpdated = _inAppPurchase.purchaseStream;
     _subscription = purchaseUpdated.listen(
       _onPurchaseUpdate,
-      onDone: () => _subscription.cancel(),
+      onDone: () => _subscription?.cancel(),
       onError: (Object error) {
         _showErrorSnackBar('Purchase error: $error');
       },
@@ -216,7 +216,10 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
 
       // Store detailed purchase information
       await prefs.setString('purchaseDate', DateTime.now().toIso8601String());
-      await prefs.setString('planType', _selectedPlan!);
+      final String computedPlan = _selectedPlan ?? (purchaseDetails.productID == premiumProductId
+          ? 'premium'
+          : (purchaseDetails.productID == testerProductId ? 'tester' : 'unknown'));
+      await prefs.setString('planType', computedPlan);
       await prefs.setString('productId', purchaseDetails.productID);
       await prefs.setString('transactionId', purchaseDetails.transactionDate ?? DateTime.now().millisecondsSinceEpoch.toString());
 
@@ -293,10 +296,12 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
 
     try {
       final String productId = _selectedPlan == 'premium' ? premiumProductId : testerProductId;
-      final ProductDetails? productDetails = _products.cast<ProductDetails?>().firstWhere(
-        (product) => product?.id == productId,
-        orElse: () => null,
-      );
+      ProductDetails? productDetails;
+      try {
+        productDetails = _products.firstWhere((p) => p.id == productId);
+      } catch (_) {
+        productDetails = null;
+      }
 
       if (productDetails == null) {
         throw Exception('Product not found');
