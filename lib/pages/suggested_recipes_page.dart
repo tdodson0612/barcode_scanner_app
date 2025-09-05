@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/database_service.dart';
 import '../widgets/premium_gate.dart';
-import '../widgets/recipe_with_restriction.dart';
 import '../controllers/premium_gate_controller.dart';
 
 class Recipe {
@@ -47,10 +46,10 @@ class SuggestedRecipesPage extends StatefulWidget {
   final int liverHealthScore;
 
   const SuggestedRecipesPage({
-    Key? key,
+    super.key,
     required this.productIngredients,
     required this.liverHealthScore,
-  }) : super(key: key);
+  });
 
   @override
   State<SuggestedRecipesPage> createState() => _SuggestedRecipesPageState();

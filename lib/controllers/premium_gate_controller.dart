@@ -4,18 +4,6 @@ import '../services/premium_service.dart';
 import '../services/auth_service.dart';
 import '../logger.dart';
 
-// Premium features enum - must be defined BEFORE the class that uses it
-enum PremiumFeature {
-  basicProfile,    // Name and profile picture only
-  purchase,        // Purchase premium page
-  scan,            // Product scanning (3 max for free)
-  viewRecipes,     // View recipe suggestions after scan
-  groceryList,     // Grocery list feature
-  fullRecipes,     // Full recipe details with ingredients/directions
-  submitRecipes,   // Submit own recipes
-  favoriteRecipes, // Save favorite recipes
-}
-
 class PremiumGateController extends ChangeNotifier {
   static final PremiumGateController _instance = PremiumGateController._internal();
   factory PremiumGateController() => _instance;
@@ -40,7 +28,7 @@ class PremiumGateController extends ChangeNotifier {
       if (AuthService.isLoggedIn) {
         _isPremium = await PremiumService.isPremiumUser();
         _remainingScans = await PremiumService.getRemainingScanCount();
-        _totalScansUsed = 3 - _remainingScans; // Calculate used scans
+        _totalScansUsed = 3 - _remainingScans;
       } else {
         _isPremium = false;
         _remainingScans = 0;
@@ -71,10 +59,13 @@ class PremiumGateController extends ChangeNotifier {
     if (!AuthService.isLoggedIn) return false;
     if (_isPremium) return true;
 
-    // Free users can ONLY access basic profile and purchase page
+    // Free users can ONLY access basic profile, purchase page, and social features
     switch (feature) {
       case PremiumFeature.basicProfile:
       case PremiumFeature.purchase:
+      case PremiumFeature.socialMessaging:    // NEW: Always available
+      case PremiumFeature.friendRequests:     // NEW: Always available
+      case PremiumFeature.searchUsers:        // NEW: Always available
         return true;
       case PremiumFeature.scan:
         return _remainingScans > 0;
@@ -90,7 +81,7 @@ class PremiumGateController extends ChangeNotifier {
   // Use a scan (for free users)
   Future<bool> useScan() async {
     if (_isPremium) return true;
-
+    
     final success = await PremiumService.incrementScanCount();
     if (success) {
       _remainingScans = await PremiumService.getRemainingScanCount();
@@ -124,4 +115,19 @@ class PremiumGateController extends ChangeNotifier {
       logger.e("Error adding bonus scans", error: e, stackTrace: stackTrace);
     }
   }
+}
+
+// Premium features enum (UPDATED with social features)
+enum PremiumFeature {
+  basicProfile,        // Name and profile picture only
+  purchase,            // Purchase premium page
+  scan,                // Product scanning (3 max for free)
+  viewRecipes,         // View recipe suggestions after scan
+  groceryList,         // Grocery list feature
+  fullRecipes,         // Full recipe details with ingredients/directions
+  submitRecipes,       // Submit own recipes
+  favoriteRecipes,     // Save favorite recipes
+  socialMessaging,     // NEW: Messaging friends (always free)
+  friendRequests,      // NEW: Send/receive friend requests (always free)
+  searchUsers,         // NEW: Search for other users (always free)
 }

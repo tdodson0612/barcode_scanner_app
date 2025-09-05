@@ -121,7 +121,9 @@ class _GroceryListPageState extends State<GroceryListPage> {
               try {
                 await DatabaseService.clearGroceryList();
                 setState(() {
-                  for (var controller in controllers) controller.dispose();
+                  for (var controller in controllers) {
+                    controller.dispose();
+                  }
                   controllers = [TextEditingController()];
                 });
                 ScaffoldMessenger.of(context).showSnackBar(

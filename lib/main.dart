@@ -3,9 +3,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'home_screen.dart';
 import 'login.dart';
-import 'pages/premium_page.dart'; // Updated import
+import 'pages/premium_page.dart';
 import 'pages/grocery_list.dart';
 import 'pages/submit_recipe.dart';
+// ADD THESE NEW IMPORTS FOR SOCIAL FEATURES:
+import 'pages/messages_page.dart';
+import 'pages/search_users_page.dart';
+import 'pages/chat_page.dart';
+import 'pages/user_profile_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -58,6 +63,9 @@ class _MyAppState extends State<MyApp> {
         '/purchase': (context) => const PremiumPage(),
         '/grocery-list': (context) => const GroceryListPage(),
         '/submit-recipe': (context) => const SubmitRecipePage(),
+        // ADD THESE NEW ROUTES FOR SOCIAL FEATURES:
+        '/messages': (context) => MessagesPage(),
+        '/search-users': (context) => const SearchUsersPage(),
       },
     );
   }

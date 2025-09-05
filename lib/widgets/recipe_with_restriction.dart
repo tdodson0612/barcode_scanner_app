@@ -7,11 +7,11 @@ class RecipeWithRestriction extends StatelessWidget {
   final String directions;
 
   const RecipeWithRestriction({
-    Key? key,
+    super.key,
     required this.recipeName,
     required this.ingredients,
     required this.directions,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +70,7 @@ class RecipeWithRestriction extends StatelessWidget {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    '${ingredients.length > 50 ? ingredients.substring(0, 50) + '...' : ingredients}',
+                    ingredients.length > 50 ? '${ingredients.substring(0, 50)}...' : ingredients,
                     style: TextStyle(color: Colors.grey.shade600),
                   ),
                   SizedBox(height: 16),

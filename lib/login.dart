@@ -5,7 +5,7 @@ import 'package:logger/logger.dart';
 import 'services/auth_service.dart'; // Updated import
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({Key? key}) : super(key: key);
+  const LoginPage({super.key});
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -65,9 +65,13 @@ class _LoginPageState extends State<LoginPage> {
         if (response.user != null) {
           logger.i('Sign up successful: ${response.user?.email}');
 
+          // Add delay to ensure auth context is ready
+          await Future.delayed(const Duration(milliseconds: 1000));
+
           try {
             await Supabase.instance.client.from('user_profiles').insert({
-              'id': response.user!.id, // must match auth.uid()
+              'id': response.user!.id,
+              'email': response.user!.email,
               'daily_scans_used': 0,
               'last_scan_date': DateTime.now().toIso8601String().split('T').first,
             });

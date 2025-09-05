@@ -11,9 +11,9 @@ class AppDrawer extends StatelessWidget {
   final String currentPage;
   
   const AppDrawer({
-    Key? key,
+    super.key,
     required this.currentPage,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

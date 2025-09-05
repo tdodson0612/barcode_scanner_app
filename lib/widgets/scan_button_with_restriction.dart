@@ -7,10 +7,10 @@ class ScanButtonWithRestriction extends StatelessWidget {
   final Widget child;
 
   const ScanButtonWithRestriction({
-    Key? key,
+    super.key,
     required this.onScanAllowed,
     required this.child,
-  }) : super(key: key);
+  });
 
   Future<void> _handleScanTap(BuildContext context) async {
     if (!AuthService.isLoggedIn) {

@@ -6,7 +6,6 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../widgets/app_drawer.dart';
 import '../widgets/premium_gate.dart';
 import '../controllers/premium_gate_controller.dart';
 import 'liverhealthbar.dart';

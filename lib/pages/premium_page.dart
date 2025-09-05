@@ -538,7 +538,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
                 ),
               ],
             ),
-          )).toList(),
+          )),
         ],
       ),
     );

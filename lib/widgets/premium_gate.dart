@@ -12,14 +12,14 @@ class PremiumGate extends StatelessWidget {
   final VoidCallback? onUpgrade;
 
   const PremiumGate({
-    Key? key,
+    super.key,
     required this.child,
     required this.feature,
     required this.featureName,
     this.featureDescription = '',
     this.showSoftPreview = false,
     this.onUpgrade,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

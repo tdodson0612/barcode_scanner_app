@@ -1,3 +1,4 @@
+// lib/services/database_service.dart
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/favorite_recipe.dart';
 import '../models/grocery_item.dart';
@@ -422,6 +423,267 @@ class DatabaseService {
     } catch (e) {
       print('Error submitting contact message: $e');
       rethrow;
+    }
+  }
+
+  // ==================================================
+  // SOCIAL FEATURES - FRIENDS & MESSAGING
+  // ==================================================
+
+  /// Fetch friends list (accepted friend requests)
+  static Future<List<Map<String, dynamic>>> getFriends() async {
+    ensureUserAuthenticated();
+    
+    try {
+      final response = await _supabase
+          .from('friend_requests')
+          .select('sender:user_profiles!friend_requests_sender_fkey(id, email, username, avatar_url), receiver:user_profiles!friend_requests_receiver_fkey(id, email, username, avatar_url)')
+          .or('sender.eq.$currentUserId,receiver.eq.$currentUserId')
+          .eq('status', 'accepted');
+
+      final friends = <Map<String, dynamic>>[];
+      for (var row in response) {
+        final friend = row['sender']['id'] == currentUserId 
+            ? row['receiver'] 
+            : row['sender'];
+        friends.add(friend);
+      }
+      return friends;
+    } catch (e) {
+      print('Error fetching friends: $e');
+      return [];
+    }
+  }
+
+  /// Get pending friend requests (received)
+  static Future<List<Map<String, dynamic>>> getFriendRequests() async {
+    ensureUserAuthenticated();
+    
+    try {
+      final response = await _supabase
+          .from('friend_requests')
+          .select('id, sender:user_profiles!friend_requests_sender_fkey(id, email, username, avatar_url)')
+          .eq('receiver', currentUserId!)
+          .eq('status', 'pending');
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      print('Error fetching friend requests: $e');
+      return [];
+    }
+  }
+
+  /// Send friend request
+  static Future<String?> sendFriendRequest(String receiverId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      // Check if request already exists
+      final existing = await _supabase
+          .from('friend_requests')
+          .select('id, status')
+          .or('and(sender.eq.$currentUserId,receiver.eq.$receiverId),and(sender.eq.$receiverId,receiver.eq.$currentUserId)')
+          .maybeSingle();
+
+      if (existing != null) {
+        if (existing['status'] == 'accepted') {
+          throw Exception('Already friends');
+        } else if (existing['status'] == 'pending') {
+          throw Exception('Friend request already sent');
+        }
+      }
+
+      final response = await _supabase
+          .from('friend_requests')
+          .insert({
+            'sender': currentUserId!,
+            'receiver': receiverId,
+            'status': 'pending',
+          })
+          .select()
+          .single();
+
+      return response['id'];
+    } catch (e) {
+      print('Error sending friend request: $e');
+      rethrow;
+    }
+  }
+
+  /// Accept friend request
+  static Future<void> acceptFriendRequest(String requestId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('friend_requests')
+          .update({'status': 'accepted'})
+          .eq('id', requestId);
+    } catch (e) {
+      print('Error accepting friend request: $e');
+      rethrow;
+    }
+  }
+
+  /// Decline/Cancel friend request (deletes completely)
+  static Future<void> declineFriendRequest(String requestId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('friend_requests')
+          .delete()
+          .eq('id', requestId);
+    } catch (e) {
+      print('Error declining friend request: $e');
+      rethrow;
+    }
+  }
+
+  /// Cancel outgoing friend request
+  static Future<void> cancelFriendRequest(String receiverId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('friend_requests')
+          .delete()
+          .eq('sender', currentUserId!)
+          .eq('receiver', receiverId);
+    } catch (e) {
+      print('Error canceling friend request: $e');
+      rethrow;
+    }
+  }
+
+  /// Check friendship status
+  static Future<Map<String, dynamic>> checkFriendshipStatus(String userId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final response = await _supabase
+          .from('friend_requests')
+          .select('id, status, sender, receiver')
+          .or('and(sender.eq.$currentUserId,receiver.eq.$userId),and(sender.eq.$userId,receiver.eq.$currentUserId)')
+          .maybeSingle();
+
+      if (response == null) {
+        return {'status': 'none', 'requestId': null, 'canSendRequest': true};
+      }
+
+      final isOutgoing = response['sender'] == currentUserId;
+      final status = response['status'];
+
+      return {
+        'status': status,
+        'requestId': response['id'],
+        'isOutgoing': isOutgoing,
+        'canSendRequest': false,
+      };
+    } catch (e) {
+      print('Error checking friendship status: $e');
+      return {'status': 'none', 'requestId': null, 'canSendRequest': true};
+    }
+  }
+
+  /// Get messages between two users
+  static Future<List<Map<String, dynamic>>> getMessages(String friendId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final response = await _supabase
+          .from('messages')
+          .select('*')
+          .or('and(sender.eq.$currentUserId,receiver.eq.$friendId),and(sender.eq.$friendId,receiver.eq.$currentUserId)')
+          .order('created_at');
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      print('Error fetching messages: $e');
+      return [];
+    }
+  }
+
+  /// Send message
+  static Future<void> sendMessage(String receiverId, String content) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase.from('messages').insert({
+        'sender': currentUserId!,
+        'receiver': receiverId,
+        'content': content,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      print('Error sending message: $e');
+      rethrow;
+    }
+  }
+
+  /// Get chat list (recent conversations)
+  static Future<List<Map<String, dynamic>>> getChatList() async {
+    ensureUserAuthenticated();
+    
+    try {
+      // Get latest message with each friend
+      final friends = await getFriends();
+      final chats = <Map<String, dynamic>>[];
+
+      for (final friend in friends) {
+        final messages = await _supabase
+            .from('messages')
+            .select('*')
+            .or('and(sender.eq.$currentUserId,receiver.eq.${friend['id']}),and(sender.eq.${friend['id']},receiver.eq.$currentUserId)')
+            .order('created_at', ascending: false)
+            .limit(1);
+
+        if (messages.isNotEmpty) {
+          chats.add({
+            'friend': friend,
+            'lastMessage': messages.first,
+          });
+        } else {
+          chats.add({
+            'friend': friend,
+            'lastMessage': null,
+          });
+        }
+      }
+
+      // Sort by last message time
+      chats.sort((a, b) {
+        final aTime = a['lastMessage']?['created_at'];
+        final bTime = b['lastMessage']?['created_at'];
+        if (aTime == null && bTime == null) return 0;
+        if (aTime == null) return 1;
+        if (bTime == null) return -1;
+        return bTime.compareTo(aTime);
+      });
+
+      return chats;
+    } catch (e) {
+      print('Error fetching chat list: $e');
+      return [];
+    }
+  }
+
+  /// Search users (for adding friends)
+  static Future<List<Map<String, dynamic>>> searchUsers(String query) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final response = await _supabase
+          .from('user_profiles')
+          .select('id, email, username, avatar_url')
+          .or('email.ilike.%$query%,username.ilike.%$query%')
+          .neq('id', currentUserId!)
+          .limit(20);
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      print('Error searching users: $e');
+      return [];
     }
   }
 }
