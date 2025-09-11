@@ -340,7 +340,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               width: double.infinity,
                               child: ElevatedButton.icon(
                                 onPressed: () {
-                                  Navigator.pushNamed(context, '/premium');
+                                  Navigator.pushNamed(context, '/purchase');
                                 },
                                 icon: Icon(Icons.star),
                                 label: Text('Upgrade to Premium'),

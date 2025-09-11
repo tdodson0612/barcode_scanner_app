@@ -7,6 +7,6 @@ final logger = Logger(
     lineLength: 80, // width of log lines
     colors: true, // enable colors
     printEmojis: true, // enable emojis
-    printTime: true, // enable timestamps
+    dateTimeFormat: DateTimeFormat.onlyTimeAndSinceStart, // replaces printTime: true
   ),
 );

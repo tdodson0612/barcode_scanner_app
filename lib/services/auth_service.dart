@@ -4,7 +4,7 @@ import 'database_service.dart';
 class AuthService {
   static final SupabaseClient _supabase = Supabase.instance.client;
 
-  // Premium users list
+  // Premium users list (store in lowercase for consistency)
   static const List<String> _premiumEmails = [
     'terryd0612@gmail.com',
     'liverdiseasescanner@gmail.com',
@@ -16,7 +16,8 @@ class AuthService {
   static String? get currentUserId => currentUser?.id;
 
   static bool _isDefaultPremiumEmail(String email) {
-    return _premiumEmails.contains(email.toLowerCase().trim());
+    final normalizedEmail = email.trim().toLowerCase();
+    return _premiumEmails.contains(normalizedEmail);
   }
 
   static Future<AuthResponse> signUp({
@@ -29,7 +30,8 @@ class AuthService {
     );
     
     if (response.user != null) {
-      final isPremiumByDefault = _isDefaultPremiumEmail(email);
+      final normalizedEmail = email.trim().toLowerCase();
+      final isPremiumByDefault = _isDefaultPremiumEmail(normalizedEmail);
       await DatabaseService.createUserProfile(
         response.user!.id,
         email,
@@ -49,8 +51,11 @@ class AuthService {
       password: password,
     );
 
-    if (response.user != null && _isDefaultPremiumEmail(email)) {
-      await _ensurePremiumStatus(response.user!.id);
+    if (response.user != null) {
+      final normalizedEmail = email.trim().toLowerCase();
+      if (_isDefaultPremiumEmail(normalizedEmail)) {
+        await _ensurePremiumStatus(response.user!.id);
+      }
     }
 
     return response;
@@ -60,14 +65,12 @@ class AuthService {
     try {
       final currentProfile = await DatabaseService.getUserProfile(userId);
       if (currentProfile != null && currentProfile['is_premium'] != true) {
-        await DatabaseService.setPremiumStatus(userId, true); // Add userId parameter
+        await DatabaseService.setPremiumStatus(userId, true);
       }
     } catch (e) {
       print('Error ensuring premium status: $e');
     }
   }
-  
-
 
   static Future<void> signOut() async {
     await _supabase.auth.signOut();

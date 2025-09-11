@@ -6,11 +6,10 @@ import 'login.dart';
 import 'pages/premium_page.dart';
 import 'pages/grocery_list.dart';
 import 'pages/submit_recipe.dart';
-// ADD THESE NEW IMPORTS FOR SOCIAL FEATURES:
 import 'pages/messages_page.dart';
 import 'pages/search_users_page.dart';
-import 'pages/chat_page.dart';
-import 'pages/user_profile_page.dart';
+// Note: chat_page.dart and user_profile_page.dart don't need to be imported here
+// since they're navigated to using Navigator.push() from other pages
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -66,6 +65,8 @@ class _MyAppState extends State<MyApp> {
         // ADD THESE NEW ROUTES FOR SOCIAL FEATURES:
         '/messages': (context) => MessagesPage(),
         '/search-users': (context) => const SearchUsersPage(),
+        // Removed /chat and /user-profile routes since they need parameters
+        // Use Navigator.push() to navigate to these pages instead
       },
     );
   }

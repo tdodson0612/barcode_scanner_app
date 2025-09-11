@@ -224,7 +224,7 @@ class PremiumGate extends StatelessWidget {
                 foregroundColor: Colors.white,
               ),
               child: Text(
-                'Upgrade to Premium - \$4.99/month',
+                'Upgrade to Premium',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
@@ -309,4 +309,3 @@ class PremiumGate extends StatelessWidget {
     );
   }
 }
-

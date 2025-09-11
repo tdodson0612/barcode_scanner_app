@@ -11,6 +11,7 @@ import '../controllers/premium_gate_controller.dart';
 import 'liverhealthbar.dart';
 import '../pages/profile_screen.dart';
 import 'contact_screen.dart';
+import '../services/auth_service.dart';
 
 /// --- NutritionInfo Data Model ---
 class NutritionInfo {
@@ -44,8 +45,10 @@ class NutritionInfo {
       sugar: parseDouble(nutriments['sugars_100g']),
       sodium: parseDouble(nutriments['sodium_100g']),
     );
-  }
+    }
 }
+
+// End of _HomePageState class
 
 /// --- Recipe Data Model ---
 class Recipe {
@@ -435,7 +438,7 @@ class _HomePageState extends State<HomePage> {
     
     // Check if user can scan
     if (!controller.canAccessFeature(PremiumFeature.scan)) {
-      Navigator.pushNamed(context, '/premium');
+      Navigator.pushNamed(context, '/purchase');
       return;
     }
 
@@ -460,7 +463,7 @@ class _HomePageState extends State<HomePage> {
       final success = await controller.useScan();
       
       if (!success) {
-        Navigator.pushNamed(context, '/premium');
+        Navigator.pushNamed(context, '/purchase');
         return;
       }
 
@@ -506,7 +509,7 @@ class _HomePageState extends State<HomePage> {
     
     // Check if user can scan (premium feature)
     if (!controller.canAccessFeature(PremiumFeature.scan)) {
-      Navigator.pushNamed(context, '/premium');
+      Navigator.pushNamed(context, '/purchase');
       return;
     }
 
@@ -557,7 +560,7 @@ class _HomePageState extends State<HomePage> {
     // Use a scan for analysis
     final success = await controller.useScan();
     if (!success) {
-      Navigator.pushNamed(context, '/premium');
+      Navigator.pushNamed(context, '/purchase');
       return;
     }
 
@@ -965,7 +968,7 @@ class _HomePageState extends State<HomePage> {
                                 SizedBox(height: 12),
                                 ElevatedButton.icon(
                                   onPressed: () {
-                                    Navigator.pushNamed(context, '/premium');
+                                    Navigator.pushNamed(context, '/purchase');
                                   },
                                   icon: Icon(Icons.star),
                                   label: Text('Upgrade for Unlimited Scans'),
@@ -1357,84 +1360,172 @@ class _HomePageState extends State<HomePage> {
 
   /// Build navigation drawer
   Widget _buildDrawer() {
-    return Drawer(
-      child: ListView(
-        padding: EdgeInsets.zero,
-        children: [
-          const DrawerHeader(
-            decoration: BoxDecoration(
-              color: Colors.green,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.restaurant_menu,
+  return Drawer(
+    child: ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        const DrawerHeader(
+          decoration: BoxDecoration(
+            color: Colors.green,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.restaurant_menu,
+                color: Colors.white,
+                size: 48,
+              ),
+              SizedBox(height: 16),
+              Text(
+                'Recipe Scanner Menu',
+                style: TextStyle(
                   color: Colors.white,
-                  size: 48,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
                 ),
-                SizedBox(height: 16),
-                Text(
-                  'Recipe Scanner Menu',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
+              ),
+            ],
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.home),
+          title: const Text('Home'),
+          onTap: () {
+            Navigator.pop(context);
+            _resetToHome();
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.person),
+          title: const Text('Profile'),
+          onTap: () {
+            Navigator.pop(context);
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ProfileScreen(favoriteRecipes: _favoriteRecipes),
+              ),
+            );
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.contact_mail),
+          title: const Text('Contact Us'),
+          onTap: () {
+            Navigator.pop(context);
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const ContactScreen()),
+            );
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.star),
+          title: const Text('Premium Features'),
+          onTap: () {
+            Navigator.pop(context);
+            Navigator.pushNamed(context, '/purchase');
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.shopping_cart),
+          title: const Text('Purchase Premium'),
+          onTap: () {
+            Navigator.pop(context);
+            Navigator.pushNamed(context, '/purchase');
+          },
+        ),
+        // Add divider before logout
+        const Divider(),
+        ListTile(
+          leading: const Icon(Icons.logout, color: Colors.red),
+          title: const Text(
+            'Logout',
+            style: TextStyle(color: Colors.red),
+          ),
+          onTap: () {
+            _showLogoutConfirmation();
+          },
+        ),
+      ],
+    ),
+  );
+}
+
+/// Show logout confirmation dialog
+void _showLogoutConfirmation() {
+  showDialog(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop(); // Close dialog
+            },
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop(); // Close dialog
+              _performLogout();
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
             ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.home),
-            title: const Text('Home'),
-            onTap: () {
-              Navigator.pop(context);
-              _resetToHome();
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.person),
-            title: const Text('Profile'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ProfileScreen(favoriteRecipes: _favoriteRecipes),
-                ),
-              );
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.contact_mail),
-            title: const Text('Contact Us'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const ContactScreen()),
-              );
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.star),
-            title: const Text('Premium Features'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.pushNamed(context, '/premium');
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.shopping_cart),
-            title: const Text('Purchase Premium'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.pushNamed(context, '/purchase');
-            },
+            child: const Text('Logout'),
           ),
         ],
-      ),
-    );
-  }
+      );
+    },
+  );
 }
+
+/// Perform the actual logout
+Future<void> _performLogout() async {
+  try {
+    // Close the drawer first
+    Navigator.pop(context);
+    
+    // Sign out from Supabase
+    await AuthService.signOut();
+    
+    // Clear SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    
+    // Reset premium gate controller
+    PremiumGateController().refresh();
+    
+    // Show success message
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Successfully logged out'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+    
+    // Navigate to login and clear navigation stack
+    if (mounted) {
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        '/login',
+        (route) => false,
+      );
+    }
+  } catch (e) {
+    // Show error message
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error logging out: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}}
