@@ -4,14 +4,29 @@ import '../services/database_service.dart';
 import 'user_profile_page.dart';
 
 class SearchUsersPage extends StatefulWidget {
-  const SearchUsersPage({Key? key}) : super(key: key);
+  final String? initialQuery; // optional
+
+  const SearchUsersPage({Key? key, this.initialQuery}) : super(key: key);
+
 
   @override
   _SearchUsersPageState createState() => _SearchUsersPageState();
 }
 
 class _SearchUsersPageState extends State<SearchUsersPage> {
-  final TextEditingController _searchController = TextEditingController();
+  late TextEditingController _searchController;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController(text: widget.initialQuery ?? '');
+
+    // automatically run search if initialQuery exists
+    if (widget.initialQuery != null && widget.initialQuery!.isNotEmpty) {
+      _searchUsers();
+    }
+  }
+
   List<Map<String, dynamic>> _searchResults = [];
   Map<String, Map<String, dynamic>> _friendshipStatuses = {};
   bool _isLoading = false;
@@ -56,7 +71,7 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
       );
     }
   }
-
+  
   Future<void> _sendFriendRequest(String userId) async {
     try {
       await DatabaseService.sendFriendRequest(userId);

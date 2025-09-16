@@ -8,11 +8,14 @@ class PremiumService {
   static const String LAST_SCAN_DATE_KEY = 'last_scan_date';
 
   // Check if user is premium
+  // Check if user is premium
   static Future<bool> isPremiumUser() async {
     if (!AuthService.isLoggedIn) return false;
 
     try {
       final profile = await DatabaseService.getUserProfile(AuthService.currentUserId!);
+      print('DEBUG: User profile: $profile'); // Debug line
+      print('DEBUG: is_premium value: ${profile?['is_premium']}'); // Debug line
       return profile?['is_premium'] ?? false;
     } catch (e) {
       print('Error checking premium status: $e');

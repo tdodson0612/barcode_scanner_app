@@ -21,20 +21,25 @@ class PremiumGateController extends ChangeNotifier {
 
   // Initialize premium status
   Future<void> initialize() async {
+    print('DEBUG: Starting PremiumGateController initialization');
     _isLoading = true;
     notifyListeners();
 
     try {
       if (AuthService.isLoggedIn) {
+        print('DEBUG: User is logged in, checking premium status');
         _isPremium = await PremiumService.isPremiumUser();
+        print('DEBUG: Premium status result: $_isPremium');
         _remainingScans = await PremiumService.getRemainingScanCount();
         _totalScansUsed = 3 - _remainingScans;
       } else {
+        print('DEBUG: User is NOT logged in');
         _isPremium = false;
         _remainingScans = 0;
         _totalScansUsed = 0;
       }
     } catch (e, stackTrace) {
+      print('DEBUG: Error in initialization: $e');
       logger.e(
         'Error initializing premium status',
         error: e,
@@ -47,11 +52,22 @@ class PremiumGateController extends ChangeNotifier {
 
     _isLoading = false;
     notifyListeners();
+    print('DEBUG: Initialization complete. isPremium: $_isPremium');
   }
 
   // Update premium status (call after purchase or login)
   Future<void> refresh() async {
     await initialize();
+  }
+
+  // Add a reset method for logout
+  void reset() {
+    print('DEBUG: Resetting PremiumGateController');
+    _isPremium = false;
+    _isLoading = false;
+    _remainingScans = 0;
+    _totalScansUsed = 0;
+    notifyListeners();
   }
 
   // RESTRICTIVE: Check if user can access any feature

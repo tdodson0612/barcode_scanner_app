@@ -10,7 +10,13 @@ class AuthService {
     'liverdiseasescanner@gmail.com',
   ];
 
-  static bool get isLoggedIn => _supabase.auth.currentUser != null;
+  static bool get isLoggedIn {
+    final loggedIn = _supabase.auth.currentUser != null;
+    print('DEBUG: AuthService.isLoggedIn = $loggedIn');
+    print('DEBUG: Current user: ${_supabase.auth.currentUser?.email}');
+    return loggedIn;
+  }
+
   static User? get currentUser => _supabase.auth.currentUser;
 
   static String? get currentUserId => currentUser?.id;

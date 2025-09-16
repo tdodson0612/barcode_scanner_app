@@ -12,6 +12,11 @@ import 'liverhealthbar.dart';
 import '../pages/profile_screen.dart';
 import 'contact_screen.dart';
 import '../services/auth_service.dart';
+import '../models/favorite_recipe.dart';
+import '../pages/messages_page.dart';
+import '../pages/search_users_page.dart';
+import '../pages/favorite_recipes_page.dart';
+import '../pages/user_profile_page.dart';
 
 /// --- NutritionInfo Data Model ---
 class NutritionInfo {
@@ -45,10 +50,8 @@ class NutritionInfo {
       sugar: parseDouble(nutriments['sugars_100g']),
       sodium: parseDouble(nutriments['sodium_100g']),
     );
-    }
+  }
 }
-
-// End of _HomePageState class
 
 /// --- Recipe Data Model ---
 class Recipe {
@@ -246,7 +249,7 @@ class _HomePageState extends State<HomePage> {
   bool _showLiverBar = false;
   bool _isLoading = false;
   List<Recipe> _recipeSuggestions = [];
-  List<String> _favoriteRecipes = [];
+  List<FavoriteRecipe> _favoriteRecipes = [];
   bool _showInitialView = true;
   NutritionInfo? _currentNutrition;
 
@@ -388,33 +391,97 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// Load favorite recipes from SharedPreferences
+  /// Load favorite recipes from SharedPreferences as FavoriteRecipe objects
   Future<void> _loadFavoriteRecipes() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
+      
       setState(() {
-        _favoriteRecipes = prefs.getStringList('favorite_recipes') ?? [];
+        _favoriteRecipes = favoriteRecipesJson
+            .map((jsonString) {
+              try {
+                return FavoriteRecipe.fromJson(json.decode(jsonString));
+              } catch (e) {
+                debugPrint('Error parsing recipe: $e');
+                return null;
+              }
+            })
+            .where((recipe) => recipe != null)
+            .cast<FavoriteRecipe>()
+            .toList();
       });
     } catch (e) {
       debugPrint('Error loading favorite recipes: $e');
     }
   }
 
-  /// Toggle favorite recipe status
-  Future<void> _toggleFavoriteRecipe(String recipeTitle) async {
+  /// Toggle favorite recipe status using full Recipe objects
+  Future<void> _toggleFavoriteRecipe(Recipe recipe) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      setState(() {
-        if (_favoriteRecipes.contains(recipeTitle)) {
-          _favoriteRecipes.remove(recipeTitle);
-        } else {
-          _favoriteRecipes.add(recipeTitle);
-        }
-      });
-      await prefs.setStringList('favorite_recipes', _favoriteRecipes);
+      final currentUserId = AuthService.currentUserId;
+      
+      if (currentUserId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Please log in to save recipes')),
+        );
+        return;
+      }
+
+      // Check if recipe is already favorited
+      final existingIndex = _favoriteRecipes.indexWhere((fav) => fav.recipeName == recipe.title);
+      
+      if (existingIndex >= 0) {
+        // Remove from favorites
+        setState(() {
+          _favoriteRecipes.removeAt(existingIndex);
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Removed "${recipe.title}" from favorites'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      } else {
+        // Add to favorites
+        final favoriteRecipe = FavoriteRecipe(
+          userId: currentUserId,
+          recipeName: recipe.title,
+          ingredients: recipe.ingredients.join(', '),
+          directions: recipe.instructions,
+          createdAt: DateTime.now(),
+        );
+        
+        setState(() {
+          _favoriteRecipes.add(favoriteRecipe);
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Added "${recipe.title}" to favorites!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+      
+      // Save to SharedPreferences as JSON
+      final favoriteRecipesJson = _favoriteRecipes
+          .map((recipe) => json.encode(recipe.toJson()))
+          .toList();
+      await prefs.setStringList('favorite_recipes_detailed', favoriteRecipesJson);
     } catch (e) {
       debugPrint('Error saving favorite recipes: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error saving recipe: $e')),
+      );
     }
+  }
+
+  /// Check if a recipe is favorited
+  bool _isRecipeFavorited(String recipeTitle) {
+    return _favoriteRecipes.any((fav) => fav.recipeName == recipeTitle);
   }
 
   /// Reset to initial home view
@@ -642,6 +709,103 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// Search for users (friends) - navigates to SearchUsersPage
+  Future<void> _searchUsers(String query) async {
+    if (query.trim().isEmpty) return;
+    
+    try {
+      // Navigate to search results page with the query
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SearchUsersPage(initialQuery: query),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error searching users: $e')),
+      );
+    }
+  }
+
+  /// Build prominent search bar widget for finding friends
+  Widget _buildSearchBar() {
+    final TextEditingController searchController = TextEditingController();
+    
+    return Container(
+      margin: EdgeInsets.only(bottom: 20),
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha((0.95 * 255).toInt()),
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Text(
+            'Find Friends & Share Recipes',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.blue.shade800,
+            ),
+          ),
+          SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search for friends by name or email...',
+                    prefixIcon: Icon(Icons.person_search, color: Colors.grey.shade600),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(25),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(25),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(25),
+                      borderSide: BorderSide(color: Colors.blue, width: 2),
+                    ),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    filled: true,
+                    fillColor: Colors.grey.shade50,
+                  ),
+                  onSubmitted: (value) => _searchUsers(value),
+                ),
+              ),
+              SizedBox(width: 12),
+              ElevatedButton(
+                onPressed: () => _searchUsers(searchController.text),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  shape: CircleBorder(),
+                  padding: EdgeInsets.all(14),
+                  elevation: 3,
+                ),
+                child: Icon(Icons.search, size: 24),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Build recipe suggestions widget for real nutrition analysis
   Widget _buildNutritionRecipeSuggestions() {
     if (_recipeSuggestions.isEmpty) return const SizedBox.shrink();
@@ -683,114 +847,119 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Build individual recipe card for nutrition analysis
+  /// Build collapsible recipe card showing only title initially
   Widget _buildNutritionRecipeCard(Recipe recipe) {
-    final isFavorite = _favoriteRecipes.contains(recipe.title);
+    final isFavorite = _isRecipeFavorited(recipe.title);
     
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: ExpansionTile(
+        title: Text(
+          recipe.title,
+          style: const TextStyle(
+            fontSize: 16,
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            PremiumGate(
+              feature: PremiumFeature.favoriteRecipes,
+              featureName: 'Favorite Recipes',
+              child: IconButton(
+                icon: Icon(
+                  isFavorite ? Icons.favorite : Icons.favorite_border,
+                  color: isFavorite ? Colors.red : Colors.white,
+                  size: 20,
+                ),
+                onPressed: () => _toggleFavoriteRecipe(recipe),
+              ),
+            ),
+            Icon(Icons.expand_more, color: Colors.white),
+          ],
+        ),
+        iconColor: Colors.white,
+        collapsedIconColor: Colors.white,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  recipe.title,
+          Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  recipe.description,
                   style: const TextStyle(
-                    fontSize: 16,
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: Colors.white70,
                   ),
                 ),
-              ),
-              PremiumGate(
-                feature: PremiumFeature.favoriteRecipes,
-                featureName: 'Favorite Recipes',
-                child: IconButton(
-                  icon: Icon(
-                    isFavorite ? Icons.favorite : Icons.favorite_border,
-                    color: isFavorite ? Colors.red : Colors.white,
+                const SizedBox(height: 8),
+                Text(
+                  'Ingredients: ${recipe.ingredients.join(', ')}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.white60,
                   ),
-                  onPressed: () => _toggleFavoriteRecipe(recipe.title),
                 ),
-              ),
-            ],
-          ),
-          Text(
-            recipe.description,
-            style: const TextStyle(
-              fontSize: 14,
-              color: Colors.white70,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Ingredients: ${recipe.ingredients.join(', ')}',
-            style: const TextStyle(
-              fontSize: 12,
-              color: Colors.white60,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Instructions: ${recipe.instructions}',
-            style: const TextStyle(
-              fontSize: 12,
-              color: Colors.white60,
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Premium action buttons
-          Row(
-            children: [
-              Expanded(
-                child: PremiumGate(
-                  feature: PremiumFeature.favoriteRecipes,
-                  featureName: 'Favorite Recipes',
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      _toggleFavoriteRecipe(recipe.title);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Added to favorites!')),
-                      );
-                    },
-                    icon: Icon(Icons.favorite),
-                    label: Text('Save Recipe'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
+                const SizedBox(height: 8),
+                Text(
+                  'Instructions: ${recipe.instructions}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Colors.white60,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Premium action buttons
+                Row(
+                  children: [
+                    Expanded(
+                      child: PremiumGate(
+                        feature: PremiumFeature.favoriteRecipes,
+                        featureName: 'Favorite Recipes',
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            _toggleFavoriteRecipe(recipe);
+                          },
+                          icon: Icon(Icons.favorite),
+                          label: Text('Save Recipe'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: PremiumGate(
-                  feature: PremiumFeature.groceryList,
-                  featureName: 'Grocery List',
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Added to grocery list!')),
-                      );
-                    },
-                    icon: Icon(Icons.add_shopping_cart),
-                    label: Text('Add to List'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: PremiumGate(
+                        feature: PremiumFeature.groceryList,
+                        featureName: 'Grocery List',
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Added to grocery list!')),
+                            );
+                          },
+                          icon: Icon(Icons.add_shopping_cart),
+                          label: Text('Add to List'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -814,6 +983,9 @@ class _HomePageState extends State<HomePage> {
           padding: EdgeInsets.all(16),
           child: Column(
             children: [
+              // Prominent Search Bar at the top
+              _buildSearchBar(),
+              
               // Welcome Section
               Container(
                 padding: EdgeInsets.all(20),
@@ -1061,104 +1233,7 @@ class _HomePageState extends State<HomePage> {
                       
                       SizedBox(height: 16),
                       
-                      ..._scannedRecipes.map((recipe) => Container(
-                        margin: EdgeInsets.only(bottom: 16),
-                        padding: EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withAlpha((0.9 * 255).toInt()),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.restaurant, color: Colors.green),
-                                SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    recipe['name']!,
-                                    style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            SizedBox(height: 16),
-                            
-                            Text(
-                              'Ingredients:',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                            SizedBox(height: 8),
-                            Text(recipe['ingredients']!),
-                            
-                            SizedBox(height: 16),
-                            
-                            Text(
-                              'Directions:',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                            SizedBox(height: 8),
-                            Text(recipe['directions']!),
-                            
-                            SizedBox(height: 16),
-                            
-                            // Premium action buttons
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: PremiumGate(
-                                    feature: PremiumFeature.favoriteRecipes,
-                                    featureName: 'Favorite Recipes',
-                                    child: ElevatedButton.icon(
-                                      onPressed: () {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(content: Text('Added to favorites!')),
-                                        );
-                                      },
-                                      icon: Icon(Icons.favorite),
-                                      label: Text('Save Recipe'),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.red,
-                                        foregroundColor: Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                SizedBox(width: 12),
-                                Expanded(
-                                  child: PremiumGate(
-                                    feature: PremiumFeature.groceryList,
-                                    featureName: 'Grocery List',
-                                    child: ElevatedButton.icon(
-                                      onPressed: () {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(content: Text('Added to grocery list!')),
-                                        );
-                                      },
-                                      icon: Icon(Icons.add_shopping_cart),
-                                      label: Text('Add to List'),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.green,
-                                        foregroundColor: Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      )),
+                      ..._scannedRecipes.map((recipe) => _buildScannedRecipeCard(recipe)),
                     ],
                   ),
                 ),
@@ -1167,6 +1242,146 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Build collapsible scanned recipe card
+  Widget _buildScannedRecipeCard(Map<String, String> recipe) {
+    final isFavorite = _isRecipeFavorited(recipe['name']!);
+    
+    return Container(
+      margin: EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha((0.9 * 255).toInt()),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: ExpansionTile(
+        title: Row(
+          children: [
+            Icon(Icons.restaurant, color: Colors.green),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                recipe['name']!,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            PremiumGate(
+              feature: PremiumFeature.favoriteRecipes,
+              featureName: 'Favorite Recipes',
+              child: IconButton(
+                icon: Icon(
+                  isFavorite ? Icons.favorite : Icons.favorite_border,
+                  color: isFavorite ? Colors.red : Colors.grey,
+                  size: 20,
+                ),
+                onPressed: () {
+                  // Create Recipe object from scanned data for proper favoriting
+                  final recipeObj = Recipe(
+                    title: recipe['name']!,
+                    description: 'Scanned recipe',
+                    ingredients: recipe['ingredients']!.split(', '),
+                    instructions: recipe['directions']!,
+                  );
+                  _toggleFavoriteRecipe(recipeObj);
+                },
+              ),
+            ),
+            Icon(Icons.expand_more),
+          ],
+        ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Ingredients:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(recipe['ingredients']!),
+                
+                SizedBox(height: 16),
+                
+                Text(
+                  'Directions:',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(recipe['directions']!),
+                
+                SizedBox(height: 16),
+                
+                // Premium action buttons
+                Row(
+                  children: [
+                    Expanded(
+                      child: PremiumGate(
+                        feature: PremiumFeature.favoriteRecipes,
+                        featureName: 'Favorite Recipes',
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            // Create Recipe object from scanned data for proper favoriting
+                            final recipeObj = Recipe(
+                              title: recipe['name']!,
+                              description: 'Scanned recipe',
+                              ingredients: recipe['ingredients']!.split(', '),
+                              instructions: recipe['directions']!,
+                            );
+                            _toggleFavoriteRecipe(recipeObj);
+                          },
+                          icon: Icon(Icons.favorite),
+                          label: Text('Save Recipe'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: PremiumGate(
+                        feature: PremiumFeature.groceryList,
+                        featureName: 'Grocery List',
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Added to grocery list!')),
+                            );
+                          },
+                          icon: Icon(Icons.add_shopping_cart),
+                          label: Text('Add to List'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1345,10 +1560,20 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.shopping_cart),
-            onPressed: () {
-              Navigator.pushNamed(context, '/purchase');
+          // Only show purchase button for non-premium users
+          AnimatedBuilder(
+            animation: PremiumGateController(),
+            builder: (context, _) {
+              final controller = PremiumGateController();
+              if (!controller.isPremium) {
+                return IconButton(
+                  icon: const Icon(Icons.shopping_cart),
+                  onPressed: () {
+                    Navigator.pushNamed(context, '/purchase');
+                  },
+                );
+              }
+              return SizedBox.shrink();
             },
           ),
         ],
@@ -1358,174 +1583,210 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Build navigation drawer
+  /// Build navigation drawer - consistent across all pages
   Widget _buildDrawer() {
-  return Drawer(
-    child: ListView(
-      padding: EdgeInsets.zero,
-      children: [
-        const DrawerHeader(
-          decoration: BoxDecoration(
-            color: Colors.green,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Drawer(
+      child: AnimatedBuilder(
+        animation: PremiumGateController(),
+        builder: (context, _) {
+          final controller = PremiumGateController();
+          
+          return ListView(
+            padding: EdgeInsets.zero,
             children: [
-              Icon(
-                Icons.restaurant_menu,
-                color: Colors.white,
-                size: 48,
-              ),
-              SizedBox(height: 16),
-              Text(
-                'Recipe Scanner Menu',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
+              const DrawerHeader(
+                decoration: BoxDecoration(
+                  color: Colors.green,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.restaurant_menu,
+                      color: Colors.white,
+                      size: 48,
+                    ),
+                    SizedBox(height: 16),
+                    Text(
+                      'Recipe Scanner Menu',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
-        ),
-        ListTile(
-          leading: const Icon(Icons.home),
-          title: const Text('Home'),
-          onTap: () {
-            Navigator.pop(context);
-            _resetToHome();
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.person),
-          title: const Text('Profile'),
-          onTap: () {
-            Navigator.pop(context);
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ProfileScreen(favoriteRecipes: _favoriteRecipes),
+              ListTile(
+                leading: const Icon(Icons.home),
+                title: const Text('Home'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _resetToHome();
+                },
               ),
-            );
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.contact_mail),
-          title: const Text('Contact Us'),
-          onTap: () {
-            Navigator.pop(context);
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const ContactScreen()),
-            );
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.star),
-          title: const Text('Premium Features'),
-          onTap: () {
-            Navigator.pop(context);
-            Navigator.pushNamed(context, '/purchase');
-          },
-        ),
-        ListTile(
-          leading: const Icon(Icons.shopping_cart),
-          title: const Text('Purchase Premium'),
-          onTap: () {
-            Navigator.pop(context);
-            Navigator.pushNamed(context, '/purchase');
-          },
-        ),
-        // Add divider before logout
-        const Divider(),
-        ListTile(
-          leading: const Icon(Icons.logout, color: Colors.red),
-          title: const Text(
-            'Logout',
-            style: TextStyle(color: Colors.red),
-          ),
-          onTap: () {
-            _showLogoutConfirmation();
-          },
-        ),
-      ],
-    ),
-  );
-}
+              ListTile(
+                leading: const Icon(Icons.person),
+                title: const Text('Profile'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ProfileScreen(favoriteRecipes: _favoriteRecipes.map((fav) => fav.recipeName).toList()),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.chat),
+                title: const Text('Messages'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushNamed(context, '/messages');
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.person_search),
+                title: const Text('Find Friends'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushNamed(context, '/search-users');
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.favorite),
+                title: const Text('Favorite Recipes'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => FavoriteRecipesPage(favoriteRecipes: _favoriteRecipes),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.contact_mail),
+                title: const Text('Contact Us'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const ContactScreen()),
+                  );
+                },
+              ),
+              // Only show premium purchase options for non-premium users
+              if (!controller.isPremium) ...[
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.shopping_cart, color: Colors.amber),
+                  title: const Text(
+                    'Purchase Premium',
+                    style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushNamed(context, '/purchase');
+                  },
+                ),
+              ],
+              // Add divider before logout
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text(
+                  'Logout',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: () {
+                  _showLogoutConfirmation();
+                },
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
 
-/// Show logout confirmation dialog
-void _showLogoutConfirmation() {
-  showDialog(
-    context: context,
-    builder: (BuildContext context) {
-      return AlertDialog(
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to logout?'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop(); // Close dialog
-            },
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop(); // Close dialog
-              _performLogout();
-            },
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.red,
+  /// Show logout confirmation dialog
+  void _showLogoutConfirmation() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Logout'),
+          content: const Text('Are you sure you want to logout?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Close dialog
+              },
+              child: const Text('Cancel'),
             ),
-            child: const Text('Logout'),
-          ),
-        ],
-      );
-    },
-  );
-}
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Close dialog
+                _performLogout();
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.red,
+              ),
+              child: const Text('Logout'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
-/// Perform the actual logout
-Future<void> _performLogout() async {
-  try {
-    // Close the drawer first
-    Navigator.pop(context);
-    
-    // Sign out from Supabase
-    await AuthService.signOut();
-    
-    // Clear SharedPreferences
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
-    
-    // Reset premium gate controller
-    PremiumGateController().refresh();
-    
-    // Show success message
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Successfully logged out'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    }
-    
-    // Navigate to login and clear navigation stack
-    if (mounted) {
-      Navigator.of(context).pushNamedAndRemoveUntil(
-        '/login',
-        (route) => false,
-      );
-    }
-  } catch (e) {
-    // Show error message
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error logging out: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+  /// Perform the actual logout
+  Future<void> _performLogout() async {
+    try {
+      // Close the drawer first
+      Navigator.pop(context);
+      
+      // Sign out from Supabase
+      await AuthService.signOut();
+      
+      // Clear SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.clear();
+      
+      // Reset premium gate controller
+      PremiumGateController().refresh();
+      
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Successfully logged out'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+      
+      // Navigate to login and clear navigation stack
+      if (mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/login',
+          (route) => false,
+        );
+      }
+    } catch (e) {
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error logging out: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
-}}
+}
