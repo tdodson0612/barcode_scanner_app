@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/favorite_recipe.dart';
+import '../widgets/app_drawer.dart';
+import 'dart:convert';
 
 class FavoriteRecipesPage extends StatefulWidget {
-  final List<FavoriteRecipe> favoriteRecipes; // <-- change type
+  final List<FavoriteRecipe> favoriteRecipes;
 
   const FavoriteRecipesPage({
     Key? key,
@@ -15,7 +17,7 @@ class FavoriteRecipesPage extends StatefulWidget {
 }
 
 class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
-  List<String> _favoriteRecipes = [];
+  List<FavoriteRecipe> _favoriteRecipes = [];
 
   @override
   void initState() {
@@ -27,30 +29,48 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
   Future<void> _loadFavoriteRecipes() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
+      
       setState(() {
-        _favoriteRecipes = prefs.getStringList('favorite_recipes') ?? [];
+        _favoriteRecipes = favoriteRecipesJson
+            .map((jsonString) {
+              try {
+                return FavoriteRecipe.fromJson(json.decode(jsonString));
+              } catch (e) {
+                debugPrint('Error parsing recipe: $e');
+                return null;
+              }
+            })
+            .where((recipe) => recipe != null)
+            .cast<FavoriteRecipe>()
+            .toList();
       });
     } catch (e) {
       debugPrint('Error loading favorite recipes: $e');
     }
   }
 
-  Future<void> _removeFavoriteRecipe(String recipeTitle) async {
+  Future<void> _removeFavoriteRecipe(FavoriteRecipe recipe) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
-        _favoriteRecipes.remove(recipeTitle);
+        _favoriteRecipes.remove(recipe);
       });
-      await prefs.setStringList('favorite_recipes', _favoriteRecipes);
+      
+      // Save updated list
+      final favoriteRecipesJson = _favoriteRecipes
+          .map((recipe) => json.encode(recipe.toJson()))
+          .toList();
+      await prefs.setStringList('favorite_recipes_detailed', favoriteRecipesJson);
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Removed "$recipeTitle" from favorites'),
+          content: Text('Removed "${recipe.recipeName}" from favorites'),
           backgroundColor: Colors.orange,
           action: SnackBarAction(
             label: 'UNDO',
             textColor: Colors.white,
-            onPressed: () => _undoRemoveFavorite(recipeTitle),
+            onPressed: () => _undoRemoveFavorite(recipe),
           ),
         ),
       );
@@ -59,25 +79,53 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
-  Future<void> _undoRemoveFavorite(String recipeTitle) async {
+  Future<void> _undoRemoveFavorite(FavoriteRecipe recipe) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
-        _favoriteRecipes.add(recipeTitle);
+        _favoriteRecipes.add(recipe);
       });
-      await prefs.setStringList('favorite_recipes', _favoriteRecipes);
+      
+      // Save updated list
+      final favoriteRecipesJson = _favoriteRecipes
+          .map((recipe) => json.encode(recipe.toJson()))
+          .toList();
+      await prefs.setStringList('favorite_recipes_detailed', favoriteRecipesJson);
     } catch (e) {
       debugPrint('Error undoing favorite removal: $e');
     }
   }
 
-  void _showRecipeDetails(String recipeTitle) {
-    // This would need to be expanded based on how you store recipe details
+  void _showRecipeDetails(FavoriteRecipe recipe) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(recipeTitle),
-        content: Text('Recipe details would be shown here.\n\nThis requires expanding your favorite recipe storage to include ingredients and instructions.'),
+        title: Text(recipe.recipeName),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (recipe.ingredients.isNotEmpty) ...[
+                Text(
+                  'Ingredients:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 8),
+                Text(recipe.ingredients),
+                SizedBox(height: 16),
+              ],
+              if (recipe.directions.isNotEmpty) ...[
+                Text(
+                  'Directions:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 8),
+                Text(recipe.directions),
+              ],
+            ],
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -95,6 +143,13 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         title: Text('Favorite Recipes'),
         backgroundColor: Colors.red,
         foregroundColor: Colors.white,
+        automaticallyImplyLeading: false,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
         actions: [
           IconButton(
             icon: Icon(Icons.refresh),
@@ -103,6 +158,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
           ),
         ],
       ),
+      drawer: AppDrawer(currentPage: 'favorite_recipes'),
       body: _favoriteRecipes.isEmpty
           ? _buildEmptyState()
           : RefreshIndicator(
@@ -111,7 +167,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                 padding: EdgeInsets.all(16),
                 itemCount: _favoriteRecipes.length,
                 itemBuilder: (context, index) {
-                  final recipeTitle = _favoriteRecipes[index];
+                  final recipe = _favoriteRecipes[index];
                   return Card(
                     margin: EdgeInsets.only(bottom: 12),
                     child: ListTile(
@@ -123,7 +179,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                         ),
                       ),
                       title: Text(
-                        recipeTitle,
+                        recipe.recipeName,
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                         ),
@@ -155,13 +211,13 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                         ],
                         onSelected: (value) {
                           if (value == 'view') {
-                            _showRecipeDetails(recipeTitle);
+                            _showRecipeDetails(recipe);
                           } else if (value == 'remove') {
-                            _removeFavoriteRecipe(recipeTitle);
+                            _removeFavoriteRecipe(recipe);
                           }
                         },
                       ),
-                      onTap: () => _showRecipeDetails(recipeTitle),
+                      onTap: () => _showRecipeDetails(recipe),
                     ),
                   );
                 },
@@ -204,7 +260,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
             SizedBox(height: 32),
             ElevatedButton.icon(
               onPressed: () {
-                Navigator.pop(context);
+                Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
               },
               icon: Icon(Icons.camera_alt),
               label: Text('Start Scanning Recipes'),

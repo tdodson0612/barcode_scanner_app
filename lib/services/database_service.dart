@@ -60,6 +60,66 @@ class DatabaseService {
     }
   }
 
+  // Get current user's profile (needed by profile screen)
+  static Future<Map<String, dynamic>?> getCurrentUserProfile() async {
+    final userId = currentUserId;
+    if (userId == null) return null;
+    return await getUserProfile(userId);
+  }
+
+  // Check username availability (NEW METHOD)
+  static Future<bool> isUsernameAvailable(String username) async {
+    try {
+      final response = await _supabase
+          .from('user_profiles')
+          .select('id')
+          .ilike('username', username)
+          .maybeSingle();
+      
+      return response == null; // null means username is available
+    } catch (e) {
+      print('Error checking username availability: $e');
+      throw Exception('Failed to check username availability');
+    }
+  }
+
+  // Update profile (ENHANCED METHOD)
+  static Future<void> updateProfile({
+    String? username,
+    String? email,
+    String? firstName,
+    String? lastName,
+    String? avatarUrl,
+  }) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final updates = <String, dynamic>{
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      if (username != null) updates['username'] = username;
+      if (email != null) updates['email'] = email;
+      if (firstName != null) updates['first_name'] = firstName;
+      if (lastName != null) updates['last_name'] = lastName;
+      if (avatarUrl != null) updates['avatar_url'] = avatarUrl;
+
+      await _supabase
+          .from('user_profiles')
+          .update(updates)
+          .eq('id', currentUserId!);
+          
+    } catch (e) {
+      // Check if it's a unique constraint violation
+      if (e.toString().contains('duplicate key value') || 
+          e.toString().contains('unique constraint')) {
+        throw Exception('Username is already taken. Please choose a different username.');
+      }
+      print('Error updating profile: $e');
+      throw Exception('Failed to update profile: $e');
+    }
+  }
+
   // Set premium status - FIXED: Remove circular call
   static Future<void> setPremiumStatus(String userId, bool isPremium) async {
     ensureUserAuthenticated();
@@ -568,7 +628,7 @@ class DatabaseService {
     }
   }
 
-  /// Check friendship status
+  /// Check friendship status - ENHANCED for search_users_page compatibility
   static Future<Map<String, dynamic>> checkFriendshipStatus(String userId) async {
     ensureUserAuthenticated();
     
@@ -580,7 +640,12 @@ class DatabaseService {
           .maybeSingle();
 
       if (response == null) {
-        return {'status': 'none', 'requestId': null, 'canSendRequest': true};
+        return {
+          'status': 'none', 
+          'requestId': null, 
+          'canSendRequest': true,
+          'isOutgoing': false,
+        };
       }
 
       final isOutgoing = response['sender'] == currentUserId;
@@ -590,11 +655,16 @@ class DatabaseService {
         'status': status,
         'requestId': response['id'],
         'isOutgoing': isOutgoing,
-        'canSendRequest': false,
+        'canSendRequest': status == 'none',
       };
     } catch (e) {
       print('Error checking friendship status: $e');
-      return {'status': 'none', 'requestId': null, 'canSendRequest': true};
+      return {
+        'status': 'error', 
+        'requestId': null, 
+        'canSendRequest': false,
+        'isOutgoing': false,
+      };
     }
   }
 
@@ -680,7 +750,7 @@ class DatabaseService {
     }
   }
 
-  /// Search users (for adding friends)
+  /// Search users (for adding friends) - ENHANCED for search_users_page compatibility
   static Future<List<Map<String, dynamic>>> searchUsers(String query) async {
     ensureUserAuthenticated();
     
@@ -690,12 +760,12 @@ class DatabaseService {
           .select('id, email, username, avatar_url')
           .or('email.ilike.%$query%,username.ilike.%$query%')
           .neq('id', currentUserId!)
-          .limit(20);
+          .limit(50);
 
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       print('Error searching users: $e');
-      return [];
+      throw Exception('Failed to search users: $e');
     }
   }
 }

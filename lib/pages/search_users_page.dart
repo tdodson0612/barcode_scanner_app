@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 import 'user_profile_page.dart';
+import '../widgets/app_drawer.dart';
 
 class SearchUsersPage extends StatefulWidget {
   final String? initialQuery; // optional
@@ -245,9 +246,17 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Find Friends'),
-        backgroundColor: Colors.white,
-        elevation: 1,
+        backgroundColor: Colors.green,
+        foregroundColor: Colors.white,
+        automaticallyImplyLeading: false,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
       ),
+      drawer: AppDrawer(currentPage: 'find_friends'),
       body: Column(
         children: [
           // Search Bar

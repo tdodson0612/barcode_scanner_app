@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/premium_gate.dart';
 import '../controllers/premium_gate_controller.dart';
+import '../services/database_service.dart';
+import 'dart:async';
 
 class ProfileScreen extends StatefulWidget {
   final List<String> favoriteRecipes;
@@ -19,8 +21,12 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   File? _profileImage;
   final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
   bool _isEditingName = false;
+  bool _isEditingEmail = false;
   String _userName = 'User';
+  String _userEmail = '';
+  bool _isLoading = false;
 
   Widget _sectionContainer({required Widget child}) {
     return Container(
@@ -42,21 +48,59 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _emailController.dispose();
     super.dispose();
   }
 
   Future<void> _loadProfile() async {
-    final prefs = await SharedPreferences.getInstance();
-    final imagePath = prefs.getString('profile_image_path');
-    final savedName = prefs.getString('user_name') ?? 'User';
-    
     setState(() {
-      _userName = savedName;
-      _nameController.text = savedName;
-      if (imagePath != null && imagePath.isNotEmpty) {
-        _profileImage = File(imagePath);
-      }
+      _isLoading = true;
     });
+
+    try {
+      // Load from SharedPreferences first (for offline access)
+      final prefs = await SharedPreferences.getInstance();
+      final imagePath = prefs.getString('profile_image_path');
+      final savedName = prefs.getString('user_name') ?? 'User';
+      final savedEmail = prefs.getString('user_email') ?? '';
+      
+      setState(() {
+        _userName = savedName;
+        _userEmail = savedEmail;
+        _nameController.text = savedName;
+        _emailController.text = savedEmail;
+        if (imagePath != null && imagePath.isNotEmpty) {
+          _profileImage = File(imagePath);
+        }
+      });
+
+      // Then try to load from Supabase (for most up-to-date data)
+      final profile = await DatabaseService.getCurrentUserProfile();
+      if (profile != null) {
+        final userName = profile['username'] ?? savedName;
+        final userEmail = profile['email'] ?? savedEmail;
+        
+        // Update local storage with Supabase data
+        await prefs.setString('user_name', userName);
+        await prefs.setString('user_email', userEmail);
+        
+        setState(() {
+          _userName = userName;
+          _userEmail = userEmail;
+          _nameController.text = userName;
+          _emailController.text = userEmail;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading profile: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading profile: $e')),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _pickImage(ImageSource source) async {
@@ -70,22 +114,117 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() {
         _profileImage = File(pickedFile.path);
       });
+
+      // TODO: Upload image to Supabase storage if needed
+      // For now, we're just saving locally
     }
   }
 
   Future<void> _saveUserName() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_name', _nameController.text);
-    
-    setState(() {
-      _userName = _nameController.text;
-      _isEditingName = false;
-    });
-    
-    if (mounted) {
+    if (_nameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profile updated!')),
+        const SnackBar(content: Text('Name cannot be empty')),
       );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Save to Supabase first
+      await DatabaseService.updateProfile(username: _nameController.text.trim());
+      
+      // Then save to SharedPreferences as backup
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_name', _nameController.text.trim());
+      
+      setState(() {
+        _userName = _nameController.text.trim();
+        _isEditingName = false;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Name updated successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error saving username: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating name: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _saveUserEmail() async {
+    if (_emailController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Email cannot be empty')),
+      );
+      return;
+    }
+
+    // Basic email validation
+    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(_emailController.text.trim())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid email address')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Save to Supabase first
+      await DatabaseService.updateProfile(email: _emailController.text.trim());
+      
+      // Then save to SharedPreferences as backup
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_email', _emailController.text.trim());
+      
+      setState(() {
+        _userEmail = _emailController.text.trim();
+        _isEditingEmail = false;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Email updated successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error saving email: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating email: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
@@ -98,10 +237,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
   }
 
+  void _toggleEditEmail() {
+    setState(() {
+      _isEditingEmail = !_isEditingEmail;
+      if (_isEditingEmail) {
+        _emailController.text = _userEmail;
+      }
+    });
+  }
+
   void _cancelEditName() {
     setState(() {
       _isEditingName = false;
       _nameController.text = _userName;
+    });
+  }
+
+  void _cancelEditEmail() {
+    setState(() {
+      _isEditingEmail = false;
+      _emailController.text = _userEmail;
     });
   }
 
@@ -151,6 +306,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
+        actions: [
+          if (_isLoading)
+            Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+            ),
+        ],
       ),
       drawer: AppDrawer(currentPage: 'profile'),
       body: Stack(
@@ -225,7 +393,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               const Text(
-                                'Name:',
+                                'Username:',
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
@@ -248,7 +416,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               controller: _nameController,
                               decoration: const InputDecoration(
                                 border: OutlineInputBorder(),
-                                hintText: 'Enter your name',
+                                hintText: 'Enter your username',
                               ),
                               autofocus: true,
                             ),
@@ -256,12 +424,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             Row(
                               children: [
                                 ElevatedButton(
-                                  onPressed: _saveUserName,
+                                  onPressed: _isLoading ? null : _saveUserName,
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.blue,
                                     foregroundColor: Colors.white,
                                   ),
-                                  child: const Text('Save'),
+                                  child: _isLoading
+                                      ? SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                          ),
+                                        )
+                                      : const Text('Save'),
                                 ),
                                 const SizedBox(width: 10),
                                 TextButton(
@@ -272,7 +449,85 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                           ] else ...[
                             Text(
-                              _userName,
+                              _userName.isEmpty ? 'No username set' : _userName,
+                              style: const TextStyle(
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Email Section (ALWAYS AVAILABLE)
+                    _sectionContainer(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Email:',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              if (!_isEditingEmail)
+                                TextButton.icon(
+                                  onPressed: _toggleEditEmail,
+                                  icon: const Icon(Icons.edit, size: 16),
+                                  label: const Text('Edit'),
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Colors.blue,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          if (_isEditingEmail) ...[
+                            TextField(
+                              controller: _emailController,
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                hintText: 'Enter your email',
+                              ),
+                              keyboardType: TextInputType.emailAddress,
+                              autofocus: true,
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                ElevatedButton(
+                                  onPressed: _isLoading ? null : _saveUserEmail,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blue,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  child: _isLoading
+                                      ? SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                          ),
+                                        )
+                                      : const Text('Save'),
+                                ),
+                                const SizedBox(width: 10),
+                                TextButton(
+                                  onPressed: _cancelEditEmail,
+                                  child: const Text('Cancel'),
+                                ),
+                              ],
+                            ),
+                          ] else ...[
+                            Text(
+                              _userEmail.isEmpty ? 'No email set' : _userEmail,
                               style: const TextStyle(
                                 fontSize: 16,
                               ),
@@ -379,7 +634,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               width: double.infinity,
                               child: ElevatedButton.icon(
                                 onPressed: () {
-                                  // This will be handled by PremiumGate
+                                  Navigator.pushNamed(context, '/submit-recipe');
                                 },
                                 icon: Icon(Icons.add),
                                 label: Text('Submit Your Own Recipe'),
@@ -416,12 +671,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                             SizedBox(height: 10),
                             Text(
-                              'No favorite recipes yet. Start scanning to discover new recipes!',
+                              widget.favoriteRecipes.isEmpty
+                                  ? 'No favorite recipes yet. Start scanning to discover new recipes!'
+                                  : '${widget.favoriteRecipes.length} favorite recipes saved',
                               style: TextStyle(
                                 fontSize: 14,
                                 color: Colors.grey.shade600,
                               ),
                             ),
+                            if (widget.favoriteRecipes.isNotEmpty) ...[
+                              SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    // Navigation handled by AppDrawer
+                                  },
+                                  icon: Icon(Icons.favorite),
+                                  label: Text('View Favorite Recipes'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                    foregroundColor: Colors.white,
+                                    padding: EdgeInsets.symmetric(vertical: 12),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -436,5 +711,3 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 }
-
-

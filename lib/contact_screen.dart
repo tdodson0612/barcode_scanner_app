@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'widgets/app_drawer.dart';
 
 class ContactScreen extends StatefulWidget {
   const ContactScreen({super.key});
@@ -75,7 +76,15 @@ class _ContactScreenState extends State<ContactScreen> {
         title: const Text('Contact Us'),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
+        automaticallyImplyLeading: false,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
       ),
+      drawer: AppDrawer(currentPage: 'contact'),
       body: Stack(
         children: [
           // Background Image

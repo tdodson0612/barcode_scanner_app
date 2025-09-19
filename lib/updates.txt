@@ -1,0 +1,330 @@
+# Updated Line-by-Line Code Fixes for Flutter App
+
+## 1. home_screen.dart
+
+```dart
+// Add this import around line 15-20 with other imports:
+import '../widgets/app_drawer.dart';
+
+// Replace line 1096 (the drawer line in build method):
+// OLD: drawer: _buildDrawer(),
+// NEW: 
+drawer: AppDrawer(currentPage: 'home'),
+
+// Delete lines 1100-1249 (the entire _buildDrawer() method and _showLogoutConfirmation() and _performLogout() methods)
+// These are no longer needed since AppDrawer handles all this functionality
+```
+
+## 2. pages/search_users_page.dart
+
+```dart
+// Add this import around line 3:
+import '../widgets/app_drawer.dart';
+
+// Replace lines 106-110 (the AppBar configuration):
+// OLD:
+      appBar: AppBar(
+        title: Text('Find Friends'),
+        backgroundColor: Colors.white,
+        elevation: 1,
+      ),
+// NEW:
+      appBar: AppBar(
+        title: Text('Find Friends'),
+        backgroundColor: Colors.green,
+        foregroundColor: Colors.white,
+        automaticallyImplyLeading: false,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
+      ),
+
+// Add this line after the AppBar (around line 118):
+      drawer: AppDrawer(currentPage: 'find_friends'),
+```
+
+## 3. pages/favorite_recipes_page.dart
+
+```dart
+// Add this import around line 3:
+import '../widgets/app_drawer.dart';
+import 'dart:convert';
+
+// Change line 11 (change parameter type):
+// OLD: final List<String> favoriteRecipes;
+// NEW: 
+final List<FavoriteRecipe> favoriteRecipes;
+
+// Change line 18 (change variable type):
+// OLD: List<String> _favoriteRecipes = [];
+// NEW:
+List<FavoriteRecipe> _favoriteRecipes = [];
+
+// Replace lines 24-31 (entire _loadFavoriteRecipes method):
+// OLD: (the existing simple method)
+// NEW:
+  Future<void> _loadFavoriteRecipes() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
+      
+      setState(() {
+        _favoriteRecipes = favoriteRecipesJson
+            .map((jsonString) {
+              try {
+                return FavoriteRecipe.fromJson(json.decode(jsonString));
+              } catch (e) {
+                debugPrint('Error parsing recipe: $e');
+                return null;
+              }
+            })
+            .where((recipe) => recipe != null)
+            .cast<FavoriteRecipe>()
+            .toList();
+      });
+    } catch (e) {
+      debugPrint('Error loading favorite recipes: $e');
+    }
+  }
+
+// Replace lines 33-46 (_removeFavoriteRecipe method):
+// OLD: Future<void> _removeFavoriteRecipe(String recipeTitle) async {
+// NEW:
+  Future<void> _removeFavoriteRecipe(FavoriteRecipe recipe) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _favoriteRecipes.remove(recipe);
+      });
+      
+      // Save updated list
+      final favoriteRecipesJson = _favoriteRecipes
+          .map((recipe) => json.encode(recipe.toJson()))
+          .toList();
+      await prefs.setStringList('favorite_recipes_detailed', favoriteRecipesJson);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Removed "${recipe.recipeName}" from favorites'),
+          backgroundColor: Colors.orange,
+          action: SnackBarAction(
+            label: 'UNDO',
+            textColor: Colors.white,
+            onPressed: () => _undoRemoveFavorite(recipe),
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error removing favorite recipe: $e');
+    }
+  }
+
+// Replace lines 59-69 (_undoRemoveFavorite method):
+// OLD: Future<void> _undoRemoveFavorite(String recipeTitle) async {
+// NEW:
+  Future<void> _undoRemoveFavorite(FavoriteRecipe recipe) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _favoriteRecipes.add(recipe);
+      });
+      
+      // Save updated list
+      final favoriteRecipesJson = _favoriteRecipes
+          .map((recipe) => json.encode(recipe.toJson()))
+          .toList();
+      await prefs.setStringList('favorite_recipes_detailed', favoriteRecipesJson);
+    } catch (e) {
+      debugPrint('Error undoing favorite removal: $e');
+    }
+  }
+
+// Replace lines 71-81 (_showRecipeDetails method):
+// OLD: void _showRecipeDetails(String recipeTitle) {
+// NEW:
+  void _showRecipeDetails(FavoriteRecipe recipe) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(recipe.recipeName),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (recipe.ingredients.isNotEmpty) ...[
+                Text(
+                  'Ingredients:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 8),
+                Text(recipe.ingredients),
+                SizedBox(height: 16),
+              ],
+              if (recipe.directions.isNotEmpty) ...[
+                Text(
+                  'Directions:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 8),
+                Text(recipe.directions),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+// Replace lines 87-91 (AppBar configuration):
+// OLD:
+        backgroundColor: Colors.red,
+        foregroundColor: Colors.white,
+// NEW:
+        backgroundColor: Colors.red,
+        foregroundColor: Colors.white,
+        automaticallyImplyLeading: false,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
+
+// Add this line after line 97 (after the AppBar closing):
+      drawer: AppDrawer(currentPage: 'favorite_recipes'),
+
+// Replace lines 104-108 (ListView.builder itemBuilder):
+// OLD: 
+                  final recipeTitle = _favoriteRecipes[index];
+                  return Card(
+// NEW:
+                  final recipe = _favoriteRecipes[index];
+                  return Card(
+
+// Replace line 113 (title Text):
+// OLD: Text(recipeTitle,
+// NEW: Text(recipe.recipeName,
+
+// Replace lines 135-138 (PopupMenuItem onSelected logic):
+// OLD:
+                          if (value == 'view') {
+                            _showRecipeDetails(recipeTitle);
+                          } else if (value == 'remove') {
+                            _removeFavoriteRecipe(recipeTitle);
+                          }
+// NEW:
+                          if (value == 'view') {
+                            _showRecipeDetails(recipe);
+                          } else if (value == 'remove') {
+                            _removeFavoriteRecipe(recipe);
+                          }
+
+// Replace line 142 (onTap):
+// OLD: onTap: () => _showRecipeDetails(recipeTitle),
+// NEW: onTap: () => _showRecipeDetails(recipe),
+
+// Replace lines 174-177 (empty state button onPressed):
+// OLD:
+              onPressed: () {
+                Navigator.pop(context);
+              },
+// NEW:
+              onPressed: () {
+                Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+              },
+```
+
+## 4. contact_screen.dart
+
+```dart
+// Add this import around line 3:
+import 'widgets/app_drawer.dart';
+
+// Replace lines 63-67 (AppBar configuration):
+// OLD:
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+// NEW:
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+        automaticallyImplyLeading: false,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
+
+// Add this line after line 68 (after the AppBar closing):
+      drawer: AppDrawer(currentPage: 'contact'),
+```
+
+## 5. pages/profile_screen.dart (ALREADY UPDATED)
+
+The profile_screen.dart file is already correctly updated with all the necessary changes including:
+- AppDrawer integration with proper currentPage parameter
+- Email management functionality  
+- Enhanced profile loading from both local storage and Supabase
+- Premium status display
+- Loading states and error handling
+- All required imports
+
+No changes needed for this file.
+
+## Database Schema Required
+
+You'll need to create these tables in your Supabase dashboard:
+
+```sql
+-- Profiles table (if it doesn't exist)
+CREATE TABLE profiles (
+  id uuid REFERENCES auth.users NOT NULL PRIMARY KEY,
+  username text,
+  email text,
+  avatar_url text,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now()
+);
+
+-- Friendships table
+CREATE TABLE friendships (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  requester_id uuid REFERENCES profiles(id) NOT NULL,
+  recipient_id uuid REFERENCES profiles(id) NOT NULL,
+  status text CHECK (status IN ('pending', 'accepted', 'rejected')) DEFAULT 'pending',
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  UNIQUE(requester_id, recipient_id)
+);
+
+-- Contact messages table (if it doesn't exist)
+CREATE TABLE contact_messages (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  name text NOT NULL,
+  email text NOT NULL,
+  message text NOT NULL,
+  created_at timestamp with time zone DEFAULT now()
+);
+```
+
+## Important Notes:
+
+1. **home_screen.dart**: The drawer-related methods have been moved down in the file, so they're now around lines 1100-1249 instead of the original locations.
+
+2. **profile_screen.dart**: This file is already fully updated and matches the AppDrawer integration pattern.
+
+3. **AppDrawer Integration**: All files now use the centralized AppDrawer widget with proper currentPage parameters for consistent navigation.
+
+4. **FavoriteRecipe Model**: Make sure you have the FavoriteRecipe model properly defined in your models directory for the favorite recipes functionality to work.
+
+5. **Database Services**: Ensure DatabaseService.getCurrentUserProfile() and DatabaseService.updateProfile() methods are implemented for the profile functionality.

@@ -1,7 +1,3 @@
-// ==================================================
-// COMPLETE APP DRAWER - FINISHED VERSION
-// ==================================================
-
 // lib/widgets/app_drawer.dart
 import 'package:flutter/material.dart';
 import '../controllers/premium_gate_controller.dart';
@@ -32,7 +28,7 @@ class AppDrawer extends StatelessWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Colors.blue, Colors.blue.shade700],
+                    colors: [Colors.green, Colors.green.shade700],
                   ),
                 ),
                 child: Column(
@@ -94,80 +90,39 @@ class AppDrawer extends StatelessWidget {
                 ),
               ),
               
-              // Home (PREMIUM ONLY for full access, limited for free)
-              if (controller.isPremium)
-                ListTile(
-                  leading: Icon(
-                    Icons.home,
-                    color: currentPage == 'home' ? Colors.blue : null,
-                  ),
-                  title: Text('Home'),
-                  selected: currentPage == 'home',
-                  onTap: () {
-                    Navigator.pop(context);
-                    if (currentPage != 'home') {
-                      Navigator.pushReplacementNamed(context, '/home');
-                    }
-                  },
-                ),
-              
-              // Scan (LIMITED for free users)
+              // Home (ALWAYS AVAILABLE)
               ListTile(
-                leading: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.qr_code_scanner),
-                    if (!controller.isPremium && controller.hasUsedAllFreeScans)
-                      Padding(
-                        padding: EdgeInsets.only(left: 4),
-                        child: Icon(Icons.lock, color: Colors.red, size: 16),
-                      ),
-                  ],
+                leading: Icon(
+                  Icons.home,
+                  color: currentPage == 'home' ? Colors.green : null,
                 ),
-                title: Row(
-                  children: [
-                    Text('Scan Products'),
-                    if (!controller.isPremium) ...[
-                      SizedBox(width: 8),
-                      Container(
-                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: controller.hasUsedAllFreeScans ? Colors.red : Colors.orange,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          controller.hasUsedAllFreeScans ? 'BLOCKED' : '${controller.remainingScans} LEFT',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
+                title: Text(
+                  'Home',
+                  style: TextStyle(
+                    fontWeight: currentPage == 'home' ? FontWeight.bold : FontWeight.normal,
+                    color: currentPage == 'home' ? Colors.green : null,
+                  ),
                 ),
+                selected: currentPage == 'home',
                 onTap: () {
                   Navigator.pop(context);
-                  if (controller.canAccessFeature(PremiumFeature.scan)) {
-                    Navigator.pushReplacementNamed(context, '/home');
-                  } else {
-                    Navigator.pushNamed(context, '/premium');
+                  if (currentPage != 'home') {
+                    Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
                   }
                 },
               ),
               
-              // Profile (ALWAYS AVAILABLE - basic version)
+              // Profile (ALWAYS AVAILABLE)
               ListTile(
                 leading: Icon(
                   Icons.person,
-                  color: currentPage == 'profile' ? Colors.blue : null,
+                  color: currentPage == 'profile' ? Colors.green : null,
                 ),
                 title: Text(
                   'Profile',
                   style: TextStyle(
                     fontWeight: currentPage == 'profile' ? FontWeight.bold : FontWeight.normal,
-                    color: currentPage == 'profile' ? Colors.blue : null,
+                    color: currentPage == 'profile' ? Colors.green : null,
                   ),
                 ),
                 selected: currentPage == 'profile',
@@ -179,26 +134,79 @@ class AppDrawer extends StatelessWidget {
                 },
               ),
               
-              // Premium Features (BLOCKED for free users)
+              // Messages (ALWAYS AVAILABLE)
+              ListTile(
+                leading: Icon(
+                  Icons.chat,
+                  color: currentPage == 'messages' ? Colors.green : null,
+                ),
+                title: Text(
+                  'Messages',
+                  style: TextStyle(
+                    fontWeight: currentPage == 'messages' ? FontWeight.bold : FontWeight.normal,
+                    color: currentPage == 'messages' ? Colors.green : null,
+                  ),
+                ),
+                selected: currentPage == 'messages',
+                onTap: () {
+                  Navigator.pop(context);
+                  if (currentPage != 'messages') {
+                    Navigator.pushNamed(context, '/messages');
+                  }
+                },
+              ),
+              
+              // Find Friends (ALWAYS AVAILABLE)
+              ListTile(
+                leading: Icon(
+                  Icons.person_search,
+                  color: currentPage == 'find_friends' ? Colors.green : null,
+                ),
+                title: Text(
+                  'Find Friends',
+                  style: TextStyle(
+                    fontWeight: currentPage == 'find_friends' ? FontWeight.bold : FontWeight.normal,
+                    color: currentPage == 'find_friends' ? Colors.green : null,
+                  ),
+                ),
+                selected: currentPage == 'find_friends',
+                onTap: () {
+                  Navigator.pop(context);
+                  if (currentPage != 'find_friends') {
+                    Navigator.pushNamed(context, '/search-users');
+                  }
+                },
+              ),
+              
+              // Favorite Recipes (PREMIUM GATED)
               if (controller.isPremium) ...[
+                ListTile(
+                  leading: Icon(
+                    Icons.favorite,
+                    color: currentPage == 'favorite_recipes' ? Colors.green : null,
+                  ),
+                  title: Text(
+                    'Favorite Recipes',
+                    style: TextStyle(
+                      fontWeight: currentPage == 'favorite_recipes' ? FontWeight.bold : FontWeight.normal,
+                      color: currentPage == 'favorite_recipes' ? Colors.green : null,
+                    ),
+                  ),
+                  selected: currentPage == 'favorite_recipes',
+                  onTap: () {
+                    Navigator.pop(context);
+                    if (currentPage != 'favorite_recipes') {
+                      Navigator.pushNamed(context, '/favorite-recipes');
+                    }
+                  },
+                ),
+                
                 ListTile(
                   leading: Icon(Icons.shopping_cart),
                   title: Text('My Grocery List'),
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.pushNamed(context, '/grocery-list');
-                  },
-                ),
-                
-                ListTile(
-                  leading: Icon(Icons.favorite),
-                  title: Text('Favorite Recipes'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    // Navigate to favorites page when you create it
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Favorites page coming soon!')),
-                    );
                   },
                 ),
                 
@@ -212,42 +220,6 @@ class AppDrawer extends StatelessWidget {
                 ),
               ] else ...[
                 // Show locked features for free users
-                ListTile(
-                  leading: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.shopping_cart, color: Colors.grey),
-                      SizedBox(width: 4),
-                      Icon(Icons.lock, color: Colors.red, size: 16),
-                    ],
-                  ),
-                  title: Row(
-                    children: [
-                      Text('Grocery List', style: TextStyle(color: Colors.grey)),
-                      SizedBox(width: 8),
-                      Container(
-                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.amber,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          'PREMIUM',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.pushNamed(context, '/premium');
-                  },
-                ),
-                
                 ListTile(
                   leading: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -280,7 +252,43 @@ class AppDrawer extends StatelessWidget {
                   ),
                   onTap: () {
                     Navigator.pop(context);
-                    Navigator.pushNamed(context, '/premium');
+                    Navigator.pushNamed(context, '/purchase');
+                  },
+                ),
+                
+                ListTile(
+                  leading: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.shopping_cart, color: Colors.grey),
+                      SizedBox(width: 4),
+                      Icon(Icons.lock, color: Colors.red, size: 16),
+                    ],
+                  ),
+                  title: Row(
+                    children: [
+                      Text('Grocery List', style: TextStyle(color: Colors.grey)),
+                      SizedBox(width: 8),
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.amber,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'PREMIUM',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushNamed(context, '/purchase');
                   },
                 ),
                 
@@ -316,12 +324,34 @@ class AppDrawer extends StatelessWidget {
                   ),
                   onTap: () {
                     Navigator.pop(context);
-                    Navigator.pushNamed(context, '/premium');
+                    Navigator.pushNamed(context, '/purchase');
                   },
                 ),
               ],
               
               Divider(),
+              
+              // Contact Us (ALWAYS AVAILABLE)
+              ListTile(
+                leading: Icon(
+                  Icons.contact_mail,
+                  color: currentPage == 'contact' ? Colors.green : null,
+                ),
+                title: Text(
+                  'Contact Us',
+                  style: TextStyle(
+                    fontWeight: currentPage == 'contact' ? FontWeight.bold : FontWeight.normal,
+                    color: currentPage == 'contact' ? Colors.green : null,
+                  ),
+                ),
+                selected: currentPage == 'contact',
+                onTap: () {
+                  Navigator.pop(context);
+                  if (currentPage != 'contact') {
+                    Navigator.pushNamed(context, '/contact');
+                  }
+                },
+              ),
               
               // Purchase Premium (ALWAYS AVAILABLE)
               ListTile(
@@ -341,20 +371,7 @@ class AppDrawer extends StatelessWidget {
                     : Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: () {
                   Navigator.pop(context);
-                  Navigator.pushNamed(context, '/premium');
-                },
-              ),
-              
-              // Contact Us (Always available)
-              ListTile(
-                leading: Icon(Icons.contact_mail),
-                title: Text('Contact Us'),
-                onTap: () {
-                  Navigator.pop(context);
-                  // Navigate to contact page if you have one
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Contact page coming soon!')),
-                  );
+                  Navigator.pushNamed(context, '/purchase');
                 },
               ),
               
@@ -401,4 +418,3 @@ class AppDrawer extends StatelessWidget {
     );
   }
 }
-
