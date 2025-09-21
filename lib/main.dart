@@ -8,6 +8,7 @@ import 'pages/grocery_list.dart';
 import 'pages/submit_recipe.dart';
 import 'pages/messages_page.dart';
 import 'pages/search_users_page.dart';
+import 'pages/profile_screen.dart';
 // Note: chat_page.dart and user_profile_page.dart don't need to be imported here
 // since they're navigated to using Navigator.push() from other pages
 
@@ -59,15 +60,15 @@ class _MyAppState extends State<MyApp> {
       routes: {
         '/login': (context) => const LoginPage(),
         '/home': (context) => HomePage(isPremium: _isPremium),
+        '/profile': (context) => ProfileScreen(favoriteRecipes: []), // ADD THIS LINE
         '/purchase': (context) => const PremiumPage(),
         '/grocery-list': (context) => const GroceryListPage(),
         '/submit-recipe': (context) => const SubmitRecipePage(),
-        // ADD THESE NEW ROUTES FOR SOCIAL FEATURES:
         '/messages': (context) => MessagesPage(),
         '/search-users': (context) => const SearchUsersPage(),
+      },
         // Removed /chat and /user-profile routes since they need parameters
         // Use Navigator.push() to navigate to these pages instead
-      },
     );
   }
 }
