@@ -7,6 +7,8 @@ import '../widgets/app_drawer.dart';
 import '../widgets/premium_gate.dart';
 import '../controllers/premium_gate_controller.dart';
 import '../services/database_service.dart';
+import '../services/auth_service.dart';
+import '../pages/user_profile_page.dart';
 import 'dart:async';
 
 class ProfileScreen extends StatefulWidget {
@@ -27,6 +29,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _userName = 'User';
   String _userEmail = '';
   bool _isLoading = false;
+  
+  // Add these variables for friends functionality
+  List<Map<String, dynamic>> _friends = [];
+  bool _friendsListVisible = true;
+  bool _isLoadingFriends = false;
 
   Widget _sectionContainer({required Widget child}) {
     return Container(
@@ -43,6 +50,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadProfile();
+    _loadFriends(); // Add this line
   }
 
   @override
@@ -50,6 +58,54 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _nameController.dispose();
     _emailController.dispose();
     super.dispose();
+  }
+
+  // Add these methods for friends functionality
+  Future<void> _loadFriends() async {
+    setState(() {
+      _isLoadingFriends = true;
+    });
+
+    try {
+      final friends = await DatabaseService.getUserFriends(AuthService.currentUserId!);
+      final visibility = await DatabaseService.getFriendsListVisibility();
+      
+      setState(() {
+        _friends = friends;
+        _friendsListVisible = visibility;
+        _isLoadingFriends = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading friends: $e');
+      setState(() {
+        _isLoadingFriends = false;
+      });
+    }
+  }
+
+  Future<void> _toggleFriendsVisibility(bool isVisible) async {
+    try {
+      await DatabaseService.updateFriendsListVisibility(isVisible);
+      setState(() {
+        _friendsListVisible = isVisible;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isVisible 
+              ? 'Friends list is now visible to others' 
+              : 'Friends list is now hidden from others'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error updating privacy setting'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<void> _loadProfile() async {
@@ -532,6 +588,204 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 fontSize: 16,
                               ),
                             ),
+                          ],
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // Friends Section
+                    _sectionContainer(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Friends (${_friends.length})',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              PopupMenuButton<String>(
+                                icon: Icon(Icons.more_vert, size: 20),
+                                onSelected: (value) {
+                                  if (value == 'toggle_visibility') {
+                                    _toggleFriendsVisibility(!_friendsListVisible);
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  PopupMenuItem(
+                                    value: 'toggle_visibility',
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          _friendsListVisible ? Icons.visibility_off : Icons.visibility,
+                                          size: 20,
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text(_friendsListVisible 
+                                            ? 'Hide from Others' 
+                                            : 'Make Visible'),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Icon(
+                                _friendsListVisible ? Icons.visibility : Icons.visibility_off,
+                                size: 16,
+                                color: Colors.grey.shade600,
+                              ),
+                              SizedBox(width: 4),
+                              Text(
+                                _friendsListVisible ? 'Visible to others' : 'Hidden from others',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 16),
+                          
+                          if (_isLoadingFriends) ...[
+                            Center(child: CircularProgressIndicator()),
+                          ] else if (_friends.isEmpty) ...[
+                            Text(
+                              'No friends yet. Start by finding and adding friends!',
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 14,
+                              ),
+                            ),
+                            SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.pushNamed(context, '/search-users');
+                              },
+                              icon: Icon(Icons.person_search),
+                              label: Text('Find Friends'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ] else ...[
+                            // Friends grid
+                            GridView.builder(
+                              shrinkWrap: true,
+                              physics: NeverScrollableScrollPhysics(),
+                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3,
+                                childAspectRatio: 0.8,
+                                crossAxisSpacing: 8,
+                                mainAxisSpacing: 8,
+                              ),
+                              itemCount: _friends.length > 6 ? 6 : _friends.length,
+                              itemBuilder: (context, index) {
+                                if (index == 5 && _friends.length > 6) {
+                                  // Show "View All" card
+                                  return GestureDetector(
+                                    onTap: () {
+                                      // Navigate to full friends list
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Full friends list coming soon!')),
+                                      );
+                                    },
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey.shade100,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.grey.shade300),
+                                      ),
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(Icons.more_horiz, size: 30, color: Colors.grey.shade600),
+                                          SizedBox(height: 4),
+                                          Text(
+                                            'View All\n${_friends.length} friends',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey.shade600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }
+                                
+                                final friend = _friends[index];
+                                return GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => UserProfilePage(userId: friend['id']),
+                                      ),
+                                    );
+                                  },
+                                  child: Column(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 25,
+                                        backgroundImage: friend['avatar_url'] != null
+                                            ? NetworkImage(friend['avatar_url'])
+                                            : null,
+                                        child: friend['avatar_url'] == null
+                                            ? Text(
+                                                (friend['username'] ?? friend['first_name'] ?? friend['email'] ?? 'U')[0].toUpperCase(),
+                                                style: TextStyle(
+                                                  fontSize: 20,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              )
+                                            : null,
+                                      ),
+                                      SizedBox(height: 4),
+                                      Expanded(
+                                        child: Text(
+                                          friend['first_name'] != null && friend['last_name'] != null
+                                              ? '${friend['first_name']} ${friend['last_name']}'
+                                              : friend['username'] ?? 'Unknown',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                            
+                            if (_friends.length > 6) ...[
+                              SizedBox(height: 12),
+                              TextButton(
+                                onPressed: () {
+                                  // Navigate to full friends list
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Full friends list coming soon!')),
+                                  );
+                                },
+                                child: Text('View All ${_friends.length} Friends'),
+                              ),
+                            ],
                           ],
                         ],
                       ),
