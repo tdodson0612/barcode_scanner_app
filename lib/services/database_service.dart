@@ -39,6 +39,7 @@ class DatabaseService {
         'last_scan_date': DateTime.now().toIso8601String().split('T')[0],
         'created_at': DateTime.now().toIso8601String(),
         'username': email.split('@')[0], // Default username from email
+        'friends_list_visible': true, // Default to visible
       });
     } catch (e) {
       print('Error creating user profile: $e');
@@ -141,6 +142,67 @@ class DatabaseService {
 
     final profile = await getUserProfile(userId);
     return profile?['is_premium'] ?? false;
+  }
+
+  // ==================================================
+  // FRIENDS LIST VISIBILITY METHODS (NEW)
+  // ==================================================
+  
+  /// Get user's friends list for profile display
+  static Future<List<Map<String, dynamic>>> getUserFriends(String userId) async {
+    try {
+      final response = await _supabase
+          .from('friend_requests')
+          .select('''
+            sender:user_profiles!friend_requests_sender_fkey(id, email, username, first_name, last_name, avatar_url),
+            receiver:user_profiles!friend_requests_receiver_fkey(id, email, username, first_name, last_name, avatar_url)
+          ''')
+          .or('sender.eq.$userId,receiver.eq.$userId')
+          .eq('status', 'accepted');
+
+      final friends = <Map<String, dynamic>>[];
+      for (var row in response) {
+        final friend = row['sender']['id'] == userId 
+            ? row['receiver'] 
+            : row['sender'];
+        friends.add(friend);
+      }
+      return friends;
+    } catch (e) {
+      print('Error fetching user friends: $e');
+      return [];
+    }
+  }
+
+  /// Get friends list visibility setting
+  static Future<bool> getFriendsListVisibility() async {
+    ensureUserAuthenticated();
+    
+    try {
+      final profile = await getCurrentUserProfile();
+      return profile?['friends_list_visible'] ?? true; // Default to visible
+    } catch (e) {
+      print('Error getting friends list visibility: $e');
+      return true; // Default to visible on error
+    }
+  }
+
+  /// Update friends list visibility setting
+  static Future<void> updateFriendsListVisibility(bool isVisible) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('user_profiles')
+          .update({
+            'friends_list_visible': isVisible,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', currentUserId!);
+    } catch (e) {
+      print('Error updating friends list visibility: $e');
+      rethrow;
+    }
   }
 
   // ==================================================
@@ -502,7 +564,7 @@ class DatabaseService {
   // SOCIAL FEATURES - FRIENDS & MESSAGING
   // ==================================================
 
-  /// Fetch friends list (accepted friend requests)
+  /// Fetch friends list (accepted friend requests) - LEGACY METHOD
   static Future<List<Map<String, dynamic>>> getFriends() async {
     ensureUserAuthenticated();
     
