@@ -1,3 +1,4 @@
+// lib/home_screen.dart - Complete architectural rebuild with proper error handling
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -6,18 +7,22 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 import '../widgets/premium_gate.dart';
 import '../controllers/premium_gate_controller.dart';
 import 'liverhealthbar.dart';
 import '../pages/profile_screen.dart';
 import 'contact_screen.dart';
 import '../services/auth_service.dart';
+import '../services/error_handling_service.dart';
 import '../models/favorite_recipe.dart';
 import '../pages/messages_page.dart';
 import '../pages/search_users_page.dart';
 import '../pages/favorite_recipes_page.dart';
 import '../pages/user_profile_page.dart';
 import '../widgets/app_drawer.dart';
+import '../config/environment.dart';
+
 
 /// --- NutritionInfo Data Model ---
 class NutritionInfo {
@@ -85,10 +90,10 @@ class Recipe {
 
 /// --- Liver Health Score Calculator ---
 class LiverHealthCalculator {
-  static const double fatMax = 20.0;       // grams
-  static const double sodiumMax = 500.0;   // mg
-  static const double sugarMax = 20.0;     // grams
-  static const double calMax = 400.0;      // kcal
+  static const double fatMax = 20.0;
+  static const double sodiumMax = 500.0;
+  static const double sugarMax = 20.0;
+  static const double calMax = 400.0;
 
   static int calculate({
     required double fat,
@@ -168,9 +173,10 @@ class RecipeGenerator {
   ];
 }
 
-/// --- Nutrition API Service ---
+/// --- Nutrition API Service with Enhanced Error Handling ---
 class NutritionApiService {
-  static const String baseUrl = "https://world.openfoodfacts.org/api/v0/product";
+  // FIXED: Use Environment base URL instead of hardcoded
+  static String get baseUrl => Environment.openFoodFactsApiUrl;
 
   static Future<NutritionInfo?> fetchNutritionInfo(String barcode) async {
     if (barcode.isEmpty) return null;
@@ -181,7 +187,7 @@ class NutritionApiService {
       final response = await http.get(
         Uri.parse(url),
         headers: {'User-Agent': 'FlutterApp/1.0'},
-      );
+      ).timeout(Duration(seconds: Environment.apiTimeoutSeconds));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -191,13 +197,15 @@ class NutritionApiService {
       }
       return null;
     } catch (e) {
-      debugPrint('Error fetching nutrition info: $e');
+      if (Environment.enableDebugLogging) {
+        print('Nutrition API Error: $e');
+      }
       return null;
     }
   }
 }
 
-/// --- Barcode Scanner Service ---
+/// --- Barcode Scanner Service with Enhanced Error Handling ---
 class BarcodeScannerService {
   static Future<String?> scanBarcode(String imagePath) async {
     if (imagePath.isEmpty) return null;
@@ -213,7 +221,7 @@ class BarcodeScannerService {
       }
       return null;
     } catch (e) {
-      debugPrint('Error scanning barcode: $e');
+      print('Barcode Scanner Error: $e');
       return null;
     } finally {
       await barcodeScanner.close();
@@ -228,7 +236,7 @@ class BarcodeScannerService {
   }
 }
 
-/// --- Combined Home Page with Premium Features ---
+/// --- FIXED: HomePage with proper architecture ---
 class HomePage extends StatefulWidget {
   final bool isPremium;
 
@@ -238,7 +246,7 @@ class HomePage extends StatefulWidget {
   _HomePageState createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
   // Premium scanning state
   bool _isScanning = false;
   List<Map<String, String>> _scannedRecipes = [];
@@ -254,197 +262,291 @@ class _HomePageState extends State<HomePage> {
   bool _showInitialView = true;
   NutritionInfo? _currentNutrition;
 
-  // Ad state
+  // FIXED: Premium state management without AnimatedBuilder performance issues
+  late final PremiumGateController _premiumController;
+  StreamSubscription? _premiumSubscription;
+  bool _isPremium = false;
+  int _remainingScans = 3;
+  bool _hasUsedAllFreeScans = false;
+
+  // FIXED: Proper ad management with disposal tracking
   InterstitialAd? _interstitialAd;
   bool _isAdReady = false;
   RewardedAd? _rewardedAd;
   bool _isRewardedAdReady = false;
+  bool _isDisposed = false;
 
   // Image picker
   final ImagePicker _picker = ImagePicker();
 
   @override
+  bool get wantKeepAlive => true;
+
+  @override
   void initState() {
     super.initState();
-    PremiumGateController().refresh();
-    _loadFavoriteRecipes();
-    _loadInterstitialAd();
-    _loadRewardedAd();
+    _initializePremiumController();
+    _initializeAsync();
   }
 
   @override
   void dispose() {
+    _isDisposed = true;
+    _premiumSubscription?.cancel();
     _interstitialAd?.dispose();
     _rewardedAd?.dispose();
     super.dispose();
   }
 
-  /// Load interstitial ad for free users
-  void _loadInterstitialAd() {
-    InterstitialAd.load(
-      adUnitId: Platform.isAndroid
-          ? 'ca-app-pub-3940256099942544/1033173712' // Test ad unit ID
-          : 'ca-app-pub-3940256099942544/4411468910',
-      request: AdRequest(),
-      adLoadCallback: InterstitialAdLoadCallback(
-        onAdLoaded: (ad) {
-          _interstitialAd = ad;
-          _isAdReady = true;
-          
-          ad.setImmersiveMode(true);
-        },
-        onAdFailedToLoad: (error) {
-          debugPrint('InterstitialAd failed to load: $error');
-          _isAdReady = false;
-        },
-      ),
-    );
+  // FIXED: Proper premium controller management
+  void _initializePremiumController() {
+    _premiumController = PremiumGateController();
+    
+    // Listen to premium state changes efficiently
+    _premiumSubscription = _premiumController.addListener(() {
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _isPremium = _premiumController.isPremium;
+          _remainingScans = _premiumController.remainingScans;
+          _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
+        });
+      }
+    }) as StreamSubscription?;
+
+    // Initialize current state
+    setState(() {
+      _isPremium = _premiumController.isPremium;
+      _remainingScans = _premiumController.remainingScans;
+      _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
+    });
   }
 
-  /// Load rewarded ad for free users to earn extra scans
-  void _loadRewardedAd() {
-    RewardedAd.load(
-      adUnitId: Platform.isAndroid
-          ? 'ca-app-pub-3940256099942544/5224354917' // Test ad unit ID
-          : 'ca-app-pub-3940256099942544/1712485313',
-      request: AdRequest(),
-      rewardedAdLoadCallback: RewardedAdLoadCallback(
-        onAdLoaded: (ad) {
-          _rewardedAd = ad;
-          _isRewardedAdReady = true;
-        },
-        onAdFailedToLoad: (error) {
-          debugPrint('RewardedAd failed to load: $error');
-          _isRewardedAdReady = false;
-        },
-      ),
-    );
-  }
-
-  /// Show interstitial ad before allowing scan for free users
-  void _showInterstitialAd(VoidCallback onAdClosed) {
-    if (_isAdReady && _interstitialAd != null) {
-      _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
-        onAdShowedFullScreenContent: (ad) {
-          debugPrint('Interstitial ad showed full screen content');
-        },
-        onAdDismissedFullScreenContent: (ad) {
-          debugPrint('Interstitial ad dismissed');
-          ad.dispose();
-          _loadInterstitialAd(); // Load next ad
-          onAdClosed(); // Continue with scan
-        },
-        onAdFailedToShowFullScreenContent: (ad, error) {
-          debugPrint('Interstitial ad failed to show: $error');
-          ad.dispose();
-          _loadInterstitialAd();
-          onAdClosed(); // Continue with scan even if ad fails
-        },
-      );
-      _interstitialAd!.show();
-      _isAdReady = false;
-    } else {
-      onAdClosed(); // Continue with scan if no ad available
+  // FIXED: Async initialization with proper error handling
+  Future<void> _initializeAsync() async {
+    try {
+      await _premiumController.refresh();
+      await _loadFavoriteRecipes();
+      _loadInterstitialAd();
+      _loadRewardedAd();
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.initializationError,
+          showSnackBar: true,
+          customMessage: 'Failed to initialize home screen',
+        );
+      }
     }
   }
 
-  /// Show rewarded ad to earn extra scans
+  /// FIXED: Load interstitial ad with proper error handling
+  void _loadInterstitialAd() {
+  if (_isDisposed) return;
+
+  // FIXED: Use Environment system instead of hardcoded IDs
+  final adUnitId = Environment.interstitialAdUnitId;
+
+  InterstitialAd.load(
+    adUnitId: adUnitId,
+    request: AdRequest(),
+    adLoadCallback: InterstitialAdLoadCallback(
+      onAdLoaded: (ad) {
+        if (!_isDisposed) {
+          _interstitialAd = ad;
+          _isAdReady = true;
+          ad.setImmersiveMode(true);
+        } else {
+          ad.dispose();
+        }
+      },
+      onAdFailedToLoad: (error) {
+        if (Environment.enableDebugLogging) {
+          print('InterstitialAd failed to load: $error');
+        }
+        _isAdReady = false;
+      },
+    ),
+  );
+}
+
+
+  /// FIXED: Load rewarded ad with proper error handling
+void _loadRewardedAd() {
+  if (_isDisposed) return;
+
+  // FIXED: Use Environment system instead of hardcoded IDs
+  final adUnitId = Environment.rewardedAdUnitId;
+
+  RewardedAd.load(
+    adUnitId: adUnitId,
+    request: AdRequest(),
+    rewardedAdLoadCallback: RewardedAdLoadCallback(
+      onAdLoaded: (ad) {
+        if (!_isDisposed) {
+          _rewardedAd = ad;
+          _isRewardedAdReady = true;
+        } else {
+          ad.dispose();
+        }
+      },
+      onAdFailedToLoad: (error) {
+        if (Environment.enableDebugLogging) {
+          print('RewardedAd failed to load: $error');
+        }
+        _isRewardedAdReady = false;
+      },
+    ),
+  );
+}
+
+  /// FIXED: Show interstitial ad with proper disposal checks
+  void _showInterstitialAd(VoidCallback onAdClosed) {
+    if (_isDisposed || !_isAdReady || _interstitialAd == null) {
+      onAdClosed();
+      return;
+    }
+
+    _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
+      onAdShowedFullScreenContent: (ad) {
+        print('Interstitial ad showed full screen content');
+      },
+      onAdDismissedFullScreenContent: (ad) {
+        print('Interstitial ad dismissed');
+        ad.dispose();
+        if (!_isDisposed) {
+          _loadInterstitialAd();
+        }
+        onAdClosed();
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        print('Interstitial ad failed to show: $error');
+        ad.dispose();
+        if (!_isDisposed) {
+          _loadInterstitialAd();
+        }
+        onAdClosed();
+      },
+    );
+    
+    _interstitialAd!.show();
+    _isAdReady = false;
+  }
+
+  /// FIXED: Show rewarded ad with proper error handling
   void _showRewardedAd() {
+    if (_isDisposed) return;
+
     if (_isRewardedAdReady && _rewardedAd != null) {
       _rewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
         onAdShowedFullScreenContent: (ad) {
-          debugPrint('Rewarded ad showed full screen content');
+          print('Rewarded ad showed full screen content');
         },
         onAdDismissedFullScreenContent: (ad) {
-          debugPrint('Rewarded ad dismissed');
+          print('Rewarded ad dismissed');
           ad.dispose();
-          _loadRewardedAd(); // Load next ad
+          if (!_isDisposed) {
+            _loadRewardedAd();
+          }
         },
         onAdFailedToShowFullScreenContent: (ad, error) {
-          debugPrint('Rewarded ad failed to show: $error');
+          print('Rewarded ad failed to show: $error');
           ad.dispose();
-          _loadRewardedAd();
+          if (!_isDisposed) {
+            _loadRewardedAd();
+          }
         },
       );
       
       _rewardedAd!.show(
         onUserEarnedReward: (ad, reward) {
-          debugPrint('User earned reward: ${reward.amount} ${reward.type}');
-          // Award extra scan to user
-          final controller = PremiumGateController();
-          controller.addBonusScans(1);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Bonus scan earned! You now have ${controller.remainingScans + 1} scans remaining.'),
-              backgroundColor: Colors.green,
-            ),
-          );
+          if (!_isDisposed) {
+            print('User earned reward: ${reward.amount} ${reward.type}');
+            _premiumController.addBonusScans(1);
+            
+            if (mounted) {
+              ErrorHandlingService.showSuccess(
+                context,
+                'Bonus scan earned! You now have ${_premiumController.remainingScans} scans remaining.'
+              );
+            }
+          }
         },
       );
       _isRewardedAdReady = false;
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Ad not ready yet. Please try again in a moment.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'Ad not ready yet. Please try again in a moment.'
+        );
+      }
     }
   }
 
-  /// Load favorite recipes from SharedPreferences as FavoriteRecipe objects
+  /// FIXED: Load favorite recipes with proper error handling
   Future<void> _loadFavoriteRecipes() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
       
-      setState(() {
-        _favoriteRecipes = favoriteRecipesJson
-            .map((jsonString) {
-              try {
-                return FavoriteRecipe.fromJson(json.decode(jsonString));
-              } catch (e) {
-                debugPrint('Error parsing recipe: $e');
-                return null;
-              }
-            })
-            .where((recipe) => recipe != null)
-            .cast<FavoriteRecipe>()
-            .toList();
-      });
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _favoriteRecipes = favoriteRecipesJson
+              .map((jsonString) {
+                try {
+                  return FavoriteRecipe.fromJson(json.decode(jsonString));
+                } catch (e) {
+                  print('Error parsing recipe: $e');
+                  return null;
+                }
+              })
+              .where((recipe) => recipe != null)
+              .cast<FavoriteRecipe>()
+              .toList();
+        });
+      }
     } catch (e) {
-      debugPrint('Error loading favorite recipes: $e');
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          showSnackBar: true,
+          customMessage: 'Failed to load favorite recipes',
+        );
+      }
     }
   }
 
-  /// Toggle favorite recipe status using full Recipe objects
+  /// FIXED: Toggle favorite recipe with enhanced error handling
   Future<void> _toggleFavoriteRecipe(Recipe recipe) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final currentUserId = AuthService.currentUserId;
       
       if (currentUserId == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Please log in to save recipes')),
-        );
+        if (mounted) {
+          ErrorHandlingService.showSimpleError(context, 'Please log in to save recipes');
+        }
         return;
       }
 
-      // Check if recipe is already favorited
       final existingIndex = _favoriteRecipes.indexWhere((fav) => fav.recipeName == recipe.title);
       
       if (existingIndex >= 0) {
         // Remove from favorites
-        setState(() {
-          _favoriteRecipes.removeAt(existingIndex);
-        });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Removed "${recipe.title}" from favorites'),
-            backgroundColor: Colors.orange,
-          ),
-        );
+        if (mounted && !_isDisposed) {
+          setState(() {
+            _favoriteRecipes.removeAt(existingIndex);
+          });
+          
+          ErrorHandlingService.showSuccess(
+            context,
+            'Removed "${recipe.title}" from favorites'
+          );
+        }
       } else {
         // Add to favorites
         final favoriteRecipe = FavoriteRecipe(
@@ -455,80 +557,90 @@ class _HomePageState extends State<HomePage> {
           createdAt: DateTime.now(),
         );
         
-        setState(() {
-          _favoriteRecipes.add(favoriteRecipe);
-        });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Added "${recipe.title}" to favorites!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        if (mounted && !_isDisposed) {
+          setState(() {
+            _favoriteRecipes.add(favoriteRecipe);
+          });
+          
+          ErrorHandlingService.showSuccess(
+            context,
+            'Added "${recipe.title}" to favorites!'
+          );
+        }
       }
       
-      // Save to SharedPreferences as JSON
+      // Save to SharedPreferences
       final favoriteRecipesJson = _favoriteRecipes
           .map((recipe) => json.encode(recipe.toJson()))
           .toList();
       await prefs.setStringList('favorite_recipes_detailed', favoriteRecipesJson);
+      
     } catch (e) {
-      debugPrint('Error saving favorite recipes: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving recipe: $e')),
-      );
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Error saving recipe',
+        );
+      }
     }
   }
 
-  /// Check if a recipe is favorited
   bool _isRecipeFavorited(String recipeTitle) {
     return _favoriteRecipes.any((fav) => fav.recipeName == recipeTitle);
   }
 
-  /// Reset to initial home view
   void _resetToHome() {
-    setState(() {
-      _showInitialView = true;
-      _nutritionText = '';
-      _showLiverBar = false;
-      _imageFile = null;
-      _recipeSuggestions = [];
-      _liverHealthScore = null;
-      _isLoading = false;
-      _scannedRecipes = [];
-      _currentNutrition = null;
-    });
+    if (mounted && !_isDisposed) {
+      setState(() {
+        _showInitialView = true;
+        _nutritionText = '';
+        _showLiverBar = false;
+        _imageFile = null;
+        _recipeSuggestions = [];
+        _liverHealthScore = null;
+        _isLoading = false;
+        _scannedRecipes = [];
+        _currentNutrition = null;
+      });
+    }
   }
 
-  /// Premium scan method (simulated) - Free users must watch ad first
+  /// FIXED: Premium scan with proper error handling
   Future<void> _performScan() async {
-    final controller = PremiumGateController();
-    
-    // Check if user can scan
-    if (!controller.canAccessFeature(PremiumFeature.scan)) {
-      Navigator.pushNamed(context, '/purchase');
-      return;
-    }
+    try {
+      if (!_premiumController.canAccessFeature(PremiumFeature.scan)) {
+        Navigator.pushNamed(context, '/purchase');
+        return;
+      }
 
-    // Free users must watch interstitial ad before scanning
-    if (!controller.isPremium) {
-      _showInterstitialAd(() => _executePerformScan());
-    } else {
-      _executePerformScan();
+      if (!_isPremium) {
+        _showInterstitialAd(() => _executePerformScan());
+      } else {
+        _executePerformScan();
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.scanError,
+          customMessage: 'Unable to start scan',
+        );
+      }
     }
   }
 
-  /// Execute the actual scan after ad is watched (or for premium users)
   Future<void> _executePerformScan() async {
-    final controller = PremiumGateController();
-
-    setState(() {
-      _isScanning = true;
-    });
+    if (_isDisposed) return;
 
     try {
-      // Use a scan (for free users)
-      final success = await controller.useScan();
+      setState(() {
+        _isScanning = true;
+      });
+
+      final success = await _premiumController.useScan();
       
       if (!success) {
         Navigator.pushNamed(context, '/purchase');
@@ -538,69 +650,85 @@ class _HomePageState extends State<HomePage> {
       // Simulate scanning delay
       await Future.delayed(Duration(seconds: 2));
 
-      // Simulate scan results
-      setState(() {
-        _scannedRecipes = [
-          {
-            'name': 'Tomato Pasta',
-            'ingredients': '2 cups pasta, 4 tomatoes, 1 onion, garlic, olive oil',
-            'directions': '1. Cook pasta. 2. Sauté onion and garlic. 3. Add tomatoes. 4. Mix with pasta.',
-          },
-          {
-            'name': 'Vegetable Stir Fry',
-            'ingredients': '2 cups mixed vegetables, soy sauce, ginger, garlic, oil',
-            'directions': '1. Heat oil in pan. 2. Add ginger and garlic. 3. Add vegetables. 4. Stir fry with soy sauce.',
-          },
-        ];
-      });
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _scannedRecipes = [
+            {
+              'name': 'Tomato Pasta',
+              'ingredients': '2 cups pasta, 4 tomatoes, 1 onion, garlic, olive oil',
+              'directions': '1. Cook pasta. 2. Sauté onion and garlic. 3. Add tomatoes. 4. Mix with pasta.',
+            },
+            {
+              'name': 'Vegetable Stir Fry',
+              'ingredients': '2 cups mixed vegetables, soy sauce, ginger, garlic, oil',
+              'directions': '1. Heat oil in pan. 2. Add ginger and garlic. 3. Add vegetables. 4. Stir fry with soy sauce.',
+            },
+          ];
+        });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Scan successful! ${controller.remainingScans} scans remaining today.'),
-          backgroundColor: Colors.green,
-        ),
-      );
+        ErrorHandlingService.showSuccess(
+          context,
+          'Scan successful! ${_premiumController.remainingScans} scans remaining today.'
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error scanning: $e')),
-      );
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.scanError,
+          customMessage: 'Error during scanning',
+        );
+      }
     } finally {
-      setState(() {
-        _isScanning = false;
-      });
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _isScanning = false;
+        });
+      }
     }
   }
 
-  /// Take photo from camera (Real nutrition scanner) - Free users must watch ad first
+  /// FIXED: Take photo with proper error handling
   Future<void> _takePhoto() async {
-    final controller = PremiumGateController();
-    
-    // Check if user can scan (premium feature)
-    if (!controller.canAccessFeature(PremiumFeature.scan)) {
-      Navigator.pushNamed(context, '/purchase');
-      return;
-    }
+    try {
+      if (!_premiumController.canAccessFeature(PremiumFeature.scan)) {
+        Navigator.pushNamed(context, '/purchase');
+        return;
+      }
 
-    // Free users must watch interstitial ad before taking photo
-    if (!controller.isPremium) {
-      _showInterstitialAd(() => _executeTakePhoto());
-    } else {
-      _executeTakePhoto();
+      if (!_isPremium) {
+        _showInterstitialAd(() => _executeTakePhoto());
+      } else {
+        _executeTakePhoto();
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.imageError,
+          customMessage: 'Unable to access camera',
+        );
+      }
     }
   }
 
-  /// Execute taking photo after ad is watched (or for premium users)
   Future<void> _executeTakePhoto() async {
+    if (_isDisposed) return;
+
     try {
-      setState(() {
-        _showInitialView = false;
-        _nutritionText = '';
-        _showLiverBar = false;
-        _imageFile = null;
-        _recipeSuggestions = [];
-        _isLoading = false;
-        _scannedRecipes = [];
-      });
+      if (mounted) {
+        setState(() {
+          _showInitialView = false;
+          _nutritionText = '';
+          _showLiverBar = false;
+          _imageFile = null;
+          _recipeSuggestions = [];
+          _isLoading = false;
+          _scannedRecipes = [];
+        });
+      }
 
       final pickedFile = await _picker.pickImage(
         source: ImageSource.camera,
@@ -609,45 +737,53 @@ class _HomePageState extends State<HomePage> {
         maxHeight: 1024,
       );
 
-      if (pickedFile != null) {
+      if (pickedFile != null && mounted && !_isDisposed) {
         setState(() {
           _imageFile = File(pickedFile.path);
         });
       }
     } catch (e) {
-      _showErrorDialog('Failed to take photo: ${e.toString()}');
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.imageError,
+          customMessage: 'Failed to take photo',
+        );
+      }
     }
   }
 
-  /// Submit photo for analysis (Real nutrition analysis)
+  /// FIXED: Submit photo with comprehensive error handling
   Future<void> _submitPhoto() async {
-    if (_imageFile == null) return;
-
-    final controller = PremiumGateController();
-    
-    // Use a scan for analysis
-    final success = await controller.useScan();
-    if (!success) {
-      Navigator.pushNamed(context, '/purchase');
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _nutritionText = '';
-      _showLiverBar = false;
-      _recipeSuggestions = [];
-    });
+    if (_imageFile == null || _isDisposed) return;
 
     try {
+      final success = await _premiumController.useScan();
+      if (!success) {
+        Navigator.pushNamed(context, '/purchase');
+        return;
+      }
+
+      if (mounted) {
+        setState(() {
+          _isLoading = true;
+          _nutritionText = '';
+          _showLiverBar = false;
+          _recipeSuggestions = [];
+        });
+      }
+
       final nutrition = await BarcodeScannerService.scanAndLookup(_imageFile!.path);
 
       if (nutrition == null) {
-        setState(() {
-          _nutritionText = "No barcode found or product not recognized. Please try again.";
-          _showLiverBar = false;
-          _isLoading = false;
-        });
+        if (mounted && !_isDisposed) {
+          setState(() {
+            _nutritionText = "No barcode found or product not recognized. Please try again.";
+            _showLiverBar = false;
+            _isLoading = false;
+          });
+        }
         return;
       }
 
@@ -660,31 +796,40 @@ class _HomePageState extends State<HomePage> {
 
       final suggestions = RecipeGenerator.generateSuggestions(score);
 
-      setState(() {
-        _nutritionText = _buildNutritionDisplay(nutrition);
-        _liverHealthScore = score;
-        _showLiverBar = true;
-        _isLoading = false;
-        _recipeSuggestions = suggestions;
-        _currentNutrition = nutrition;
-      });
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _nutritionText = _buildNutritionDisplay(nutrition);
+          _liverHealthScore = score;
+          _showLiverBar = true;
+          _isLoading = false;
+          _recipeSuggestions = suggestions;
+          _currentNutrition = nutrition;
+        });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Analysis successful! ${controller.remainingScans} scans remaining today.'),
-          backgroundColor: Colors.green,
-        ),
-      );
+        ErrorHandlingService.showSuccess(
+          context,
+          'Analysis successful! ${_premiumController.remainingScans} scans remaining today.'
+        );
+      }
     } catch (e) {
-      setState(() {
-        _nutritionText = "Error processing image: ${e.toString()}";
-        _showLiverBar = false;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _nutritionText = "Error processing image: ${e.toString()}";
+          _showLiverBar = false;
+          _isLoading = false;
+        });
+        
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.scanError,
+          customMessage: 'Failed to analyze image',
+          onRetry: _submitPhoto,
+        );
+      }
     }
   }
 
-  /// Build nutrition information display text
   String _buildNutritionDisplay(NutritionInfo nutrition) {
     return "Product: ${nutrition.productName}\n"
            "Energy: ${nutrition.calories.toStringAsFixed(1)} kcal/100g\n"
@@ -693,29 +838,11 @@ class _HomePageState extends State<HomePage> {
            "Sodium: ${nutrition.sodium.toStringAsFixed(1)} mg/100g";
   }
 
-  /// Show error dialog
-  void _showErrorDialog(String message) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Error'),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Search for users (friends) - navigates to SearchUsersPage
+  /// FIXED: Search users with proper error handling
   Future<void> _searchUsers(String query) async {
     if (query.trim().isEmpty) return;
     
     try {
-      // Navigate to search results page with the query
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -723,13 +850,17 @@ class _HomePageState extends State<HomePage> {
         ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error searching users: $e')),
-      );
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.navigationError,
+          customMessage: 'Error opening user search',
+        );
+      }
     }
   }
 
-  /// Build prominent search bar widget for finding friends
   Widget _buildSearchBar() {
     final TextEditingController searchController = TextEditingController();
     
@@ -807,7 +938,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Build recipe suggestions widget for real nutrition analysis
+  /// Build recipe suggestions for nutrition analysis
   Widget _buildNutritionRecipeSuggestions() {
     if (_recipeSuggestions.isEmpty) return const SizedBox.shrink();
 
@@ -848,7 +979,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Build collapsible recipe card showing only title initially
+  /// Build collapsible recipe card for nutrition results
   Widget _buildNutritionRecipeCard(Recipe recipe) {
     final isFavorite = _isRecipeFavorited(recipe.title);
     
@@ -917,7 +1048,6 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                // Premium action buttons
                 Row(
                   children: [
                     Expanded(
@@ -925,9 +1055,7 @@ class _HomePageState extends State<HomePage> {
                         feature: PremiumFeature.favoriteRecipes,
                         featureName: 'Favorite Recipes',
                         child: ElevatedButton.icon(
-                          onPressed: () {
-                            _toggleFavoriteRecipe(recipe);
-                          },
+                          onPressed: () => _toggleFavoriteRecipe(recipe),
                           icon: Icon(Icons.favorite),
                           label: Text('Save Recipe'),
                           style: ElevatedButton.styleFrom(
@@ -944,9 +1072,9 @@ class _HomePageState extends State<HomePage> {
                         featureName: 'Grocery List',
                         child: ElevatedButton.icon(
                           onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Added to grocery list!')),
-                            );
+                            if (mounted) {
+                              ErrorHandlingService.showSuccess(context, 'Added to grocery list!');
+                            }
                           },
                           icon: Icon(Icons.add_shopping_cart),
                           label: Text('Add to List'),
@@ -967,7 +1095,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Build initial welcome view
+  /// Build initial welcome view - FIXED: No more AnimatedBuilder
   Widget _buildInitialView() {
     return Stack(
       children: [
@@ -976,6 +1104,18 @@ class _HomePageState extends State<HomePage> {
           child: Image.asset(
             'assets/background.png',
             fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) {
+              return Container(
+                color: Colors.green.shade50,
+                child: Center(
+                  child: Icon(
+                    Icons.image_not_supported,
+                    size: 50,
+                    color: Colors.grey,
+                  ),
+                ),
+              );
+            },
           ),
         ),
         
@@ -984,7 +1124,7 @@ class _HomePageState extends State<HomePage> {
           padding: EdgeInsets.all(16),
           child: Column(
             children: [
-              // Prominent Search Bar at the top
+              // Search Bar
               _buildSearchBar(),
               
               // Welcome Section
@@ -1025,184 +1165,175 @@ class _HomePageState extends State<HomePage> {
               
               SizedBox(height: 30),
               
-              // Scan Button Section
+              // FIXED: Scan Button Section with direct state management
               Center(
-                child: AnimatedBuilder(
-                  animation: PremiumGateController(),
-                  builder: (context, _) {
-                    final controller = PremiumGateController();
-                    
-                    return Column(
-                      children: [
-                        // Main Scan Button
-                        GestureDetector(
-                          onTap: _isScanning ? null : _takePhoto,
-                          child: Container(
-                            width: 200,
-                            height: 200,
-                            decoration: BoxDecoration(
-                              color: _isScanning 
-                                  ? Colors.grey 
-                                  : (controller.canAccessFeature(PremiumFeature.scan) 
-                                      ? Colors.blue 
-                                      : Colors.red),
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black26,
-                                  blurRadius: 10,
-                                  offset: Offset(0, 5),
-                                ),
-                              ],
+                child: Column(
+                  children: [
+                    // Main Scan Button
+                    GestureDetector(
+                      onTap: _isScanning ? null : _takePhoto,
+                      child: Container(
+                        width: 200,
+                        height: 200,
+                        decoration: BoxDecoration(
+                          color: _isScanning 
+                              ? Colors.grey 
+                              : (_premiumController.canAccessFeature(PremiumFeature.scan) 
+                                  ? Colors.blue 
+                                  : Colors.red),
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 10,
+                              offset: Offset(0, 5),
                             ),
-                            child: Center(
-                              child: _isScanning
-                                  ? Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        CircularProgressIndicator(color: Colors.white),
-                                        SizedBox(height: 16),
-                                        Text(
-                                          'Scanning...',
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
-                                    )
-                                  : Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          controller.canAccessFeature(PremiumFeature.scan)
-                                              ? Icons.camera_alt
-                                              : Icons.lock,
-                                          color: Colors.white,
-                                          size: 60,
-                                        ),
-                                        SizedBox(height: 12),
-                                        Text(
-                                          controller.canAccessFeature(PremiumFeature.scan)
-                                              ? 'Tap to Scan'
-                                              : 'Upgrade to Scan',
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 18,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                            ),
-                          ),
+                          ],
                         ),
-                        
-                        SizedBox(height: 20),
-                        
-                        // Scan Status
-                        Container(
-                          padding: EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withAlpha((0.9 * 255).toInt()),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Column(
-                            children: [
-                              if (!controller.isPremium) ...[
-                                Row(
+                        child: Center(
+                          child: _isScanning
+                              ? Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    CircularProgressIndicator(color: Colors.white),
+                                    SizedBox(height: 16),
+                                    Text(
+                                      'Scanning...',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Icon(
-                                      controller.canAccessFeature(PremiumFeature.scan)
-                                          ? Icons.check_circle
-                                          : Icons.warning,
-                                      color: controller.canAccessFeature(PremiumFeature.scan)
-                                          ? Colors.green
-                                          : Colors.red,
-                                      size: 20,
+                                      _premiumController.canAccessFeature(PremiumFeature.scan)
+                                          ? Icons.camera_alt
+                                          : Icons.lock,
+                                      color: Colors.white,
+                                      size: 60,
                                     ),
-                                    SizedBox(width: 8),
+                                    SizedBox(height: 12),
                                     Text(
-                                      controller.canAccessFeature(PremiumFeature.scan)
-                                          ? 'Free scans remaining: ${controller.remainingScans}/3'
-                                          : 'Daily scan limit reached!',
+                                      _premiumController.canAccessFeature(PremiumFeature.scan)
+                                          ? 'Tap to Scan'
+                                          : 'Upgrade to Scan',
                                       style: TextStyle(
-                                        fontSize: 16,
-                                        color: controller.canAccessFeature(PremiumFeature.scan)
-                                            ? Colors.green.shade700
-                                            : Colors.red.shade700,
-                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
                                       ),
                                     ),
                                   ],
                                 ),
-                                SizedBox(height: 12),
-                                ElevatedButton.icon(
-                                  onPressed: () {
-                                    Navigator.pushNamed(context, '/purchase');
-                                  },
-                                  icon: Icon(Icons.star),
-                                  label: Text('Upgrade for Unlimited Scans'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.amber,
-                                    foregroundColor: Colors.white,
-                                  ),
+                        ),
+                      ),
+                    ),
+                    
+                    SizedBox(height: 20),
+                    
+                    // Scan Status
+                    Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        children: [
+                          if (!_isPremium) ...[
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  _premiumController.canAccessFeature(PremiumFeature.scan)
+                                      ? Icons.check_circle
+                                      : Icons.warning,
+                                  color: _premiumController.canAccessFeature(PremiumFeature.scan)
+                                      ? Colors.green
+                                      : Colors.red,
+                                  size: 20,
                                 ),
-                                
-                                // Watch ad for bonus scan button
-                                SizedBox(height: 8),
-                                ElevatedButton.icon(
-                                  onPressed: _showRewardedAd,
-                                  icon: Icon(Icons.play_circle_fill),
-                                  label: Text('Watch Ad for Bonus Scan'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.purple,
-                                    foregroundColor: Colors.white,
+                                SizedBox(width: 8),
+                                Text(
+                                  _premiumController.canAccessFeature(PremiumFeature.scan)
+                                      ? 'Free scans remaining: $_remainingScans/3'
+                                      : 'Daily scan limit reached!',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: _premiumController.canAccessFeature(PremiumFeature.scan)
+                                        ? Colors.green.shade700
+                                        : Colors.red.shade700,
+                                    fontWeight: FontWeight.w600,
                                   ),
-                                ),
-                              ] else ...[
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.star, color: Colors.amber, size: 20),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Premium: Unlimited Scans',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        color: Colors.amber.shade700,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
                                 ),
                               ],
-                            ],
-                          ),
-                        ),
-                        
-                        // Quick Scan Demo Button (for premium demo)
-                        SizedBox(height: 20),
-                        ElevatedButton.icon(
-                          onPressed: _performScan,
-                          icon: Icon(Icons.qr_code_scanner),
-                          label: Text('Quick Recipe Scan Demo'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+                            ),
+                            SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.pushNamed(context, '/purchase');
+                              },
+                              icon: Icon(Icons.star),
+                              label: Text('Upgrade for Unlimited Scans'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.amber,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                            
+                            SizedBox(height: 8),
+                            ElevatedButton.icon(
+                              onPressed: _showRewardedAd,
+                              icon: Icon(Icons.play_circle_fill),
+                              label: Text('Watch Ad for Bonus Scan'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.purple,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ] else ...[
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.star, color: Colors.amber, size: 20),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Premium: Unlimited Scans',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: Colors.amber.shade700,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    
+                    SizedBox(height: 20),
+                    ElevatedButton.icon(
+                      onPressed: _performScan,
+                      icon: Icon(Icons.qr_code_scanner),
+                      label: Text('Quick Recipe Scan Demo'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               
               SizedBox(height: 30),
               
-              // Recipe Results from Demo Scan (PREMIUM GATED)
+              // Recipe Results from Demo Scan
               if (_scannedRecipes.isNotEmpty) ...[
                 PremiumGate(
                   feature: PremiumFeature.viewRecipes,
@@ -1246,7 +1377,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// Build collapsible scanned recipe card
+  /// Build scanned recipe card
   Widget _buildScannedRecipeCard(Map<String, String> recipe) {
     final isFavorite = _isRecipeFavorited(recipe['name']!);
     
@@ -1285,7 +1416,6 @@ class _HomePageState extends State<HomePage> {
                   size: 20,
                 ),
                 onPressed: () {
-                  // Create Recipe object from scanned data for proper favoriting
                   final recipeObj = Recipe(
                     title: recipe['name']!,
                     description: 'Scanned recipe',
@@ -1329,7 +1459,6 @@ class _HomePageState extends State<HomePage> {
                 
                 SizedBox(height: 16),
                 
-                // Premium action buttons
                 Row(
                   children: [
                     Expanded(
@@ -1338,7 +1467,6 @@ class _HomePageState extends State<HomePage> {
                         featureName: 'Favorite Recipes',
                         child: ElevatedButton.icon(
                           onPressed: () {
-                            // Create Recipe object from scanned data for proper favoriting
                             final recipeObj = Recipe(
                               title: recipe['name']!,
                               description: 'Scanned recipe',
@@ -1363,9 +1491,9 @@ class _HomePageState extends State<HomePage> {
                         featureName: 'Grocery List',
                         child: ElevatedButton.icon(
                           onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Added to grocery list!')),
-                            );
+                            if (mounted) {
+                              ErrorHandlingService.showSuccess(context, 'Added to grocery list!');
+                            }
                           },
                           icon: Icon(Icons.add_shopping_cart),
                           label: Text('Add to List'),
@@ -1421,6 +1549,21 @@ class _HomePageState extends State<HomePage> {
                     width: 200,
                     height: 200,
                     fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        width: 200,
+                        height: 200,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.error,
+                          size: 50,
+                          color: Colors.red,
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
@@ -1555,28 +1698,22 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
+    
     return Scaffold(
       appBar: AppBar(
         title: Text('Recipe Scanner'),
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
         actions: [
-          // Only show purchase button for non-premium users
-          AnimatedBuilder(
-            animation: PremiumGateController(),
-            builder: (context, _) {
-              final controller = PremiumGateController();
-              if (!controller.isPremium) {
-                return IconButton(
-                  icon: const Icon(Icons.shopping_cart),
-                  onPressed: () {
-                    Navigator.pushNamed(context, '/purchase');
-                  },
-                );
-              }
-              return SizedBox.shrink();
-            },
-          ),
+          // FIXED: Show purchase button for non-premium users without AnimatedBuilder
+          if (!_isPremium)
+            IconButton(
+              icon: const Icon(Icons.shopping_cart),
+              onPressed: () {
+                Navigator.pushNamed(context, '/purchase');
+              },
+            ),
         ],
       ),
       drawer: AppDrawer(currentPage: 'home'),

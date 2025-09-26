@@ -5,6 +5,7 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 import 'dart:async';
 import 'dart:io';
 import '../services/database_service.dart';
+import '../services/error_handling_service.dart';
 import '../controllers/premium_gate_controller.dart';
 
 class PremiumPage extends StatefulWidget {
@@ -69,94 +70,170 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       await _initializeInAppPurchase();
       _animationController.forward();
     } catch (e) {
-      Navigator.pushReplacementNamed(context, '/login');
+      if (mounted) {
+        await ErrorHandlingService.handleAuthError(context, e);
+      }
     }
   }
 
   Future<void> _checkPremiumStatus() async {
     try {
+      setState(() => _isLoading = true);
+      
       final userId = DatabaseService.currentUserId;
-      if (userId == null || userId.isEmpty) return;
+      if (userId == null || userId.isEmpty) {
+        throw Exception('User not authenticated');
+      }
 
-      // Check local cache first
+      // Check local cache first for quick UI update
       final prefs = await SharedPreferences.getInstance();
       final localPremium = prefs.getBool('isPremiumUser') ?? false;
       final localTester = prefs.getBool('isTesterUser') ?? false;
 
-      if (localPremium || localTester) {
+      if (mounted) {
         setState(() {
           _isPremium = localPremium;
           _isTester = localTester;
         });
       }
 
-      // Fetch from database using DatabaseService method
+      // Fetch from database for accurate status
       final premiumStatus = await DatabaseService.isPremiumUser();
+      final dailyScans = await DatabaseService.getDailyScanCount();
       
       // Update local cache
       await prefs.setBool('isPremiumUser', premiumStatus);
 
-      final dailyScans = await DatabaseService.getDailyScanCount();
       final remainingScans = (premiumStatus || localTester) ? -1 : (3 - dailyScans);
 
-      setState(() {
-        _isPremium = premiumStatus;
-        _isTester = localTester && !premiumStatus; // Tester only if not premium
-        _dailyScans = dailyScans;
-        _remainingScans = remainingScans;
-      });
+      if (mounted) {
+        setState(() {
+          _isPremium = premiumStatus;
+          _isTester = localTester && !premiumStatus; // Tester only if not premium
+          _dailyScans = dailyScans;
+          _remainingScans = remainingScans;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      debugPrint('Error checking premium status: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.premiumError,
+          showSnackBar: true,
+          onRetry: _checkPremiumStatus,
+        );
+      }
     }
   }
 
   Future<void> _initializeInAppPurchase() async {
-    final bool isAvailable = await _inAppPurchase.isAvailable();
-    setState(() {
-      _isAvailable = isAvailable;
-      _isLoading = false;
-    });
+    try {
+      final bool isAvailable = await _inAppPurchase.isAvailable();
+      
+      if (mounted) {
+        setState(() {
+          _isAvailable = isAvailable;
+        });
+      }
 
-    if (!isAvailable) return;
+      if (!isAvailable) {
+        if (mounted) {
+          ErrorHandlingService.showSimpleError(
+            context, 
+            'In-app purchases are not available on this device'
+          );
+        }
+        return;
+      }
 
-    // Listen to purchase updates
-    final Stream<List<PurchaseDetails>> purchaseUpdated = _inAppPurchase.purchaseStream;
-    _subscription = purchaseUpdated.listen(
-      _onPurchaseUpdate,
-      onDone: () => _subscription?.cancel(),
-      onError: (Object error) {
-        _showErrorSnackBar('Purchase error: $error');
-      },
-    );
+      // Listen to purchase updates
+      final Stream<List<PurchaseDetails>> purchaseUpdated = _inAppPurchase.purchaseStream;
+      _subscription = purchaseUpdated.listen(
+        _onPurchaseUpdate,
+        onDone: () => _subscription?.cancel(),
+        onError: (Object error) {
+          if (mounted) {
+            ErrorHandlingService.handleError(
+              context: context,
+              error: error,
+              category: ErrorHandlingService.premiumError,
+              showSnackBar: true,
+            );
+          }
+        },
+      );
 
-    await _loadProducts();
+      await _loadProducts();
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.premiumError,
+          onRetry: _initializeInAppPurchase,
+        );
+      }
+    }
   }
 
   Future<void> _loadProducts() async {
     if (!_isAvailable) return;
 
-    final ProductDetailsResponse response = await _inAppPurchase.queryProductDetails(_productIds);
-    setState(() {
-      _products = response.productDetails;
-    });
+    try {
+      final ProductDetailsResponse response = await _inAppPurchase.queryProductDetails(_productIds);
+      
+      if (response.error != null) {
+        throw Exception('Failed to load product details: ${response.error!.message}');
+      }
+
+      if (mounted) {
+        setState(() {
+          _products = response.productDetails;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.premiumError,
+          customMessage: 'Unable to load subscription plans. Please try again.',
+          onRetry: _loadProducts,
+        );
+      }
+    }
   }
 
   void _onPurchaseUpdate(List<PurchaseDetails> purchaseDetailsList) {
     for (final PurchaseDetails purchaseDetails in purchaseDetailsList) {
       switch (purchaseDetails.status) {
         case PurchaseStatus.pending:
-          setState(() => _isPurchasing = true);
+          if (mounted) {
+            setState(() => _isPurchasing = true);
+          }
           break;
         case PurchaseStatus.purchased:
         case PurchaseStatus.restored:
           _handleSuccessfulPurchase(purchaseDetails);
           break;
         case PurchaseStatus.error:
-          setState(() => _isPurchasing = false);
-          _showErrorSnackBar('Purchase failed: ${purchaseDetails.error?.message}');
+          if (mounted) {
+            setState(() => _isPurchasing = false);
+            ErrorHandlingService.handleError(
+              context: context,
+              error: Exception('Purchase failed: ${purchaseDetails.error?.message}'),
+              category: ErrorHandlingService.premiumError,
+            );
+          }
           break;
         case PurchaseStatus.canceled:
-          setState(() => _isPurchasing = false);
+          if (mounted) {
+            setState(() => _isPurchasing = false);
+            ErrorHandlingService.showSimpleError(context, 'Purchase was cancelled');
+          }
           break;
       }
 
@@ -171,7 +248,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       final prefs = await SharedPreferences.getInstance();
       final userId = DatabaseService.currentUserId;
       
-      // Check if userId is valid string, not null or wrong type
       if (userId == null || userId.isEmpty) {
         throw Exception('User not authenticated - invalid user ID');
       }
@@ -187,20 +263,24 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
         await prefs.setBool('isTesterUser', false);
         
         planName = 'Premium';
-        setState(() {
-          _isPremium = true;
-          _isTester = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isPremium = true;
+            _isTester = false;
+          });
+        }
       } else if (purchaseDetails.productID == testerProductId) {
         // Testers don't get database premium status, just local
         await prefs.setBool('isTesterUser', true);
         await prefs.setBool('isPremiumUser', false);
         
         planName = 'Tester';
-        setState(() {
-          _isTester = true;
-          _isPremium = false;
-        });
+        if (mounted) {
+          setState(() {
+            _isTester = true;
+            _isPremium = false;
+          });
+        }
       } else {
         throw Exception('Unknown product ID: ${purchaseDetails.productID}');
       }
@@ -217,29 +297,32 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       // Refresh premium controller
       await PremiumGateController().refresh();
 
-      setState(() {
-        _remainingScans = -1;
-        _isPurchasing = false;
-      });
-
       if (mounted) {
-        _showSuccessSnackBar('Welcome to $planName! Purchase successful.');
+        setState(() {
+          _remainingScans = -1;
+          _isPurchasing = false;
+        });
+
+        ErrorHandlingService.showSuccess(context, 'Welcome to $planName! Purchase successful.');
         
-        // Navigate back and reload the app to ensure all features are available
+        // Navigate back to previous screen instead of reloading entire app
         Future.delayed(const Duration(seconds: 2), () {
           if (mounted) {
-            Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(builder: (_) => const ReloadApp()),
-              (route) => false,
-            );
+            Navigator.of(context).pop();
           }
         });
       }
     } catch (e) {
-      setState(() => _isPurchasing = false);
-      
-      // Show specific error for purchase success but account update failure
-      _showErrorSnackBar('Purchase successful, but failed to update account: $e. Please contact support.');
+      if (mounted) {
+        setState(() => _isPurchasing = false);
+        
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.premiumError,
+          customMessage: 'Purchase successful, but failed to update account. Please contact support.',
+        );
+      }
     }
   }
 
@@ -263,23 +346,26 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
     });
 
     if (!_isValidTesterKey) {
-      _showErrorSnackBar('Invalid tester key. Please try again or choose Premium.');
+      ErrorHandlingService.showSimpleError(
+        context, 
+        'Invalid tester key. Please try again or choose Premium.'
+      );
     }
   }
 
   Future<void> _purchasePlan() async {
     if (_selectedPlan == null) {
-      _showErrorSnackBar('Please select a plan first');
+      ErrorHandlingService.showSimpleError(context, 'Please select a plan first');
       return;
     }
 
     if (_selectedPlan == 'tester' && !_isValidTesterKey) {
-      _showErrorSnackBar('Please enter a valid tester key');
+      ErrorHandlingService.showSimpleError(context, 'Please enter a valid tester key');
       return;
     }
 
     if (!_isAvailable) {
-      _showErrorSnackBar('In-app purchases are not available');
+      ErrorHandlingService.showSimpleError(context, 'In-app purchases are not available');
       return;
     }
 
@@ -295,14 +381,21 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       }
 
       if (productDetails == null) {
-        throw Exception('Product not found');
+        throw Exception('Product not found. Please try reloading the page.');
       }
 
       final PurchaseParam purchaseParam = PurchaseParam(productDetails: productDetails);
       await _inAppPurchase.buyNonConsumable(purchaseParam: purchaseParam);
     } catch (e) {
-      setState(() => _isPurchasing = false);
-      _showErrorSnackBar('Failed to start purchase: $e');
+      if (mounted) {
+        setState(() => _isPurchasing = false);
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.premiumError,
+          onRetry: _purchasePlan,
+        );
+      }
     }
   }
 
@@ -312,39 +405,21 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
     setState(() => _isPurchasing = true);
     try {
       await _inAppPurchase.restorePurchases();
+      if (mounted) {
+        ErrorHandlingService.showSuccess(context, 'Purchases restored successfully');
+      }
     } catch (e) {
-      setState(() => _isPurchasing = false);
-      _showErrorSnackBar('Failed to restore purchases: $e');
+      if (mounted) {
+        setState(() => _isPurchasing = false);
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.premiumError,
+          customMessage: 'Failed to restore purchases. Please try again.',
+          onRetry: _restorePurchases,
+        );
+      }
     }
-  }
-
-  void _showErrorSnackBar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  void _showSuccessSnackBar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.white),
-            const SizedBox(width: 8),
-            Expanded(child: Text(message)),
-          ],
-        ),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 3),
-      ),
-    );
   }
 
   String _getProductPrice(String productId) {
@@ -372,13 +447,13 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       backgroundColor = Colors.amber.shade50;
     } else if (_isTester) {
       title = 'Tester Active!';
-      subtitle = 'Thank you for helping us improve LiverWise!';
+      subtitle = 'Thank you for helping us improve Recipe Scanner!';
       icon = Icons.science;
       iconColor = Colors.blue.shade600;
       backgroundColor = Colors.blue.shade50;
     } else {
       title = 'Choose Your Plan';
-      subtitle = 'Unlock the full potential of LiverWise';
+      subtitle = 'Unlock the full potential of Recipe Scanner';
       icon = Icons.star_outline;
       iconColor = Colors.grey.shade600;
       backgroundColor = Colors.grey.shade50;
@@ -820,7 +895,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
           const SizedBox(height: 8),
           Text(
             _isPremium 
-                ? 'Enjoy unlimited access to all premium features. Thank you for supporting LiverWise!'
+                ? 'Enjoy unlimited access to all premium features. Thank you for supporting Recipe Scanner!'
                 : 'Thank you for helping us improve the app! Your feedback is invaluable.',
             textAlign: TextAlign.center,
             style: TextStyle(
@@ -837,7 +912,16 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Loading subscription plans...'),
+            ],
+          ),
+        ),
       );
     }
 
@@ -893,38 +977,4 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       ),
     );
   }
-}
-
-// ReloadApp widget to restart the entire app after purchase
-class ReloadApp extends StatelessWidget {
-  const ReloadApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    // Import your main app widget here
-    // This assumes your main app widget is called MyApp
-    // Replace with your actual main app widget
-    return MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 20),
-              const Text('Activating your features...'),
-              const SizedBox(height: 40),
-              ElevatedButton(
-                onPressed: () {
-                  // Navigate to home or restart app logic here
-                  Navigator.of(context).pushReplacementNamed('/');
-                },
-                child: const Text('Continue'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+}// lib/pages/premium_page.dart

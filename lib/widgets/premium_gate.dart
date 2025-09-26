@@ -60,8 +60,8 @@ class PremiumGate extends StatelessWidget {
 
   Widget _buildLoadingState() {
     return Container(
-      padding: EdgeInsets.all(20),
-      child: Center(
+      padding: const EdgeInsets.all(20),
+      child: const Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -76,24 +76,24 @@ class PremiumGate extends StatelessWidget {
 
   Widget _buildLoginRequired(BuildContext context) {
     return Container(
-      padding: EdgeInsets.all(20),
+      padding: const EdgeInsets.all(20),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          const Icon(
             Icons.login,
             size: 64,
             color: Colors.blue,
           ),
-          SizedBox(height: 16),
-          Text(
+          const SizedBox(height: 16),
+          const Text(
             'Sign In Required',
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
             ),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           Text(
             'Please sign in to access this feature',
             textAlign: TextAlign.center,
@@ -102,19 +102,19 @@ class PremiumGate extends StatelessWidget {
               fontSize: 16,
             ),
           ),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             height: 48,
             child: ElevatedButton(
               onPressed: () {
-                Navigator.pushNamed(context, '/auth');
+                Navigator.pushNamed(context, '/login');
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blue,
                 foregroundColor: Colors.white,
               ),
-              child: Text(
+              child: const Text(
                 'Sign In',
                 style: TextStyle(fontSize: 16),
               ),
@@ -129,12 +129,12 @@ class PremiumGate extends StatelessWidget {
     final controller = PremiumGateController();
     
     return Container(
-      padding: EdgeInsets.all(20),
+      padding: const EdgeInsets.all(20),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            padding: EdgeInsets.all(16),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: Colors.amber.shade100,
               shape: BoxShape.circle,
@@ -145,7 +145,7 @@ class PremiumGate extends StatelessWidget {
               color: Colors.amber.shade700,
             ),
           ),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
           Text(
             'Premium Required',
             style: TextStyle(
@@ -154,17 +154,17 @@ class PremiumGate extends StatelessWidget {
               color: Colors.amber.shade700,
             ),
           ),
-          SizedBox(height: 16),
+          const SizedBox(height: 16),
           Text(
             'Upgrade to Access $featureName',
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
             ),
             textAlign: TextAlign.center,
           ),
           if (featureDescription.isNotEmpty) ...[
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(
               featureDescription,
               textAlign: TextAlign.center,
@@ -175,12 +175,12 @@ class PremiumGate extends StatelessWidget {
             ),
           ],
           
-          SizedBox(height: 20),
+          const SizedBox(height: 20),
           
           // Show scan usage for scan-related features
           if (feature == PremiumFeature.scan || feature == PremiumFeature.viewRecipes) ...[
             Container(
-              padding: EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.red.shade50,
                 borderRadius: BorderRadius.circular(12),
@@ -196,7 +196,7 @@ class PremiumGate extends StatelessWidget {
                       fontSize: 16,
                     ),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
                     'You\'ve used all ${controller.totalScansUsed}/3 free daily scans',
                     style: TextStyle(
@@ -207,23 +207,23 @@ class PremiumGate extends StatelessWidget {
                 ],
               ),
             ),
-            SizedBox(height: 20),
+            const SizedBox(height: 20),
           ],
           
           _buildPremiumBenefits(),
-          SizedBox(height: 24),
+          const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             height: 48,
             child: ElevatedButton(
               onPressed: onUpgrade ?? () {
-                Navigator.pushNamed(context, '/premium');
+                Navigator.pushNamed(context, '/purchase');
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.amber,
                 foregroundColor: Colors.white,
               ),
-              child: Text(
+              child: const Text(
                 'Upgrade to Premium',
                 style: TextStyle(
                   fontSize: 16,
@@ -258,7 +258,7 @@ class PremiumGate extends StatelessWidget {
   }
 
   Widget _buildPremiumBenefits() {
-    final benefits = [
+    const benefits = [
       'Unlimited daily scans',
       'Full recipe details & directions',
       'Personal grocery list',
@@ -268,7 +268,7 @@ class PremiumGate extends StatelessWidget {
     ];
 
     return Container(
-      padding: EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.amber.shade50,
         borderRadius: BorderRadius.circular(12),
@@ -284,21 +284,21 @@ class PremiumGate extends StatelessWidget {
               color: Colors.amber.shade700,
             ),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           ...benefits.map((benefit) => Padding(
-            padding: EdgeInsets.symmetric(vertical: 2),
+            padding: const EdgeInsets.symmetric(vertical: 2),
             child: Row(
               children: [
-                Icon(
+                const Icon(
                   Icons.check_circle,
                   size: 16,
                   color: Colors.green,
                 ),
-                SizedBox(width: 8),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     benefit,
-                    style: TextStyle(fontSize: 13),
+                    style: const TextStyle(fontSize: 13),
                   ),
                 ),
               ],

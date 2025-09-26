@@ -1,6 +1,8 @@
+// main.dart - FIXED: Updated to use Environment system for security
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'config/environment.dart'; // ADDED: Import environment system
 import 'home_screen.dart';
 import 'login.dart';
 import 'pages/premium_page.dart';
@@ -9,17 +11,69 @@ import 'pages/submit_recipe.dart';
 import 'pages/messages_page.dart';
 import 'pages/search_users_page.dart';
 import 'pages/profile_screen.dart';
-// Note: chat_page.dart and user_profile_page.dart don't need to be imported here
-// since they're navigated to using Navigator.push() from other pages
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Supabase.initialize(
-    url: 'https://jmnwyzearnndhlitruyu.supabase.co',
-    anonKey: 'sb_publishable_l8QycOjdSgpUwI0vJBkHLw_Zxflwo_w',
-  );
+  
+  try {
+    // ADDED: Initialize environment configuration first
+    await Environment.initialize();
+    
+    // FIXED: Use environment variables instead of hardcoded keys
+    await Supabase.initialize(
+      url: Environment.supabaseUrl,
+      anonKey: Environment.supabaseAnonKey,
+    );
 
-  runApp(const MyApp());
+    if (Environment.enableDebugLogging) {
+      print('✅ App initialization completed successfully');
+      Environment.printConfig();
+    }
+
+    runApp(const MyApp());
+    
+  } catch (e) {
+    // Handle initialization errors gracefully
+    if (Environment.enableDebugLogging) {
+      print('❌ App initialization failed: $e');
+    }
+    
+    // Show error app if initialization fails
+    runApp(MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error, size: 64, color: Colors.red),
+              SizedBox(height: 16),
+              Text(
+                'App Initialization Failed',
+                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Please check your configuration and try again.\n\nError: $e',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+              ),
+              SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: () {
+                  // Restart the app
+                  main();
+                },
+                child: Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ));
+  }
 }
 
 class MyApp extends StatefulWidget {
@@ -39,10 +93,20 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _checkPremiumStatus() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _isPremium = prefs.getBool('isPremiumUser') ?? false;
-    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      setState(() {
+        _isPremium = prefs.getBool('isPremiumUser') ?? false;
+      });
+    } catch (e) {
+      if (Environment.enableDebugLogging) {
+        print('Error checking premium status: $e');
+      }
+      // Default to free user if there's an error
+      setState(() {
+        _isPremium = false;
+      });
+    }
   }
 
   @override
@@ -51,24 +115,83 @@ class _MyAppState extends State<MyApp> {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'LiverWise',
+      title: Environment.appName, // UPDATED: Use environment app name
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      initialRoute: supabase.auth.currentUser != null ? '/home' : '/login',
+      // ENHANCED: Better initial route logic with error handling
+      initialRoute: _getInitialRoute(supabase),
       routes: {
         '/login': (context) => const LoginPage(),
         '/home': (context) => HomePage(isPremium: _isPremium),
-        '/profile': (context) => ProfileScreen(favoriteRecipes: []), // ADD THIS LINE
+        '/profile': (context) => ProfileScreen(favoriteRecipes: []),
         '/purchase': (context) => const PremiumPage(),
         '/grocery-list': (context) => const GroceryListPage(),
         '/submit-recipe': (context) => const SubmitRecipePage(),
         '/messages': (context) => MessagesPage(),
         '/search-users': (context) => const SearchUsersPage(),
       },
-        // Removed /chat and /user-profile routes since they need parameters
-        // Use Navigator.push() to navigate to these pages instead
+      // ADDED: Error handling for unknown routes
+      onUnknownRoute: (settings) {
+        if (Environment.enableDebugLogging) {
+          print('Unknown route: ${settings.name}');
+        }
+        return MaterialPageRoute(
+          builder: (context) => Scaffold(
+            appBar: AppBar(title: Text('Page Not Found')),
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.error_outline, size: 64, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text(
+                    'Page Not Found',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'The page "${settings.name}" does not exist.',
+                    style: TextStyle(color: Colors.grey[600]),
+                  ),
+                  SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => Navigator.pushReplacementNamed(context, '/home'),
+                    child: Text('Go Home'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
+  }
+
+  /// ADDED: Enhanced initial route logic with error handling
+  String _getInitialRoute(SupabaseClient supabase) {
+    try {
+      // Check if user is authenticated
+      final user = supabase.auth.currentUser;
+      
+      if (user != null) {
+        if (Environment.enableDebugLogging) {
+          print('User authenticated: ${user.email}');
+        }
+        return '/home';
+      } else {
+        if (Environment.enableDebugLogging) {
+          print('No authenticated user, redirecting to login');
+        }
+        return '/login';
+      }
+    } catch (e) {
+      if (Environment.enableDebugLogging) {
+        print('Error determining initial route: $e');
+      }
+      // Default to login on any error
+      return '/login';
+    }
   }
 }

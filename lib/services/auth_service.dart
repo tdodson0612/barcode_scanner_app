@@ -1,3 +1,4 @@
+// lib/services/auth_service.dart
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'database_service.dart';
 

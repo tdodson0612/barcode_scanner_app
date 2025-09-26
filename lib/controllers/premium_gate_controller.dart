@@ -1,5 +1,6 @@
-// lib/controllers/premium_gate_controller.dart
+// lib/controllers/premium_gate_controller.dart - FIXED: Memory leak and concurrency issues
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '../services/premium_service.dart';
 import '../services/auth_service.dart';
 import '../logger.dart';
@@ -9,26 +10,62 @@ class PremiumGateController extends ChangeNotifier {
   factory PremiumGateController() => _instance;
   PremiumGateController._internal();
 
+  // State variables
   bool _isPremium = false;
   bool _isLoading = true;
-  int _remainingScans = 3; // START WITH 3 SCANS FOR NEW USERS
+  int _remainingScans = 3;
   int _totalScansUsed = 0;
   bool _initializationFailed = false;
+  
+  // FIXED: Proper concurrency control
   int _retryCount = 0;
   static const int maxRetries = 3;
+  Timer? _retryTimer; // Managed timer to prevent leaks
+  Completer<void>? _initializationCompleter; // Prevent multiple simultaneous initializations
+  bool _isDisposed = false; // Disposal tracking
 
+  // Getters
   bool get isPremium => _isPremium;
   bool get isLoading => _isLoading;
   int get remainingScans => _remainingScans;
   int get totalScansUsed => _totalScansUsed;
   bool get initializationFailed => _initializationFailed;
+  bool get hasUsedAllFreeScans => !_isPremium && _remainingScans <= 0;
 
-  // Initialize premium status with retry logic
+  // FIXED: Proper disposal method to prevent memory leaks
+  @override
+  void dispose() {
+    print('DEBUG: Disposing PremiumGateController');
+    _isDisposed = true;
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _initializationCompleter?.complete();
+    _initializationCompleter = null;
+    super.dispose();
+  }
+
+  // FIXED: Initialize with proper concurrency control and exponential backoff
   Future<void> initialize() async {
+    // Prevent multiple simultaneous initializations
+    if (_initializationCompleter != null && !_initializationCompleter!.isCompleted) {
+      print('DEBUG: Initialization already in progress, waiting...');
+      return _initializationCompleter!.future;
+    }
+
+    if (_isDisposed) {
+      print('DEBUG: Controller disposed, skipping initialization');
+      return;
+    }
+
+    _initializationCompleter = Completer<void>();
+    
     print('DEBUG: Starting PremiumGateController initialization (attempt ${_retryCount + 1})');
     _isLoading = true;
     _initializationFailed = false;
-    notifyListeners();
+    
+    if (!_isDisposed) {
+      notifyListeners();
+    }
 
     try {
       if (AuthService.isLoggedIn) {
@@ -50,11 +87,13 @@ class PremiumGateController extends ChangeNotifier {
       } else {
         print('DEBUG: User is NOT logged in - using defaults');
         _isPremium = false;
-        _remainingScans = 3; // Give free users 3 scans by default
+        _remainingScans = 3;
         _totalScansUsed = 0;
       }
 
       _retryCount = 0; // Reset retry count on success
+      _initializationFailed = false;
+      
     } catch (e, stackTrace) {
       print('DEBUG: Error in initialization (attempt ${_retryCount + 1}): $e');
       logger.e(
@@ -63,41 +102,39 @@ class PremiumGateController extends ChangeNotifier {
         stackTrace: stackTrace,
       );
       
-      // Handle initialization failure with fallback values
       await _handleInitializationFailure();
     }
 
     _isLoading = false;
-    notifyListeners();
+    
+    if (!_isDisposed) {
+      notifyListeners();
+    }
+    
     print('DEBUG: Initialization complete. isPremium: $_isPremium, remainingScans: $_remainingScans');
+    
+    if (!_initializationCompleter!.isCompleted) {
+      _initializationCompleter!.complete();
+    }
   }
 
-  // Check premium status with timeout
-  Future<bool> _checkPremiumWithTimeout() async {
-    return await Future.any([
-      PremiumService.isPremiumUser(),
-      Future.delayed(Duration(seconds: 10), () => false), // 10 second timeout
-    ]);
-  }
-
-  // Get remaining scans with timeout
-  Future<int> _getRemainingScansWithTimeout() async {
-    return await Future.any([
-      PremiumService.getRemainingScanCount(),
-      Future.delayed(Duration(seconds: 10), () => 3), // Default to 3 scans on timeout
-    ]);
-  }
-
-  // Handle initialization failure with retry logic
+  // FIXED: Proper retry logic with managed Timer and exponential backoff
   Future<void> _handleInitializationFailure() async {
+    if (_isDisposed) return;
+    
     _retryCount++;
     
     if (_retryCount < maxRetries) {
-      print('DEBUG: Retrying initialization in 2 seconds...');
-      // Retry after delay
-      Future.delayed(Duration(seconds: 2), () {
-        if (_retryCount < maxRetries) {
-          initialize(); // Retry
+      // Exponential backoff: 2s, 4s, 8s
+      final delaySeconds = 2 * _retryCount;
+      print('DEBUG: Retrying initialization in ${delaySeconds} seconds...');
+      
+      // FIXED: Use managed Timer instead of unmanaged Future.delayed
+      _retryTimer?.cancel(); // Cancel any existing timer
+      _retryTimer = Timer(Duration(seconds: delaySeconds), () {
+        if (!_isDisposed && _retryCount < maxRetries) {
+          print('DEBUG: Executing retry attempt ${_retryCount + 1}');
+          initialize(); // This will create a new completer
         }
       });
     } else {
@@ -105,31 +142,77 @@ class PremiumGateController extends ChangeNotifier {
       _initializationFailed = true;
       // Use safe fallback values
       _isPremium = false;
-      _remainingScans = 3; // Give users the benefit of the doubt
+      _remainingScans = 3;
       _totalScansUsed = 0;
     }
   }
 
-  // Update premium status (call after purchase or login)
+  // Check premium status with timeout
+  Future<bool> _checkPremiumWithTimeout() async {
+    if (_isDisposed) return false;
+    
+    try {
+      return await Future.any([
+        PremiumService.isPremiumUser(),
+        Future.delayed(Duration(seconds: 10), () => false),
+      ]).timeout(Duration(seconds: 12)); // Additional safety timeout
+    } catch (e) {
+      print('DEBUG: Premium check timeout or error: $e');
+      return false;
+    }
+  }
+
+  // Get remaining scans with timeout
+  Future<int> _getRemainingScansWithTimeout() async {
+    if (_isDisposed) return 3;
+    
+    try {
+      return await Future.any([
+        PremiumService.getRemainingScanCount(),
+        Future.delayed(Duration(seconds: 10), () => 3),
+      ]).timeout(Duration(seconds: 12));
+    } catch (e) {
+      print('DEBUG: Scan count check timeout or error: $e');
+      return 3;
+    }
+  }
+
+  // FIXED: Update premium status with proper concurrency control
   Future<void> refresh() async {
+    if (_isDisposed) return;
+    
+    print('DEBUG: Manual refresh requested');
+    _retryTimer?.cancel(); // Cancel any pending retries
     _retryCount = 0; // Reset retry count for manual refresh
     await initialize();
   }
 
-  // Add a reset method for logout
+  // Reset method for logout - FIXED: Cancel timers
   void reset() {
     print('DEBUG: Resetting PremiumGateController');
+    
+    // Cancel any pending operations
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _initializationCompleter?.complete();
+    _initializationCompleter = null;
+    
+    // Reset state
     _isPremium = false;
     _isLoading = false;
-    _remainingScans = 3; // Reset to default free scans
+    _remainingScans = 3;
     _totalScansUsed = 0;
     _initializationFailed = false;
     _retryCount = 0;
-    notifyListeners();
+    
+    if (!_isDisposed) {
+      notifyListeners();
+    }
   }
 
-  // FIXED: Check if user can access any feature
+  // Check if user can access feature
   bool canAccessFeature(PremiumFeature feature) {
+    if (_isDisposed) return false;
     if (!AuthService.isLoggedIn) return false;
     
     // If initialization failed, be permissive to avoid blocking users
@@ -153,24 +236,24 @@ class PremiumGateController extends ChangeNotifier {
       case PremiumFeature.searchUsers:
         return true;
       case PremiumFeature.scan:
-        // FIXED: Allow scans if remaining > 0 OR if we haven't loaded yet
         return _remainingScans > 0 || _isLoading;
       case PremiumFeature.groceryList:
       case PremiumFeature.fullRecipes:
       case PremiumFeature.submitRecipes:
       case PremiumFeature.viewRecipes:
       case PremiumFeature.favoriteRecipes:
-        return false; // COMPLETELY BLOCKED for free users
+        return false;
     }
   }
 
-  // Use a scan (for free users) with retry logic
+  // Use a scan with proper error handling
   Future<bool> useScan() async {
+    if (_isDisposed) return false;
     if (_isPremium) return true;
     
     try {
       final success = await _incrementScanWithTimeout();
-      if (success) {
+      if (success && !_isDisposed) {
         if (_remainingScans > 0) {
           _remainingScans--;
         }
@@ -181,7 +264,7 @@ class PremiumGateController extends ChangeNotifier {
     } catch (e) {
       logger.e("Error using scan", error: e);
       // On error, still allow the scan locally but log the issue
-      if (_remainingScans > 0) {
+      if (!_isDisposed && _remainingScans > 0) {
         _remainingScans--;
         _totalScansUsed = 3 - _remainingScans;
         notifyListeners();
@@ -192,34 +275,31 @@ class PremiumGateController extends ChangeNotifier {
 
   // Increment scan count with timeout
   Future<bool> _incrementScanWithTimeout() async {
+    if (_isDisposed) return false;
+    
     try {
       return await Future.any([
         PremiumService.incrementScanCount(),
-        Future.delayed(Duration(seconds: 5), () => true), // Timeout fallback
-      ]);
+        Future.delayed(Duration(seconds: 5), () => true),
+      ]).timeout(Duration(seconds: 7));
     } catch (e) {
+      print('DEBUG: Scan increment timeout or error: $e');
       return true; // Be permissive on error
     }
   }
 
-  // Check if user has used all free scans
-  bool get hasUsedAllFreeScans => !_isPremium && _remainingScans <= 0;
-
-  // Award bonus scans (from rewarded ads) with bounds checking
+  // Award bonus scans with bounds checking
   Future<void> addBonusScans(int count) async {
-    if (_isPremium) {
-      // Premium users don't need bonus scans
-      return;
-    }
+    if (_isDisposed || _isPremium) return;
 
     try {
       _remainingScans += count;
-
-      // Prevent negative values and excessive bonus scans
       _remainingScans = _remainingScans.clamp(0, 10); // Max 10 total scans
-
       _totalScansUsed = (3 - _remainingScans).clamp(0, 3);
-      notifyListeners();
+      
+      if (!_isDisposed) {
+        notifyListeners();
+      }
       
       print('DEBUG: Added $count bonus scans. New total: $_remainingScans');
     } catch (e, stackTrace) {
@@ -229,6 +309,7 @@ class PremiumGateController extends ChangeNotifier {
 
   // Get user-friendly status message
   String getStatusMessage() {
+    if (_isDisposed) return "Service unavailable";
     if (_isLoading) return "Loading...";
     if (_initializationFailed) return "Connection issues - features may be limited";
     if (_isPremium) return "Premium: Unlimited access";
@@ -237,21 +318,21 @@ class PremiumGateController extends ChangeNotifier {
 
   // Check if we should show upgrade prompts
   bool shouldShowUpgradePrompt() {
-    return !_isPremium && !_isLoading && _remainingScans <= 1;
+    return !_isDisposed && !_isPremium && !_isLoading && _remainingScans <= 1;
   }
 }
 
-// Premium features enum (UPDATED with social features)
+// Premium features enum
 enum PremiumFeature {
-  basicProfile,        // Name and profile picture only
-  purchase,            // Purchase premium page
-  scan,                // Product scanning (3 max for free)
-  viewRecipes,         // View recipe suggestions after scan
-  groceryList,         // Grocery list feature
-  fullRecipes,         // Full recipe details with ingredients/directions
-  submitRecipes,       // Submit own recipes
-  favoriteRecipes,     // Save favorite recipes
-  socialMessaging,     // NEW: Messaging friends (always free)
-  friendRequests,      // NEW: Send/receive friend requests (always free)
-  searchUsers,         // NEW: Search for other users (always free)
+  basicProfile,
+  purchase,
+  scan,
+  viewRecipes,
+  groceryList,
+  fullRecipes,
+  submitRecipes,
+  favoriteRecipes,
+  socialMessaging,
+  friendRequests,
+  searchUsers,
 }

@@ -1,4 +1,4 @@
-// lib/services/database_service.dart
+// lib/services/database_service.dart - FIXED: Proper error handling throughout
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/favorite_recipe.dart';
 import '../models/grocery_item.dart';
@@ -42,8 +42,8 @@ class DatabaseService {
         'friends_list_visible': true, // Default to visible
       });
     } catch (e) {
-      print('Error creating user profile: $e');
-      rethrow;
+      // FIXED: Proper error handling instead of print + rethrow
+      throw Exception('Failed to create user profile: $e');
     }
   }
 
@@ -56,8 +56,8 @@ class DatabaseService {
           .single();
       return response;
     } catch (e) {
-      print('Error getting user profile: $e');
-      return null;
+      // FIXED: Don't return null on error - let caller handle it
+      throw Exception('Failed to get user profile: $e');
     }
   }
 
@@ -65,10 +65,16 @@ class DatabaseService {
   static Future<Map<String, dynamic>?> getCurrentUserProfile() async {
     final userId = currentUserId;
     if (userId == null) return null;
-    return await getUserProfile(userId);
+    
+    try {
+      return await getUserProfile(userId);
+    } catch (e) {
+      // Return null for current user profile if not found (not an error condition)
+      return null;
+    }
   }
 
-  // Check username availability (NEW METHOD)
+  // Check username availability
   static Future<bool> isUsernameAvailable(String username) async {
     try {
       final response = await _supabase
@@ -79,12 +85,11 @@ class DatabaseService {
       
       return response == null; // null means username is available
     } catch (e) {
-      print('Error checking username availability: $e');
-      throw Exception('Failed to check username availability');
+      throw Exception('Failed to check username availability: $e');
     }
   }
 
-  // Update profile (ENHANCED METHOD)
+  // Update profile
   static Future<void> updateProfile({
     String? username,
     String? email,
@@ -116,12 +121,11 @@ class DatabaseService {
           e.toString().contains('unique constraint')) {
         throw Exception('Username is already taken. Please choose a different username.');
       }
-      print('Error updating profile: $e');
       throw Exception('Failed to update profile: $e');
     }
   }
 
-  // Set premium status - FIXED: Remove circular call
+  // Set premium status
   static Future<void> setPremiumStatus(String userId, bool isPremium) async {
     ensureUserAuthenticated();
     
@@ -131,8 +135,7 @@ class DatabaseService {
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', userId);
     } catch (e) {
-      print('Error setting premium status: $e');
-      rethrow;
+      throw Exception('Failed to update premium status: $e');
     }
   }
 
@@ -140,12 +143,17 @@ class DatabaseService {
     final userId = AuthService.currentUserId;
     if (userId == null) return false;
 
-    final profile = await getUserProfile(userId);
-    return profile?['is_premium'] ?? false;
+    try {
+      final profile = await getUserProfile(userId);
+      return profile?['is_premium'] ?? false;
+    } catch (e) {
+      // If we can't check premium status, default to free
+      return false;
+    }
   }
 
   // ==================================================
-  // FRIENDS LIST VISIBILITY METHODS (NEW)
+  // FRIENDS LIST VISIBILITY METHODS
   // ==================================================
   
   /// Get user's friends list for profile display
@@ -169,8 +177,7 @@ class DatabaseService {
       }
       return friends;
     } catch (e) {
-      print('Error fetching user friends: $e');
-      return [];
+      throw Exception('Failed to load friends list: $e');
     }
   }
 
@@ -182,7 +189,6 @@ class DatabaseService {
       final profile = await getCurrentUserProfile();
       return profile?['friends_list_visible'] ?? true; // Default to visible
     } catch (e) {
-      print('Error getting friends list visibility: $e');
       return true; // Default to visible on error
     }
   }
@@ -200,8 +206,7 @@ class DatabaseService {
           })
           .eq('id', currentUserId!);
     } catch (e) {
-      print('Error updating friends list visibility: $e');
-      rethrow;
+      throw Exception('Failed to update privacy setting: $e');
     }
   }
 
@@ -212,38 +217,50 @@ class DatabaseService {
     final userId = AuthService.currentUserId;
     if (userId == null) return 0;
 
-    final profile = await getUserProfile(userId);
-    if (profile == null) return 0;
+    try {
+      final profile = await getUserProfile(userId);
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      final lastScanDate = profile?['last_scan_date'] ?? '';
 
-    final today = DateTime.now().toIso8601String().split('T')[0];
-    final lastScanDate = profile['last_scan_date'] ?? '';
+      // Reset count if it's a new day
+      if (lastScanDate != today) {
+        await _supabase.from('user_profiles').update({
+          'daily_scans_used': 0,
+          'last_scan_date': today,
+        }).eq('id', userId);
+        return 0;
+      }
 
-    // Reset count if it's a new day
-    if (lastScanDate != today) {
-      await _supabase.from('user_profiles').update({
-        'daily_scans_used': 0,
-        'last_scan_date': today,
-      }).eq('id', userId);
+      return profile?['daily_scans_used'] ?? 0;
+    } catch (e) {
+      // If we can't get scan count, assume 0
       return 0;
     }
-
-    return profile['daily_scans_used'] ?? 0;
   }
 
   static Future<bool> canPerformScan() async {
-    if (await isPremiumUser()) return true;
-    
-    final dailyCount = await getDailyScanCount();
-    return dailyCount < 3; // Free users get 3 scans per day
+    try {
+      if (await isPremiumUser()) return true;
+      
+      final dailyCount = await getDailyScanCount();
+      return dailyCount < 3; // Free users get 3 scans per day
+    } catch (e) {
+      // If we can't check, allow the scan
+      return true;
+    }
   }
 
   static Future<void> incrementScanCount() async {
-    if (await isPremiumUser()) return; // Premium users have unlimited scans
+    try {
+      if (await isPremiumUser()) return; // Premium users have unlimited scans
 
-    final currentCount = await getDailyScanCount();
-    await _supabase.from('user_profiles').update({
-      'daily_scans_used': currentCount + 1,
-    }).eq('id', currentUserId!);
+      final currentCount = await getDailyScanCount();
+      await _supabase.from('user_profiles').update({
+        'daily_scans_used': currentCount + 1,
+      }).eq('id', currentUserId!);
+    } catch (e) {
+      throw Exception('Failed to update scan count: $e');
+    }
   }
 
   // ==================================================
@@ -263,8 +280,7 @@ class DatabaseService {
           .map((recipe) => FavoriteRecipe.fromJson(recipe))
           .toList();
     } catch (e) {
-      print('Error fetching favorite recipes: $e');
-      return [];
+      throw Exception('Failed to load favorite recipes: $e');
     }
   }
 
@@ -281,8 +297,7 @@ class DatabaseService {
         'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      print('Error adding favorite recipe: $e');
-      rethrow;
+      throw Exception('Failed to add favorite recipe: $e');
     }
   }
 
@@ -292,8 +307,7 @@ class DatabaseService {
     try {
       await _supabase.from('favorite_recipes').delete().eq('id', recipeId);
     } catch (e) {
-      print('Error removing favorite recipe: $e');
-      rethrow;
+      throw Exception('Failed to remove favorite recipe: $e');
     }
   }
 
@@ -310,7 +324,7 @@ class DatabaseService {
 
       return response != null;
     } catch (e) {
-      print('Error checking if recipe is favorited: $e');
+      // If we can't check, assume not favorited
       return false;
     }
   }
@@ -332,8 +346,7 @@ class DatabaseService {
           .map((item) => GroceryItem.fromJson(item))
           .toList();
     } catch (e) {
-      print('Error fetching grocery list: $e');
-      return [];
+      throw Exception('Failed to load grocery list: $e');
     }
   }
 
@@ -359,8 +372,7 @@ class DatabaseService {
         await _supabase.from('grocery_items').insert(groceryItems);
       }
     } catch (e) {
-      print('Error saving grocery list: $e');
-      rethrow;
+      throw Exception('Failed to save grocery list: $e');
     }
   }
 
@@ -373,8 +385,7 @@ class DatabaseService {
           .delete()
           .eq('user_id', currentUserId!);
     } catch (e) {
-      print('Error clearing grocery list: $e');
-      rethrow;
+      throw Exception('Failed to clear grocery list: $e');
     }
   }
 
@@ -392,12 +403,11 @@ class DatabaseService {
         'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      print('Error adding to grocery list: $e');
-      rethrow;
+      throw Exception('Failed to add item to grocery list: $e');
     }
   }
 
-  // Enhanced shopping list methods from your existing code
+  // Enhanced shopping list methods
   static List<String> _parseIngredients(String ingredientsText) {
     final items = ingredientsText
         .split(RegExp(r'[,\n•\-\*]|\d+\.'))
@@ -477,14 +487,17 @@ class DatabaseService {
         'recipeName': recipeName,
       };
     } catch (e) {
-      print('Error adding recipe to shopping list: $e');
-      rethrow;
+      throw Exception('Failed to add recipe to shopping list: $e');
     }
   }
 
   static Future<int> getShoppingListCount() async {
-    final items = await getGroceryList();
-    return items.length;
+    try {
+      final items = await getGroceryList();
+      return items.length;
+    } catch (e) {
+      return 0;
+    }
   }
 
   // ==================================================
@@ -504,8 +517,7 @@ class DatabaseService {
           .map((recipe) => SubmittedRecipe.fromJson(recipe))
           .toList();
     } catch (e) {
-      print('Error fetching submitted recipes: $e');
-      return [];
+      throw Exception('Failed to load submitted recipes: $e');
     }
   }
 
@@ -522,8 +534,7 @@ class DatabaseService {
         'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      print('Error submitting recipe: $e');
-      rethrow;
+      throw Exception('Failed to submit recipe: $e');
     }
   }
 
@@ -533,8 +544,7 @@ class DatabaseService {
     try {
       await _supabase.from('submitted_recipes').delete().eq('id', recipeId);
     } catch (e) {
-      print('Error deleting submitted recipe: $e');
-      rethrow;
+      throw Exception('Failed to delete submitted recipe: $e');
     }
   }
 
@@ -555,8 +565,7 @@ class DatabaseService {
         'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      print('Error submitting contact message: $e');
-      rethrow;
+      throw Exception('Failed to submit contact message: $e');
     }
   }
 
@@ -564,7 +573,7 @@ class DatabaseService {
   // SOCIAL FEATURES - FRIENDS & MESSAGING
   // ==================================================
 
-  /// Fetch friends list (accepted friend requests) - LEGACY METHOD
+  /// Fetch friends list (accepted friend requests)
   static Future<List<Map<String, dynamic>>> getFriends() async {
     ensureUserAuthenticated();
     
@@ -584,8 +593,7 @@ class DatabaseService {
       }
       return friends;
     } catch (e) {
-      print('Error fetching friends: $e');
-      return [];
+      throw Exception('Failed to load friends: $e');
     }
   }
 
@@ -602,8 +610,7 @@ class DatabaseService {
 
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      print('Error fetching friend requests: $e');
-      return [];
+      throw Exception('Failed to load friend requests: $e');
     }
   }
 
@@ -639,8 +646,7 @@ class DatabaseService {
 
       return response['id'];
     } catch (e) {
-      print('Error sending friend request: $e');
-      rethrow;
+      throw Exception('Failed to send friend request: $e');
     }
   }
 
@@ -654,12 +660,11 @@ class DatabaseService {
           .update({'status': 'accepted'})
           .eq('id', requestId);
     } catch (e) {
-      print('Error accepting friend request: $e');
-      rethrow;
+      throw Exception('Failed to accept friend request: $e');
     }
   }
 
-  /// Decline/Cancel friend request (deletes completely)
+  /// Decline/Cancel friend request
   static Future<void> declineFriendRequest(String requestId) async {
     ensureUserAuthenticated();
     
@@ -669,8 +674,7 @@ class DatabaseService {
           .delete()
           .eq('id', requestId);
     } catch (e) {
-      print('Error declining friend request: $e');
-      rethrow;
+      throw Exception('Failed to decline friend request: $e');
     }
   }
 
@@ -685,12 +689,11 @@ class DatabaseService {
           .eq('sender', currentUserId!)
           .eq('receiver', receiverId);
     } catch (e) {
-      print('Error canceling friend request: $e');
-      rethrow;
+      throw Exception('Failed to cancel friend request: $e');
     }
   }
 
-  /// Check friendship status - ENHANCED for search_users_page compatibility
+  /// Check friendship status
   static Future<Map<String, dynamic>> checkFriendshipStatus(String userId) async {
     ensureUserAuthenticated();
     
@@ -720,7 +723,6 @@ class DatabaseService {
         'canSendRequest': status == 'none',
       };
     } catch (e) {
-      print('Error checking friendship status: $e');
       return {
         'status': 'error', 
         'requestId': null, 
@@ -743,8 +745,7 @@ class DatabaseService {
 
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      print('Error fetching messages: $e');
-      return [];
+      throw Exception('Failed to load messages: $e');
     }
   }
 
@@ -760,8 +761,7 @@ class DatabaseService {
         'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      print('Error sending message: $e');
-      rethrow;
+      throw Exception('Failed to send message: $e');
     }
   }
 
@@ -770,7 +770,6 @@ class DatabaseService {
     ensureUserAuthenticated();
     
     try {
-      // Get latest message with each friend
       final friends = await getFriends();
       final chats = <Map<String, dynamic>>[];
 
@@ -807,12 +806,11 @@ class DatabaseService {
 
       return chats;
     } catch (e) {
-      print('Error fetching chat list: $e');
-      return [];
+      throw Exception('Failed to load chat list: $e');
     }
   }
 
-  /// Search users (for adding friends) - ENHANCED for search_users_page compatibility
+  /// Search users (for adding friends)
   static Future<List<Map<String, dynamic>>> searchUsers(String query) async {
     ensureUserAuthenticated();
     
@@ -826,7 +824,6 @@ class DatabaseService {
 
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      print('Error searching users: $e');
       throw Exception('Failed to search users: $e');
     }
   }
