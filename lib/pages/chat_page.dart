@@ -1,7 +1,9 @@
+// lib/pages/chat_page.dart - FIXED: Enhanced with ErrorHandlingService integration
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/database_service.dart';
 import '../services/auth_service.dart';
+import '../services/error_handling_service.dart';
 
 class ChatPage extends StatefulWidget {
   final String friendId;
@@ -36,26 +38,37 @@ class _ChatPageState extends State<ChatPage> {
     try {
       setState(() => _isLoading = true);
       final messages = await DatabaseService.getMessages(widget.friendId);
-      setState(() {
-        _messages = messages;
-        _isLoading = false;
-      });
       
-      // Scroll to bottom after loading messages
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) {
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent,
-            duration: Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
-        }
-      });
+      if (mounted) {
+        setState(() {
+          _messages = messages;
+          _isLoading = false;
+        });
+        
+        // Scroll to bottom after loading messages
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollController.hasClients) {
+            _scrollController.animateTo(
+              _scrollController.position.maxScrollExtent,
+              duration: Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
+        });
+      }
     } catch (e) {
-      setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading messages: $e')),
-      );
+      if (mounted) {
+        setState(() => _isLoading = false);
+        
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          showSnackBar: true,
+          customMessage: 'Unable to load messages',
+          onRetry: _loadMessages,
+        );
+      }
     }
   }
 
@@ -63,16 +76,18 @@ class _ChatPageState extends State<ChatPage> {
     final content = _messageController.text.trim();
     if (content.isEmpty || _isSending) return;
 
+    // Create temporary message for optimistic UI update
+    final tempMessage = {
+      'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
+      'sender': AuthService.currentUserId,
+      'receiver': widget.friendId,
+      'content': content,
+      'created_at': DateTime.now().toIso8601String(),
+    };
+
     setState(() {
       _isSending = true;
-      // Optimistically add message to UI
-      _messages.add({
-        'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
-        'sender': AuthService.currentUserId,
-        'receiver': widget.friendId,
-        'content': content,
-        'created_at': DateTime.now().toIso8601String(),
-      });
+      _messages.add(tempMessage);
     });
 
     _messageController.clear();
@@ -80,18 +95,34 @@ class _ChatPageState extends State<ChatPage> {
 
     try {
       await DatabaseService.sendMessage(widget.friendId, content);
-      // Reload messages to get the actual message with proper ID
-      await _loadMessages();
+      
+      if (mounted) {
+        // Reload messages to get the actual message with proper ID
+        await _loadMessages();
+        ErrorHandlingService.showSuccess(context, 'Message sent');
+      }
     } catch (e) {
-      // Remove the optimistic message on error
-      setState(() {
-        _messages.removeWhere((msg) => msg['id'].toString().startsWith('temp_'));
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to send message: $e')),
-      );
+      if (mounted) {
+        // Remove the optimistic message on error
+        setState(() {
+          _messages.removeWhere((msg) => msg['id'].toString().startsWith('temp_'));
+        });
+        
+        // Restore the message text to the input field
+        _messageController.text = content;
+        
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to send message',
+          onRetry: _sendMessage,
+        );
+      }
     } finally {
-      setState(() => _isSending = false);
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
     }
   }
 
@@ -191,45 +222,48 @@ class _ChatPageState extends State<ChatPage> {
           top: BorderSide(color: Colors.grey.shade300),
         ),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _messageController,
-              decoration: InputDecoration(
-                hintText: 'Type a message...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(25),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
+      child: SafeArea(
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _messageController,
+                decoration: InputDecoration(
+                  hintText: 'Type a message...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(25),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                 ),
-                contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                maxLines: null,
+                textCapitalization: TextCapitalization.sentences,
+                onSubmitted: (_) => _sendMessage(),
+                enabled: !_isSending,
               ),
-              maxLines: null,
-              textCapitalization: TextCapitalization.sentences,
-              onSubmitted: (_) => _sendMessage(),
             ),
-          ),
-          SizedBox(width: 8),
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.blue,
-              shape: BoxShape.circle,
+            SizedBox(width: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: _isSending ? Colors.grey : Colors.blue,
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                onPressed: _isSending ? null : _sendMessage,
+                icon: _isSending
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : Icon(Icons.send, color: Colors.white),
+              ),
             ),
-            child: IconButton(
-              onPressed: _isSending ? null : _sendMessage,
-              icon: _isSending
-                  ? SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : Icon(Icons.send, color: Colors.white),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -250,7 +284,7 @@ class _ChatPageState extends State<ChatPage> {
                       widget.friendName.isNotEmpty
                           ? widget.friendName[0].toUpperCase()
                           : 'U',
-                      style: TextStyle(fontSize: 16),
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     )
                   : null,
             ),
@@ -259,18 +293,36 @@ class _ChatPageState extends State<ChatPage> {
               child: Text(
                 widget.friendName,
                 style: TextStyle(fontSize: 18),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
         ),
         backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
         elevation: 1,
         actions: [
           IconButton(
-            onPressed: () {
-              _loadMessages();
+            onPressed: () async {
+              try {
+                await _loadMessages();
+                if (mounted) {
+                  ErrorHandlingService.showSuccess(context, 'Messages refreshed');
+                }
+              } catch (e) {
+                if (mounted) {
+                  await ErrorHandlingService.handleError(
+                    context: context,
+                    error: e,
+                    category: ErrorHandlingService.databaseError,
+                    showSnackBar: true,
+                    customMessage: 'Failed to refresh messages',
+                  );
+                }
+              }
             },
             icon: Icon(Icons.refresh),
+            tooltip: 'Refresh messages',
           ),
         ],
       ),
@@ -278,7 +330,19 @@ class _ChatPageState extends State<ChatPage> {
         children: [
           Expanded(
             child: _isLoading
-                ? Center(child: CircularProgressIndicator())
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text(
+                          'Loading messages...',
+                          style: TextStyle(color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  )
                 : _messages.isEmpty
                     ? Center(
                         child: Column(
@@ -305,16 +369,20 @@ class _ChatPageState extends State<ChatPage> {
                                 fontSize: 14,
                                 color: Colors.grey.shade500,
                               ),
+                              textAlign: TextAlign.center,
                             ),
                           ],
                         ),
                       )
-                    : ListView.builder(
-                        controller: _scrollController,
-                        itemCount: _messages.length,
-                        itemBuilder: (context, index) {
-                          return _buildMessageBubble(_messages[index]);
-                        },
+                    : RefreshIndicator(
+                        onRefresh: _loadMessages,
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          itemCount: _messages.length,
+                          itemBuilder: (context, index) {
+                            return _buildMessageBubble(_messages[index]);
+                          },
+                        ),
                       ),
           ),
           _buildMessageInput(),
