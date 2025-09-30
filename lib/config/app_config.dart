@@ -1,10 +1,10 @@
-// lib/config/app_config.dart - SIMPLE VERSION: Easy to understand and use
+// lib/config/app_config.dart - FIXED: Correct Supabase credentials
 class AppConfig {
   // STEP 1: Put your real keys here (replace the placeholder text)
   
   // Your Supabase keys (get these from your Supabase dashboard)
   static const String supabaseUrl = 'https://jmnwyzearnndhlitruyu.supabase.co';
-  static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImptoWRtemVhcm5uZGhsaXRydXl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDExNjYzMzMsImV4cCI6MjAxNjc0MjMzM30.sb_publishable_l8QycOjdSgpUwI0vJBkHLw_Zxflwo_w';
+  static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imptbnd5emVhcm5uZGhsaXRydXl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ0MTc4MTMsImV4cCI6MjA2OTk5MzgxM30.i1_79Ew1co2wIsZTyai_t6KucM-fH_NuKBIhqEuY-44';
   
   // App settings
   static const String appName = 'LiverWise';

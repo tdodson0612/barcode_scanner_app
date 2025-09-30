@@ -1,4 +1,4 @@
-// lib/login.dart - FIXED: Enhanced with proper ErrorHandlingService integration
+// lib/login.dart - FIXED: Resolved "invalid login" issue
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -64,12 +64,23 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       if (mounted) {
+        // Enhanced error message to help debug
+        String errorMessage = e.toString();
+        AppConfig.debugPrint('Auth error details: $errorMessage');
+        
+        // Provide more specific error messages
+        if (errorMessage.contains('Invalid login credentials')) {
+          errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+        } else if (errorMessage.contains('Email not confirmed')) {
+          errorMessage = 'Please verify your email address before signing in. Check your inbox for the confirmation link.';
+        }
+        
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
           category: ErrorHandlingService.authError,
           showSnackBar: true,
-          customMessage: _isLogin ? 'Login failed' : 'Sign up failed',
+          customMessage: errorMessage,
           onRetry: _submitForm,
         );
       }
@@ -82,9 +93,15 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _handleLogin() async {
     try {
+      // Trim email and password to remove any accidental whitespace
+      final trimmedEmail = _email.trim();
+      final trimmedPassword = _password; // Don't trim password - it might be intentional
+      
+      AppConfig.debugPrint('Attempting login for: $trimmedEmail');
+      
       final response = await AuthService.signIn(
-        email: _email,
-        password: _password,
+        email: trimmedEmail,
+        password: trimmedPassword,
       );
 
       if (response.user != null) {
@@ -113,8 +130,11 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     try {
+      // Trim email for signup
+      final trimmedEmail = _email.trim();
+      
       final response = await AuthService.signUp(
-        email: _email,
+        email: trimmedEmail,
         password: _password,
       );
 
@@ -306,8 +326,12 @@ class _LoginPageState extends State<LoginPage> {
       return 'Password is required';
     }
     
-    if (!_isLogin && value.length < 6) {
-      return 'Password must be at least 6 characters';
+    // CRITICAL FIX: Only enforce length requirement during signup
+    // Don't validate password length during login - let Supabase handle it
+    if (!_isLogin) {
+      if (value.length < 6) {
+        return 'Password must be at least 6 characters';
+      }
     }
     
     return null;
@@ -414,6 +438,8 @@ class _LoginPageState extends State<LoginPage> {
                           textInputAction: TextInputAction.next,
                           validator: _validateEmail,
                           onSaved: (val) => _email = val?.trim() ?? '',
+                          autocorrect: false,
+                          enableSuggestions: false,
                         ),
                         
                         SizedBox(height: 16),
@@ -438,6 +464,8 @@ class _LoginPageState extends State<LoginPage> {
                           textInputAction: _isLogin ? TextInputAction.done : TextInputAction.next,
                           validator: _validatePassword,
                           onSaved: (val) => _password = val ?? '',
+                          autocorrect: false,
+                          enableSuggestions: false,
                         ),
 
                         // Confirm Password Field (Sign Up only)
@@ -462,6 +490,8 @@ class _LoginPageState extends State<LoginPage> {
                             textInputAction: TextInputAction.done,
                             validator: _validateConfirmPassword,
                             onSaved: (val) => _confirmPassword = val ?? '',
+                            autocorrect: false,
+                            enableSuggestions: false,
                           ),
                         ],
 

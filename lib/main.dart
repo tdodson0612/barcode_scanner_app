@@ -1,8 +1,8 @@
-// main.dart - FIXED: Updated to use Environment system for security
+// main.dart - FIXED: Uses existing AppConfig instead of Environment
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'config/environment.dart'; // ADDED: Import environment system
+import 'config/app_config.dart'; // FIXED: Use AppConfig instead of Environment
 import 'home_screen.dart';
 import 'login.dart';
 import 'pages/premium_page.dart';
@@ -16,25 +16,23 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   try {
-    // ADDED: Initialize environment configuration first
-    await Environment.initialize();
-    
-    // FIXED: Use environment variables instead of hardcoded keys
+    // FIXED: Use AppConfig for Supabase initialization
     await Supabase.initialize(
-      url: Environment.supabaseUrl,
-      anonKey: Environment.supabaseAnonKey,
+      url: AppConfig.supabaseUrl,
+      anonKey: AppConfig.supabaseAnonKey,
     );
 
-    if (Environment.enableDebugLogging) {
-      print('✅ App initialization completed successfully');
-      Environment.printConfig();
+    if (AppConfig.enableDebugPrints) {
+      AppConfig.debugPrint('✅ App initialization completed successfully');
+      AppConfig.debugPrint('Supabase URL: ${AppConfig.supabaseUrl}');
+      AppConfig.debugPrint('App Name: ${AppConfig.appName}');
     }
 
     runApp(const MyApp());
     
   } catch (e) {
     // Handle initialization errors gracefully
-    if (Environment.enableDebugLogging) {
+    if (AppConfig.enableDebugPrints) {
       print('❌ App initialization failed: $e');
     }
     
@@ -99,8 +97,8 @@ class _MyAppState extends State<MyApp> {
         _isPremium = prefs.getBool('isPremiumUser') ?? false;
       });
     } catch (e) {
-      if (Environment.enableDebugLogging) {
-        print('Error checking premium status: $e');
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('Error checking premium status: $e');
       }
       // Default to free user if there's an error
       setState(() {
@@ -115,12 +113,12 @@ class _MyAppState extends State<MyApp> {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: Environment.appName, // UPDATED: Use environment app name
+      title: AppConfig.appName, // FIXED: Use AppConfig app name
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      // ENHANCED: Better initial route logic with error handling
+      // Enhanced initial route logic with error handling
       initialRoute: _getInitialRoute(supabase),
       routes: {
         '/login': (context) => const LoginPage(),
@@ -132,10 +130,10 @@ class _MyAppState extends State<MyApp> {
         '/messages': (context) => MessagesPage(),
         '/search-users': (context) => const SearchUsersPage(),
       },
-      // ADDED: Error handling for unknown routes
+      // Error handling for unknown routes
       onUnknownRoute: (settings) {
-        if (Environment.enableDebugLogging) {
-          print('Unknown route: ${settings.name}');
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('Unknown route: ${settings.name}');
         }
         return MaterialPageRoute(
           builder: (context) => Scaffold(
@@ -169,26 +167,26 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
-  /// ADDED: Enhanced initial route logic with error handling
+  /// Enhanced initial route logic with error handling
   String _getInitialRoute(SupabaseClient supabase) {
     try {
       // Check if user is authenticated
       final user = supabase.auth.currentUser;
       
       if (user != null) {
-        if (Environment.enableDebugLogging) {
-          print('User authenticated: ${user.email}');
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('User authenticated: ${user.email}');
         }
         return '/home';
       } else {
-        if (Environment.enableDebugLogging) {
-          print('No authenticated user, redirecting to login');
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('No authenticated user, redirecting to login');
         }
         return '/login';
       }
     } catch (e) {
-      if (Environment.enableDebugLogging) {
-        print('Error determining initial route: $e');
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('Error determining initial route: $e');
       }
       // Default to login on any error
       return '/login';

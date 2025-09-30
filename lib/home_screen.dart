@@ -21,7 +21,78 @@ import '../pages/search_users_page.dart';
 import '../pages/favorite_recipes_page.dart';
 import '../pages/user_profile_page.dart';
 import '../widgets/app_drawer.dart';
-import '../config/environment.dart';
+import '../config/app_config.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+// Add this class right after your imports in home_screen.dart
+class IngredientKeywordExtractor {
+  // Words to remove from product names
+  static final List<String> _removeWords = [
+    // Measurements
+    'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds', 'kg', 'kilogram', 'kilograms',
+    'gram', 'grams', 'g', 'ml', 'milliliter', 'milliliters', 'liter', 'liters', 'l',
+    'gallon', 'gallons', 'quart', 'quarts', 'pint', 'pints', 'cup', 'cups', 'tbsp', 'tsp',
+    'tablespoon', 'tablespoons', 'teaspoon', 'teaspoons', 'fl', 'fluid',
+    
+    // Packaging
+    'can', 'canned', 'jar', 'bottle', 'bottled', 'box', 'boxed', 'bag', 'bagged',
+    'pack', 'package', 'packaged', 'carton', 'container', 'pouch', 'tube', 'tin',
+    
+    // Common prefixes/descriptors
+    'organic', 'natural', 'fresh', 'frozen', 'dried', 'raw', 'cooked', 'prepared',
+    'whole', 'sliced', 'diced', 'chopped', 'minced', 'crushed', 'ground',
+    'reduced', 'low', 'high', 'fat', 'free', 'sodium', 'sugar', 'calorie', 'diet',
+    'light', 'lite', 'extra', 'pure', 'premium', 'grade', 'quality',
+    
+    // Colors (often not essential for recipes)
+    'red', 'green', 'yellow', 'white', 'black', 'brown',
+    
+    // Brand/style descriptors
+    'style', 'flavored', 'flavour', 'seasoned', 'unseasoned', 'salted', 'unsalted',
+    'sweetened', 'unsweetened', 'plain', 'original',
+    
+    // Common food preparation states
+    'peeled', 'unpeeled', 'pitted', 'unpitted', 'seeded', 'unseeded',
+    'bone-in', 'boneless', 'skin-on', 'skinless', 'roasted',
+  ];
+
+  /// Extract the main ingredient keyword from a product name
+  /// Example: "12 oz can red roasted tomatoes" -> "tomatoes"
+  static String extract(String productName) {
+    if (productName.trim().isEmpty) return productName;
+
+    // Convert to lowercase for processing
+    String processed = productName.toLowerCase().trim();
+    
+    // Remove special characters but keep spaces and hyphens
+    processed = processed.replaceAll(RegExp(r'[^\w\s-]'), ' ');
+    
+    // Remove numbers and measurements (e.g., "12", "12oz")
+    processed = processed.replaceAll(RegExp(r'\b\d+\.?\d*\s*(oz|lb|g|kg|ml|l)?\b'), '');
+    processed = processed.replaceAll(RegExp(r'\d+'), '');
+    
+    // Split into words
+    List<String> words = processed.split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .toList();
+    
+    // Remove common filler words
+    words = words.where((word) {
+      // Keep the word if it's not in the remove list
+      return !_removeWords.contains(word.toLowerCase());
+    }).toList();
+    
+    // If nothing left, return original
+    if (words.isEmpty) {
+      return productName.trim();
+    }
+    
+    // Return the last remaining word (usually the main ingredient)
+    // For "roasted tomatoes" it will return "tomatoes"
+    // For "chicken breast" it will return "chicken"
+    return words.last;
+  }
+}
 
 
 /// --- NutritionInfo Data Model ---
@@ -117,6 +188,33 @@ class LiverHealthCalculator {
 
 /// --- Recipe Generator ---
 class RecipeGenerator {
+  static Future<List<Recipe>> generateSuggestionsFromProduct(String productName) async {
+  final keyword = IngredientKeywordExtractor.extract(productName);
+  AppConfig.debugPrint('Product: $productName -> Keyword: $keyword');
+  
+  try {
+    // Query Supabase for recipes containing the keyword in ingredients
+    final response = await Supabase.instance.client
+      .from('recipes')
+      .select()
+      .ilike('ingredients', '%$keyword%')
+      .limit(5);
+    
+    // Convert response to Recipe objects
+    final recipes = (response as List)
+        .map((json) => Recipe.fromJson(json))
+        .toList();
+    
+    AppConfig.debugPrint('Found ${recipes.length} recipes for keyword: $keyword');
+    
+    return recipes.isEmpty ? _getHealthyRecipes() : recipes;
+  } catch (e) {
+    AppConfig.debugPrint('Error fetching recipes from Supabase: $e');
+    // Fallback to default recipes on error
+    return _getHealthyRecipes();
+  }
+}
+
   static List<Recipe> generateSuggestions(int liverHealthScore) {
     if (liverHealthScore >= 75) {
       return _getHealthyRecipes();
@@ -176,7 +274,7 @@ class RecipeGenerator {
 /// --- Nutrition API Service with Enhanced Error Handling ---
 class NutritionApiService {
   // FIXED: Use Environment base URL instead of hardcoded
-  static String get baseUrl => Environment.openFoodFactsApiUrl;
+  static String get baseUrl => AppConfig.openFoodFactsUrl;
 
   static Future<NutritionInfo?> fetchNutritionInfo(String barcode) async {
     if (barcode.isEmpty) return null;
@@ -187,7 +285,7 @@ class NutritionApiService {
       final response = await http.get(
         Uri.parse(url),
         headers: {'User-Agent': 'FlutterApp/1.0'},
-      ).timeout(Duration(seconds: Environment.apiTimeoutSeconds));
+      ).timeout(Duration(seconds: AppConfig.apiTimeoutSeconds));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -197,7 +295,7 @@ class NutritionApiService {
       }
       return null;
     } catch (e) {
-      if (Environment.enableDebugLogging) {
+      if (AppConfig.enableDebugPrints) {
         print('Nutrition API Error: $e');
       }
       return null;
@@ -346,8 +444,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
   if (_isDisposed) return;
 
   // FIXED: Use Environment system instead of hardcoded IDs
-  final adUnitId = Environment.interstitialAdUnitId;
-
+  final adUnitId = AppConfig.interstitialAdId;
   InterstitialAd.load(
     adUnitId: adUnitId,
     request: AdRequest(),
@@ -362,7 +459,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
         }
       },
       onAdFailedToLoad: (error) {
-        if (Environment.enableDebugLogging) {
+        if (AppConfig.enableDebugPrints) {
           print('InterstitialAd failed to load: $error');
         }
         _isAdReady = false;
@@ -377,7 +474,7 @@ void _loadRewardedAd() {
   if (_isDisposed) return;
 
   // FIXED: Use Environment system instead of hardcoded IDs
-  final adUnitId = Environment.rewardedAdUnitId;
+  final adUnitId = AppConfig.rewardedAdId;
 
   RewardedAd.load(
     adUnitId: adUnitId,
@@ -392,7 +489,7 @@ void _loadRewardedAd() {
         }
       },
       onAdFailedToLoad: (error) {
-        if (Environment.enableDebugLogging) {
+        if (AppConfig.enableDebugPrints) {
           print('RewardedAd failed to load: $error');
         }
         _isRewardedAdReady = false;
@@ -794,8 +891,8 @@ void _loadRewardedAd() {
         calories: nutrition.calories,
       );
 
-      final suggestions = RecipeGenerator.generateSuggestions(score);
-
+      final suggestions = await RecipeGenerator.generateSuggestionsFromProduct(nutrition.productName);
+      
       if (mounted && !_isDisposed) {
         setState(() {
           _nutritionText = _buildNutritionDisplay(nutrition);

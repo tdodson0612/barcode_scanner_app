@@ -28,25 +28,24 @@ class _UserProfilePageState extends State<UserProfilePage> {
   Future<void> _loadUserProfile() async {
     try {
       setState(() => isLoading = true);
-
+      
       // Get user profile and friendship status concurrently
       final results = await Future.wait([
         DatabaseService.getUserProfile(widget.userId),
         DatabaseService.checkFriendshipStatus(widget.userId),
       ]);
-
+      
       if (mounted) {
         setState(() {
-          userProfile = results[0];        // already Map<String, dynamic>?
-          friendshipStatus = results[1];   // already Map<String, dynamic>
+          userProfile = results[0] as Map<String, dynamic>?;
+          friendshipStatus = results[1] as Map<String, dynamic>;
           isLoading = false;
         });
       }
-
     } catch (e) {
       if (mounted) {
         setState(() => isLoading = false);
-
+        
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -61,27 +60,27 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
   Future<void> _sendFriendRequest() async {
     if (isActionLoading) return;
-
+    
     try {
       setState(() => isActionLoading = true);
-
+      
       await DatabaseService.sendFriendRequest(widget.userId);
-
+      
       // Refresh friendship status
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
-
+      
       if (mounted) {
         setState(() {
           friendshipStatus = status;
           isActionLoading = false;
         });
-
+        
         ErrorHandlingService.showSuccess(context, 'Friend request sent!');
       }
     } catch (e) {
       if (mounted) {
         setState(() => isActionLoading = false);
-
+        
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -95,27 +94,27 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
   Future<void> _cancelFriendRequest() async {
     if (isActionLoading) return;
-
+    
     try {
       setState(() => isActionLoading = true);
-
+      
       await DatabaseService.cancelFriendRequest(widget.userId);
-
+      
       // Refresh friendship status
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
-
+      
       if (mounted) {
         setState(() {
           friendshipStatus = status;
           isActionLoading = false;
         });
-
+        
         ErrorHandlingService.showSuccess(context, 'Friend request cancelled');
       }
     } catch (e) {
       if (mounted) {
         setState(() => isActionLoading = false);
-
+        
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -129,28 +128,27 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
   Future<void> _acceptFriendRequest() async {
     if (isActionLoading || friendshipStatus?['requestId'] == null) return;
-
+    
     try {
       setState(() => isActionLoading = true);
-
+      
       await DatabaseService.acceptFriendRequest(friendshipStatus!['requestId']);
-
+      
       // Refresh friendship status
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
-
+      
       if (mounted) {
         setState(() {
           friendshipStatus = status;
           isActionLoading = false;
         });
-
-        ErrorHandlingService.showSuccess(
-            context, 'Friend request accepted! You are now friends.');
+        
+        ErrorHandlingService.showSuccess(context, 'Friend request accepted! You are now friends.');
       }
     } catch (e) {
       if (mounted) {
         setState(() => isActionLoading = false);
-
+        
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -164,7 +162,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
   Future<void> _declineFriendRequest() async {
     if (isActionLoading || friendshipStatus?['requestId'] == null) return;
-
+    
     // Show confirmation dialog
     final confirmed = await showDialog<bool>(
       context: context,
@@ -186,27 +184,27 @@ class _UserProfilePageState extends State<UserProfilePage> {
     );
 
     if (confirmed != true) return;
-
+    
     try {
       setState(() => isActionLoading = true);
-
+      
       await DatabaseService.declineFriendRequest(friendshipStatus!['requestId']);
-
+      
       // Refresh friendship status
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
-
+      
       if (mounted) {
         setState(() {
           friendshipStatus = status;
           isActionLoading = false;
         });
-
+        
         ErrorHandlingService.showSuccess(context, 'Friend request declined');
       }
     } catch (e) {
       if (mounted) {
         setState(() => isActionLoading = false);
-
+        
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -225,9 +223,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
         MaterialPageRoute(
           builder: (_) => ChatPage(
             friendId: widget.userId,
-            friendName: userProfile?['username'] ??
-                userProfile?['email'] ??
-                'Unknown',
+            friendName: userProfile?['username'] ?? userProfile?['email'] ?? 'Unknown',
             friendAvatar: userProfile?['avatar_url'],
           ),
         ),
@@ -407,11 +403,11 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
   String _getDisplayName() {
     if (userProfile == null) return 'Unknown User';
-
+    
     final firstName = userProfile!['first_name'];
     final lastName = userProfile!['last_name'];
     final username = userProfile!['username'];
-
+    
     if (firstName != null && lastName != null) {
       return '$firstName $lastName';
     } else if (username != null) {
@@ -423,10 +419,10 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
   String _getSubtitle() {
     if (userProfile == null) return '';
-
+    
     final username = userProfile!['username'];
     final email = userProfile!['email'];
-
+    
     if (username != null && email != null) {
       return '@$username • $email';
     } else if (username != null) {
@@ -548,11 +544,9 @@ class _UserProfilePageState extends State<UserProfilePage> {
                               CircleAvatar(
                                 radius: 50,
                                 backgroundColor: Colors.grey.shade200,
-                                backgroundImage:
-                                    userProfile!['avatar_url'] != null
-                                        ? NetworkImage(
-                                            userProfile!['avatar_url'])
-                                        : null,
+                                backgroundImage: userProfile!['avatar_url'] != null
+                                    ? NetworkImage(userProfile!['avatar_url'])
+                                    : null,
                                 child: userProfile!['avatar_url'] == null
                                     ? Text(
                                         _getDisplayName()[0].toUpperCase(),
@@ -565,7 +559,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
                                     : null,
                               ),
                               const SizedBox(height: 16),
-
+                              
                               // Display Name
                               Text(
                                 _getDisplayName(),
@@ -576,7 +570,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
                                 ),
                                 textAlign: TextAlign.center,
                               ),
-
+                              
                               if (_getSubtitle().isNotEmpty) ...[
                                 const SizedBox(height: 8),
                                 Text(
@@ -588,17 +582,17 @@ class _UserProfilePageState extends State<UserProfilePage> {
                                   textAlign: TextAlign.center,
                                 ),
                               ],
-
+                              
                               const SizedBox(height: 24),
-
+                              
                               // Action Button
                               _buildActionButton(),
                             ],
                           ),
                         ),
-
+                        
                         const SizedBox(height: 24),
-
+                        
                         // Connection Status Card
                         if (friendshipStatus != null)
                           Container(
@@ -607,19 +601,24 @@ class _UserProfilePageState extends State<UserProfilePage> {
                             decoration: BoxDecoration(
                               color: Colors.grey.shade50,
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.grey.shade300),
+                              border: Border.all(
+                                color: Colors.grey.shade200,
+                              ),
                             ),
                             child: Row(
                               children: [
-                                Icon(Icons.info_outline,
-                                    color: Colors.blueGrey),
-                                const SizedBox(width: 12),
+                                Icon(
+                                  Icons.info_outline,
+                                  size: 20,
+                                  color: Colors.blue.shade600,
+                                ),
+                                SizedBox(width: 12),
                                 Expanded(
                                   child: Text(
-                                    'Current status: ${friendshipStatus!['status']}',
+                                    _getStatusDescription(),
                                     style: TextStyle(
                                       fontSize: 14,
-                                      color: Colors.black87,
+                                      color: Colors.grey.shade700,
                                     ),
                                   ),
                                 ),
@@ -631,5 +630,31 @@ class _UserProfilePageState extends State<UserProfilePage> {
                   ),
                 ),
     );
+  }
+
+  String _getStatusDescription() {
+    if (friendshipStatus == null) return 'Loading connection status...';
+    
+    final status = friendshipStatus!['status'];
+    final isOutgoing = friendshipStatus!['isOutgoing'] ?? false;
+    
+    switch (status) {
+      case 'accepted':
+        return 'You are friends with this user. You can send messages anytime!';
+      case 'pending':
+        if (isOutgoing) {
+          return 'You sent a friend request. Waiting for them to respond.';
+        } else {
+          return 'This user sent you a friend request. Accept or decline above.';
+        }
+      case 'none':
+      default:
+        return 'You are not connected with this user. Send a friend request to connect!';
+    }
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
   }
 }
