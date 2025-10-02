@@ -1,4 +1,4 @@
-// lib/pages/profile_screen.dart - Complete architectural rebuild
+// lib/pages/profile_screen.dart - FIXED: Premium controller listener + navigation
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -10,7 +10,6 @@ import '../services/database_service.dart';
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
 import '../pages/user_profile_page.dart';
-import 'dart:async';
 
 class ProfileScreen extends StatefulWidget {
   final List<String> favoriteRecipes;
@@ -22,7 +21,6 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveClientMixin {
-  // Controllers and state variables
   File? _profileImage;
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
@@ -32,20 +30,17 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
   String _userEmail = '';
   bool _isLoading = false;
   
-  // Friends functionality
   List<Map<String, dynamic>> _friends = [];
   bool _friendsListVisible = true;
   bool _isLoadingFriends = false;
 
-  // Premium state management - separate from AnimatedBuilder
   late final PremiumGateController _premiumController;
-  StreamSubscription? _premiumSubscription;
   bool _isPremium = false;
   int _totalScansUsed = 0;
   bool _hasUsedAllFreeScans = false;
 
   @override
-  bool get wantKeepAlive => true; // Preserve state when tab switching
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -59,31 +54,25 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
-    _premiumSubscription?.cancel();
+    _premiumController.removeListener(_updatePremiumState);
     super.dispose();
   }
 
-  // FIXED: Proper premium controller management without AnimatedBuilder
+  // FIXED: Proper listener registration without StreamSubscription
   void _initializePremiumController() {
     _premiumController = PremiumGateController();
-    
-    // Listen to premium state changes efficiently
-    _premiumSubscription = _premiumController.addListener(() {
-      if (mounted) {
-        setState(() {
-          _isPremium = _premiumController.isPremium;
-          _totalScansUsed = _premiumController.totalScansUsed;
-          _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
-        });
-      }
-    }) as StreamSubscription?;
-
-    // Initialize current state
-    setState(() {
-      _isPremium = _premiumController.isPremium;
-      _totalScansUsed = _premiumController.totalScansUsed;
-      _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
-    });
+    _premiumController.addListener(_updatePremiumState);
+    _updatePremiumState();
+  }
+  
+  void _updatePremiumState() {
+    if (mounted) {
+      setState(() {
+        _isPremium = _premiumController.isPremium;
+        _totalScansUsed = _premiumController.totalScansUsed;
+        _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
+      });
+    }
   }
 
   Widget _sectionContainer({required Widget child}) {
@@ -97,7 +86,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 
-  // FRIENDS FUNCTIONALITY - Unchanged but with better error handling
+  // FIXED: Silent error handling for friends list
   Future<void> _loadFriends() async {
     if (!mounted) return;
     
@@ -128,18 +117,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
         });
       }
     } catch (e) {
+      print('Error loading friends: $e');
       if (mounted) {
         setState(() {
+          _friends = [];
           _isLoadingFriends = false;
         });
-        
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.databaseError,
-          showSnackBar: true,
-          customMessage: 'Unable to load friends list',
-        );
       }
     }
   }
@@ -172,7 +155,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     }
   }
 
-  // PROFILE LOADING - Enhanced with better state management
   Future<void> _loadProfile() async {
     if (!mounted) return;
     
@@ -181,7 +163,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     });
 
     try {
-      // Load from SharedPreferences first (for offline access)
       final prefs = await SharedPreferences.getInstance();
       final imagePath = prefs.getString('profile_image_path');
       final savedName = prefs.getString('user_name') ?? 'User';
@@ -199,13 +180,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
         });
       }
 
-      // Then try to load from Supabase (for most up-to-date data)
       final profile = await DatabaseService.getCurrentUserProfile();
       if (profile != null && mounted) {
         final userName = profile['username'] ?? savedName;
         final userEmail = profile['email'] ?? savedEmail;
         
-        // Update local storage with Supabase data
         await prefs.setString('user_name', userName);
         await prefs.setString('user_email', userEmail);
         
@@ -217,16 +196,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
         });
       }
     } catch (e) {
-      if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.databaseError,
-          showSnackBar: true,
-          customMessage: 'Unable to load profile data',
-          onRetry: _loadProfile,
-        );
-      }
+      print('Error loading profile: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -274,10 +244,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     });
 
     try {
-      // Save to Supabase first
       await DatabaseService.updateProfile(username: _nameController.text.trim());
       
-      // Then save to SharedPreferences as backup
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user_name', _nameController.text.trim());
       
@@ -314,9 +282,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
       return;
     }
 
-    // Basic email validation
-    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(_emailController.text.trim())) {
-      ErrorHandlingService.showSimpleError(context, 'Please enter a valid email address');
+    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(_emailController.text.trim())) {      ErrorHandlingService.showSimpleError(context, 'Please enter a valid email address');
       return;
     }
 
@@ -325,10 +291,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     });
 
     try {
-      // Save to Supabase first
       await DatabaseService.updateProfile(email: _emailController.text.trim());
       
-      // Then save to SharedPreferences as backup
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user_email', _emailController.text.trim());
       
@@ -423,7 +387,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 
-  // NAVIGATION METHODS - Enhanced error handling
+  // FIXED: Safe navigation with error handling
   void _navigateToUserProfile(String userId) {
     try {
       Navigator.push(
@@ -431,23 +395,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
         MaterialPageRoute(
           builder: (context) => UserProfilePage(userId: userId),
         ),
-      ).catchError((error) {
-        if (mounted) {
-          ErrorHandlingService.handleError(
-            context: context,
-            error: error,
-            category: ErrorHandlingService.unknownError,
-            customMessage: 'Unable to open profile',
-          );
-        }
-      });
+      );
     } catch (e) {
       if (mounted) {
-        ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.unknownError,
-          customMessage: 'Navigation error',
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to open profile')),
         );
       }
     }
@@ -455,23 +407,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
   void _navigateToSearchUsers() {
     try {
-      Navigator.pushNamed(context, '/search-users').catchError((error) {
-        if (mounted) {
-          ErrorHandlingService.handleError(
-            context: context,
-            error: error,
-            category: ErrorHandlingService.unknownError,
-            customMessage: 'Unable to open search',
-          );
-        }
-      });
+      Navigator.pushNamed(context, '/search-users');
     } catch (e) {
       if (mounted) {
-        ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.unknownError,
-          customMessage: 'Navigation error',
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Search page unavailable')),
         );
       }
     }
@@ -533,18 +473,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
         },
       );
     } catch (e) {
-      if (mounted) {
-        ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.unknownError,
-          customMessage: 'Unable to show friends list',
-        );
-      }
+      print('Error showing friends dialog: $e');
     }
   }
 
-  // PREMIUM STATUS SECTION - Separated from AnimatedBuilder
   Widget _buildPremiumStatusSection() {
     return _sectionContainer(
       child: Column(
@@ -602,7 +534,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: () {
-                  Navigator.pushNamed(context, '/purchase');
+                  try {
+                    Navigator.pushNamed(context, '/purchase');
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Premium page unavailable')),
+                    );
+                  }
                 },
                 icon: Icon(Icons.star),
                 label: Text('Upgrade to Premium'),
@@ -621,7 +559,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Required for AutomaticKeepAliveClientMixin
+    super.build(context);
     
     return Scaffold(
       appBar: AppBar(
@@ -652,7 +590,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
       drawer: AppDrawer(currentPage: 'profile'),
       body: Stack(
         children: [
-          // Background Image
           Positioned.fill(
             child: Image.asset(
               'assets/background.png',
@@ -672,12 +609,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
             ),
           ),
           
-          // FIXED: Remove AnimatedBuilder - use direct state management
           SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                // Profile Picture Section (ALWAYS AVAILABLE)
                 Center(
                   child: Stack(
                     children: [
@@ -720,7 +655,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
                 const SizedBox(height: 30),
 
-                // Name Section (ALWAYS AVAILABLE)
                 _sectionContainer(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -797,7 +731,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
                 const SizedBox(height: 20),
 
-                // Email Section (ALWAYS AVAILABLE)
                 _sectionContainer(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -875,7 +808,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
                 const SizedBox(height: 20),
 
-                // Friends Section
                 _sectionContainer(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -958,7 +890,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                           ),
                         ),
                       ] else ...[
-                        // Friends grid
                         GridView.builder(
                           shrinkWrap: true,
                           physics: NeverScrollableScrollPhysics(),
@@ -971,7 +902,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                           itemCount: _friends.length > 6 ? 6 : _friends.length,
                           itemBuilder: (context, index) {
                             if (index == 5 && _friends.length > 6) {
-                              // Show "View All" card
                               return GestureDetector(
                                 onTap: _showFullFriendsList,
                                 child: Container(
@@ -1054,12 +984,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
                 const SizedBox(height: 20),
 
-                // Premium Status Display - FIXED: No more AnimatedBuilder
                 _buildPremiumStatusSection(),
 
                 const SizedBox(height: 20),
 
-                // Premium Features (BLOCKED for free users)
                 PremiumGate(
                   feature: PremiumFeature.submitRecipes,
                   featureName: 'Recipe Submission',
@@ -1080,7 +1008,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                           width: double.infinity,
                           child: ElevatedButton.icon(
                             onPressed: () {
-                              Navigator.pushNamed(context, '/submit-recipe');
+                              try {
+                                Navigator.pushNamed(context, '/submit-recipe');
+                              } catch (e) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Recipe page unavailable')),
+                                );
+                              }
                             },
                             icon: Icon(Icons.add),
                             label: Text('Submit Your Own Recipe'),
@@ -1098,7 +1032,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
                 const SizedBox(height: 20),
 
-                // Favorite Recipes (BLOCKED for free users)
                 PremiumGate(
                   feature: PremiumFeature.favoriteRecipes,
                   featureName: 'Favorite Recipes',
@@ -1131,7 +1064,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                             width: double.infinity,
                             child: ElevatedButton.icon(
                               onPressed: () {
-                                // Navigation handled by AppDrawer
+                                try {
+                                  Navigator.pushNamed(context, '/favorite-recipes');
+                                } catch (e) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Favorites page unavailable')),
+                                  );
+                                }
                               },
                               icon: Icon(Icons.favorite),
                               label: Text('View Favorite Recipes'),
@@ -1155,3 +1094,4 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 }
+  

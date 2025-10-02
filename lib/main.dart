@@ -1,8 +1,8 @@
-// main.dart - FIXED: Uses existing AppConfig instead of Environment
+// main.dart - FIXED: Added missing favorite-recipes route
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'config/app_config.dart'; // FIXED: Use AppConfig instead of Environment
+import 'config/app_config.dart';
 import 'home_screen.dart';
 import 'login.dart';
 import 'pages/premium_page.dart';
@@ -11,12 +11,14 @@ import 'pages/submit_recipe.dart';
 import 'pages/messages_page.dart';
 import 'pages/search_users_page.dart';
 import 'pages/profile_screen.dart';
+import 'pages/favorite_recipes_page.dart';
+import 'models/favorite_recipe.dart';
+import 'contact_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   try {
-    // FIXED: Use AppConfig for Supabase initialization
     await Supabase.initialize(
       url: AppConfig.supabaseUrl,
       anonKey: AppConfig.supabaseAnonKey,
@@ -31,12 +33,10 @@ void main() async {
     runApp(const MyApp());
     
   } catch (e) {
-    // Handle initialization errors gracefully
     if (AppConfig.enableDebugPrints) {
       print('❌ App initialization failed: $e');
     }
     
-    // Show error app if initialization fails
     runApp(MaterialApp(
       home: Scaffold(
         body: Center(
@@ -61,7 +61,6 @@ void main() async {
               SizedBox(height: 16),
               ElevatedButton(
                 onPressed: () {
-                  // Restart the app
                   main();
                 },
                 child: Text('Retry'),
@@ -100,7 +99,6 @@ class _MyAppState extends State<MyApp> {
       if (AppConfig.enableDebugPrints) {
         AppConfig.debugPrint('Error checking premium status: $e');
       }
-      // Default to free user if there's an error
       setState(() {
         _isPremium = false;
       });
@@ -113,12 +111,11 @@ class _MyAppState extends State<MyApp> {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: AppConfig.appName, // FIXED: Use AppConfig app name
+      title: AppConfig.appName,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      // Enhanced initial route logic with error handling
       initialRoute: _getInitialRoute(supabase),
       routes: {
         '/login': (context) => const LoginPage(),
@@ -129,8 +126,9 @@ class _MyAppState extends State<MyApp> {
         '/submit-recipe': (context) => const SubmitRecipePage(),
         '/messages': (context) => MessagesPage(),
         '/search-users': (context) => const SearchUsersPage(),
+        '/favorite-recipes': (context) => FavoriteRecipesPage(favoriteRecipes: []),
+        '/contact': (context) => const ContactScreen(),
       },
-      // Error handling for unknown routes
       onUnknownRoute: (settings) {
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('Unknown route: ${settings.name}');
@@ -167,10 +165,8 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
-  /// Enhanced initial route logic with error handling
   String _getInitialRoute(SupabaseClient supabase) {
     try {
-      // Check if user is authenticated
       final user = supabase.auth.currentUser;
       
       if (user != null) {
@@ -188,7 +184,6 @@ class _MyAppState extends State<MyApp> {
       if (AppConfig.enableDebugPrints) {
         AppConfig.debugPrint('Error determining initial route: $e');
       }
-      // Default to login on any error
       return '/login';
     }
   }

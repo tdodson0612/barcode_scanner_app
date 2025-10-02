@@ -1,4 +1,4 @@
-// lib/pages/suggested_recipes_page.dart
+// lib/pages/suggested_recipes_page.dart - FIXED: Navigation and state management
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/database_service.dart';
@@ -61,7 +61,7 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
   bool _isLoading = false;
   bool _hasMore = true;
   int _currentPage = 0;
-  bool _ingredientsExist = false; // Cache the ingredient check result
+  bool _ingredientsExist = false;
   final ScrollController _scrollController = ScrollController();
 
   @override
@@ -91,30 +91,29 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
     });
 
     try {
-      // First, check if any of the scanned ingredients exist in the database
       bool hasMatchingIngredients = await _checkIngredientsExist();
-      _ingredientsExist = hasMatchingIngredients; // Cache the result
       
       if (!hasMatchingIngredients) {
-        // No matching ingredients found, show empty state
-        setState(() {
-          _allRecipes = [];
-          _currentRecipes = [];
-          _hasMore = false;
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _allRecipes = [];
+            _currentRecipes = [];
+            _hasMore = false;
+            _isLoading = false;
+            _ingredientsExist = false;
+          });
+        }
         return;
       }
 
-      // Query Supabase for recipes based on ingredients
       final response = await Supabase.instance.client
           .from('recipes')
           .select('*')
           .contains('ingredients', widget.productIngredients)
           .order('health_score', ascending: false)
-          .range(_currentPage * 2, (_currentPage * 2) + 1); // Get 2 recipes per page
+          .range(_currentPage * 2, (_currentPage * 2) + 1);
 
-      List<Recipe> newRecipes = response.map<Recipe>((recipeData) {
+      List<Recipe> newRecipes = (response as List).map<Recipe>((recipeData) {
         return Recipe(
           id: recipeData['id']?.toString() ?? '',
           title: recipeData['title'] ?? 'Unknown Recipe',
@@ -125,33 +124,36 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
         );
       }).toList();
 
-      setState(() {
-        if (_currentPage == 0) {
-          _allRecipes = newRecipes;
-          _currentRecipes = newRecipes;
-        }
-        _hasMore = newRecipes.length == 2; // If we got less than 2, no more recipes
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          if (_currentPage == 0) {
+            _allRecipes = newRecipes;
+            _currentRecipes = newRecipes;
+          }
+          _hasMore = newRecipes.length == 2;
+          _isLoading = false;
+          _ingredientsExist = true;
+        });
+      }
 
     } catch (e) {
       print('Error loading recipes: $e');
-      // Only load fallback recipes if ingredients exist but there was a connection error
-      if (_ingredientsExist || await _checkIngredientsExist()) {
-        _ingredientsExist = true;
+      if (await _checkIngredientsExist()) {
         _loadFallbackRecipes();
       } else {
-        setState(() {
-          _allRecipes = [];
-          _currentRecipes = [];
-          _hasMore = false;
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _allRecipes = [];
+            _currentRecipes = [];
+            _hasMore = false;
+            _isLoading = false;
+            _ingredientsExist = false;
+          });
+        }
       }
     }
   }
 
-  // Helper method to check if any scanned ingredients exist in the database
   Future<bool> _checkIngredientsExist() async {
     try {
       for (String ingredient in widget.productIngredients) {
@@ -162,13 +164,13 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
             .limit(1);
         
         if (response.isNotEmpty) {
-          return true; // Found at least one matching ingredient
+          return true;
         }
       }
-      return false; // No matching ingredients found
+      return false;
     } catch (e) {
       print('Error checking ingredients: $e');
-      return false; // Assume no matches on error
+      return false;
     }
   }
 
@@ -188,7 +190,7 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           .order('health_score', ascending: false)
           .range(_currentPage * 2, (_currentPage * 2) + 1);
 
-      List<Recipe> newRecipes = response.map<Recipe>((recipeData) {
+      List<Recipe> newRecipes = (response as List).map<Recipe>((recipeData) {
         return Recipe(
           id: recipeData['id']?.toString() ?? '',
           title: recipeData['title'] ?? 'Unknown Recipe',
@@ -199,24 +201,27 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
         );
       }).toList();
 
-      setState(() {
-        _allRecipes.addAll(newRecipes);
-        _currentRecipes = _allRecipes;
-        _hasMore = newRecipes.length == 2;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _allRecipes.addAll(newRecipes);
+          _currentRecipes = _allRecipes;
+          _hasMore = newRecipes.length == 2;
+          _isLoading = false;
+        });
+      }
 
     } catch (e) {
       print('Error loading more recipes: $e');
-      setState(() {
-        _isLoading = false;
-        _hasMore = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasMore = false;
+        });
+      }
     }
   }
 
   void _loadFallbackRecipes() {
-    // Generate fallback recipes based on liver health score when database fails
     List<Recipe> fallbackRecipes;
     
     if (widget.liverHealthScore >= 75) {
@@ -227,12 +232,15 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
       fallbackRecipes = _getDetoxFallbackRecipes();
     }
 
-    setState(() {
-      _allRecipes = fallbackRecipes;
-      _currentRecipes = fallbackRecipes;
-      _hasMore = false;
-      _isLoading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _allRecipes = fallbackRecipes;
+        _currentRecipes = fallbackRecipes;
+        _hasMore = false;
+        _isLoading = false;
+        _ingredientsExist = true;
+      });
+    }
   }
 
   List<Recipe> _getHealthyFallbackRecipes() => [
@@ -328,13 +336,11 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
       final isFavorited = await DatabaseService.isRecipeFavorited(recipe.title);
       
       if (isFavorited) {
-        // Find the recipe ID and remove it
         final favorites = await DatabaseService.getFavoriteRecipes();
         final favoriteRecipe = favorites.firstWhere(
           (fav) => fav.recipeName == recipe.title,
         );
         
-        // Check if ID is not null before removing
         if (favoriteRecipe.id != null) {
           await DatabaseService.removeFavoriteRecipe(favoriteRecipe.id!);
           
@@ -373,7 +379,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
         }
       }
       
-      // Refresh the page to update favorite status
       setState(() {});
     } catch (e) {
       if (mounted) {
@@ -398,7 +403,13 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           IconButton(
             icon: const Icon(Icons.shopping_cart),
             onPressed: () {
-              Navigator.pushNamed(context, '/grocery-list');
+              try {
+                Navigator.pushNamed(context, '/grocery-list');
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Grocery list unavailable')),
+                );
+              }
             },
           ),
         ],
@@ -543,7 +554,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header with title and actions
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -606,7 +616,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           
           const SizedBox(height: 12),
           
-          // Description
           Text(
             recipe.description,
             style: TextStyle(
@@ -618,7 +627,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           
           const SizedBox(height: 16),
           
-          // Ingredients
           const Text(
             'Ingredients:',
             style: TextStyle(
@@ -640,7 +648,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           
           const SizedBox(height: 16),
           
-          // Instructions
           const Text(
             'Instructions:',
             style: TextStyle(

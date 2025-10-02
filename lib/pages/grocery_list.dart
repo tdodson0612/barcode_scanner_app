@@ -1,3 +1,4 @@
+// lib/pages/grocery_list_page.dart - FIXED: Better error handling
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 import '../models/grocery_item.dart';
@@ -29,31 +30,42 @@ class _GroceryListPageState extends State<GroceryListPage> {
       DatabaseService.ensureUserAuthenticated();
       await _loadGroceryList();
     } catch (e) {
-      Navigator.pushReplacementNamed(context, '/login');
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
     } finally {
-      setState(() {
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
   }
 
   Future<void> _loadGroceryList() async {
     try {
       final List<GroceryItem> groceryItems = await DatabaseService.getGroceryList();
-      setState(() {
-        controllers = groceryItems
-            .map((item) => TextEditingController(text: item.item))
-            .toList();
-        if (controllers.isEmpty) controllers.add(TextEditingController());
-        controllers.add(TextEditingController()); // Always have one empty at the end
-      });
+      if (mounted) {
+        setState(() {
+          controllers = groceryItems
+              .map((item) => TextEditingController(text: item.item))
+              .toList();
+          if (controllers.isEmpty) controllers.add(TextEditingController());
+          controllers.add(TextEditingController());
+        });
+      }
     } catch (e) {
-      setState(() {
-        controllers = [TextEditingController()];
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading grocery list: $e')),
-      );
+      if (mounted) {
+        setState(() {
+          controllers = [TextEditingController()];
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading grocery list: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -90,20 +102,29 @@ class _GroceryListPageState extends State<GroceryListPage> {
           .where((text) => text.isNotEmpty)
           .toList();
       await DatabaseService.saveGroceryList(items);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Grocery list saved!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Grocery list saved!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving grocery list: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving grocery list: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
-      setState(() {
-        isSaving = false;
-      });
+      if (mounted) {
+        setState(() {
+          isSaving = false;
+        });
+      }
     }
   }
 
@@ -114,28 +135,38 @@ class _GroceryListPageState extends State<GroceryListPage> {
         title: const Text('Clear Grocery List'),
         content: const Text('Are you sure you want to clear your entire grocery list?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
               try {
                 await DatabaseService.clearGroceryList();
-                setState(() {
-                  for (var controller in controllers) {
-                    controller.dispose();
-                  }
-                  controllers = [TextEditingController()];
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Grocery list cleared!'),
-                    backgroundColor: Colors.orange,
-                  ),
-                );
+                if (mounted) {
+                  setState(() {
+                    for (var controller in controllers) {
+                      controller.dispose();
+                    }
+                    controllers = [TextEditingController()];
+                  });
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Grocery list cleared!'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error clearing grocery list: $e')),
-                );
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error clearing grocery list: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
               }
             },
             child: const Text('Clear'),
@@ -168,6 +199,9 @@ class _GroceryListPageState extends State<GroceryListPage> {
                   child: Image.asset(
                     'assets/background.png',
                     fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(color: Colors.grey[100]);
+                    },
                   ),
                 ),
                 Padding(
@@ -207,81 +241,75 @@ class _GroceryListPageState extends State<GroceryListPage> {
                             color: Colors.white.withAlpha((0.9 * 255).toInt()),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Column(
-                            children: [
-                              Expanded(
-                                child: ListView.builder(
-                                  itemCount: controllers.length,
-                                  itemBuilder: (context, index) {
-                                    return Padding(
-                                      padding: const EdgeInsets.only(bottom: 12),
-                                      child: Row(
-                                        children: [
-                                          Container(
-                                            width: 35,
-                                            height: 35,
-                                            decoration: BoxDecoration(
-                                              color: Colors.blue.shade100,
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                color: Colors.blue.shade300,
-                                                width: 1,
-                                              ),
-                                            ),
-                                            child: Center(
-                                              child: Text(
-                                                '${index + 1}',
-                                                style: TextStyle(
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Colors.blue.shade700,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: TextField(
-                                              controller: controllers[index],
-                                              decoration: InputDecoration(
-                                                hintText: 'Enter grocery item...',
-                                                border: OutlineInputBorder(
-                                                  borderRadius: BorderRadius.circular(8),
-                                                  borderSide: BorderSide(color: Colors.grey.shade300),
-                                                ),
-                                                focusedBorder: OutlineInputBorder(
-                                                  borderRadius: BorderRadius.circular(8),
-                                                  borderSide: BorderSide(color: Colors.blue, width: 2),
-                                                ),
-                                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                                filled: true,
-                                                fillColor: Colors.grey.shade50,
-                                              ),
-                                              onChanged: (text) {
-                                                if (index == controllers.length - 1 && text.isNotEmpty) {
-                                                  _addNewItem();
-                                                }
-                                              },
-                                            ),
-                                          ),
-                                          if (controllers.length > 1)
-                                            Padding(
-                                              padding: const EdgeInsets.only(left: 8),
-                                              child: IconButton(
-                                                icon: Icon(
-                                                  Icons.remove_circle,
-                                                  color: Colors.red.shade400,
-                                                ),
-                                                onPressed: () => _removeItem(index),
-                                              ),
-                                            ),
-                                        ],
+                          child: ListView.builder(
+                            itemCount: controllers.length,
+                            itemBuilder: (context, index) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 35,
+                                      height: 35,
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade100,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.blue.shade300,
+                                          width: 1,
+                                        ),
                                       ),
-                                    );
-                                  },
+                                      child: Center(
+                                        child: Text(
+                                          '${index + 1}',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.blue.shade700,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: TextField(
+                                        controller: controllers[index],
+                                        decoration: InputDecoration(
+                                          hintText: 'Enter grocery item...',
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                            borderSide: BorderSide(color: Colors.grey.shade300),
+                                          ),
+                                          focusedBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                            borderSide: BorderSide(color: Colors.blue, width: 2),
+                                          ),
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                          filled: true,
+                                          fillColor: Colors.grey.shade50,
+                                        ),
+                                        onChanged: (text) {
+                                          if (index == controllers.length - 1 && text.isNotEmpty) {
+                                            _addNewItem();
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                    if (controllers.length > 1)
+                                      Padding(
+                                        padding: const EdgeInsets.only(left: 8),
+                                        child: IconButton(
+                                          icon: Icon(
+                                            Icons.remove_circle,
+                                            color: Colors.red.shade400,
+                                          ),
+                                          onPressed: () => _removeItem(index),
+                                        ),
+                                      ),
+                                  ],
                                 ),
-                              ),
-                            ],
+                              );
+                            },
                           ),
                         ),
                       ),
