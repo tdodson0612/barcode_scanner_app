@@ -19,7 +19,7 @@ class AuthService {
   }
 
   static User? get currentUser => _supabase.auth.currentUser;
-
+  
   static String? get currentUserId => currentUser?.id;
 
   static bool _isDefaultPremiumEmail(String email) {
@@ -31,20 +31,19 @@ class AuthService {
     required String email,
     required String password,
   }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    final isPremiumByDefault = _isDefaultPremiumEmail(normalizedEmail);
+    
     final response = await _supabase.auth.signUp(
       email: email,
       password: password,
+      data: {
+        'is_premium': isPremiumByDefault, // Pass premium status to trigger
+      },
     );
     
-    if (response.user != null) {
-      final normalizedEmail = email.trim().toLowerCase();
-      final isPremiumByDefault = _isDefaultPremiumEmail(normalizedEmail);
-      await DatabaseService.createUserProfile(
-        response.user!.id,
-        email,
-        isPremium: isPremiumByDefault,
-      );
-    }
+    // Profile is now created automatically by database trigger!
+    // No need to call DatabaseService.createUserProfile anymore
     
     return response;
   }

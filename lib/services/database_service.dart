@@ -25,6 +25,12 @@ class DatabaseService {
   // ==================================================
   // USER PROFILE MANAGEMENT
   // ==================================================
+  
+  // NOTE: createUserProfile is no longer needed - profiles are created automatically
+  // by the database trigger when users sign up. Keeping this method commented out
+  // for reference in case manual profile creation is needed in the future.
+  
+  /*
   static Future<void> createUserProfile(
     String userId, 
     String email, 
@@ -42,10 +48,10 @@ class DatabaseService {
         'friends_list_visible': true, // Default to visible
       });
     } catch (e) {
-      // FIXED: Proper error handling instead of print + rethrow
       throw Exception('Failed to create user profile: $e');
     }
   }
+  */
 
   static Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     try {
