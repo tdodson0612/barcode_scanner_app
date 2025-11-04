@@ -1,4 +1,4 @@
-// lib/login.dart - FIXED: Resolved "invalid login" issue
+// lib/login.dart - FIXED: Using database trigger for profile creation
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -33,7 +33,7 @@ class _LoginPageState extends State<LoginPage> {
   void initState() {
     super.initState();
     _setupAuthListener();
-    
+   
     // Pre-fill controllers with saved values
     _emailController.text = _email;
     _passwordController.text = _password;
@@ -67,14 +67,14 @@ class _LoginPageState extends State<LoginPage> {
         // Enhanced error message to help debug
         String errorMessage = e.toString();
         AppConfig.debugPrint('Auth error details: $errorMessage');
-        
+       
         // Provide more specific error messages
         if (errorMessage.contains('Invalid login credentials')) {
           errorMessage = 'Invalid email or password. Please check your credentials and try again.';
         } else if (errorMessage.contains('Email not confirmed')) {
           errorMessage = 'Please verify your email address before signing in. Check your inbox for the confirmation link.';
         }
-        
+       
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -96,9 +96,9 @@ class _LoginPageState extends State<LoginPage> {
       // Trim email and password to remove any accidental whitespace
       final trimmedEmail = _email.trim();
       final trimmedPassword = _password; // Don't trim password - it might be intentional
-      
+     
       AppConfig.debugPrint('Attempting login for: $trimmedEmail');
-      
+     
       final response = await AuthService.signIn(
         email: trimmedEmail,
         password: trimmedPassword,
@@ -106,7 +106,7 @@ class _LoginPageState extends State<LoginPage> {
 
       if (response.user != null) {
         AppConfig.debugPrint('Login successful: ${response.user?.email}');
-        
+       
         if (mounted) {
           ErrorHandlingService.showSuccess(context, 'Welcome back!');
           Navigator.pushReplacementNamed(context, '/home');
@@ -132,7 +132,7 @@ class _LoginPageState extends State<LoginPage> {
     try {
       // Trim email for signup
       final trimmedEmail = _email.trim();
-      
+     
       final response = await AuthService.signUp(
         email: trimmedEmail,
         password: _password,
@@ -140,12 +140,9 @@ class _LoginPageState extends State<LoginPage> {
 
       if (response.user != null) {
         AppConfig.debugPrint('Sign up successful: ${response.user?.email}');
-
-        // Add delay to ensure auth context is ready
-        await Future.delayed(const Duration(milliseconds: 1000));
-
-        // Create user profile
-        await _createUserProfile(response.user!);
+       
+        // Profile is now created automatically by database trigger!
+        // No need to manually create it here
 
         if (mounted) {
           if (response.session == null) {
@@ -167,42 +164,14 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  Future<void> _createUserProfile(User user) async {
-    try {
-      await Supabase.instance.client.from('user_profiles').insert({
-        'id': user.id,
-        'email': user.email,
-        'daily_scans_used': 0,
-        'last_scan_date': DateTime.now().toIso8601String().split('T').first,
-        'username': user.email?.split('@')[0] ?? 'user',
-        'created_at': DateTime.now().toIso8601String(),
-        'friends_list_visible': true,
-      });
-      
-      AppConfig.debugPrint('User profile created for ${user.email}');
-    } catch (e) {
-      AppConfig.debugPrint('Error creating user profile: $e');
-      
-      if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.databaseError,
-          showSnackBar: true,
-          customMessage: 'Account created but profile setup failed. You can complete this in settings.',
-        );
-      }
-    }
-  }
-
   Future<void> _sendPasswordResetEmail() async {
     // Get email from form or show input dialog
     String resetEmail = _emailController.text.trim();
-    
+   
     if (resetEmail.isEmpty) {
       resetEmail = await _showEmailInputDialog() ?? '';
     }
-    
+   
     if (resetEmail.isEmpty) {
       ErrorHandlingService.showSimpleError(context, 'Please enter your email address');
       return;
@@ -216,7 +185,7 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       await AuthService.resetPassword(resetEmail);
-      
+     
       if (mounted) {
         ErrorHandlingService.showSuccess(
           context,
@@ -238,7 +207,7 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<String?> _showEmailInputDialog() async {
     final controller = TextEditingController();
-    
+   
     return showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -313,11 +282,11 @@ class _LoginPageState extends State<LoginPage> {
     if (value == null || value.trim().isEmpty) {
       return 'Email is required';
     }
-    
+   
     if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value.trim())) {
       return 'Please enter a valid email address';
     }
-    
+   
     return null;
   }
 
@@ -325,15 +294,14 @@ class _LoginPageState extends State<LoginPage> {
     if (value == null || value.isEmpty) {
       return 'Password is required';
     }
-    
-    // CRITICAL FIX: Only enforce length requirement during signup
-    // Don't validate password length during login - let Supabase handle it
+   
+    // Only enforce length requirement during signup
     if (!_isLogin) {
       if (value.length < 6) {
         return 'Password must be at least 6 characters';
       }
     }
-    
+   
     return null;
   }
 
@@ -342,12 +310,12 @@ class _LoginPageState extends State<LoginPage> {
       if (value == null || value.isEmpty) {
         return 'Please confirm your password';
       }
-      
+     
       if (value != _passwordController.text) {
         return 'Passwords do not match';
       }
     }
-    
+   
     return null;
   }
 
@@ -395,7 +363,7 @@ class _LoginPageState extends State<LoginPage> {
                           color: Colors.blue.shade600,
                         ),
                         SizedBox(height: 16),
-                        
+                       
                         // Title
                         Text(
                           _isLogin ? 'Welcome Back!' : 'Create Your Account',
@@ -406,11 +374,11 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                           textAlign: TextAlign.center,
                         ),
-                        
+                       
                         SizedBox(height: 8),
-                        
+                       
                         Text(
-                          _isLogin 
+                          _isLogin
                               ? 'Sign in to access your recipes and scan history'
                               : 'Join Recipe Scanner to unlock premium features',
                           style: TextStyle(
@@ -419,7 +387,7 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                           textAlign: TextAlign.center,
                         ),
-                        
+                       
                         SizedBox(height: 32),
 
                         // Email Field
@@ -441,7 +409,7 @@ class _LoginPageState extends State<LoginPage> {
                           autocorrect: false,
                           enableSuggestions: false,
                         ),
-                        
+                       
                         SizedBox(height: 16),
 
                         // Password Field
@@ -510,7 +478,7 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                               elevation: 2,
                             ),
-                            child: _isLoading 
+                            child: _isLoading
                                 ? Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
@@ -581,7 +549,7 @@ class _LoginPageState extends State<LoginPage> {
                               style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
                               children: [
                                 TextSpan(
-                                  text: _isLogin 
+                                  text: _isLogin
                                       ? "Don't have an account? "
                                       : "Already have an account? ",
                                 ),

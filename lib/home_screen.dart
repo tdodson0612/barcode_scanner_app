@@ -1051,7 +1051,7 @@ void _loadRewardedAd() {
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.1),
+              color: const Color.fromARGB(255, 255, 255, 255).withValues(alpha: 0.1),
               blurRadius: 8,
               offset: const Offset(0, 4),
             ),
@@ -1244,7 +1244,7 @@ void _loadRewardedAd() {
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
-                        color: Colors.black87,
+                        color: const Color.fromARGB(221, 255, 255, 255),
                       ),
                     ),
                     SizedBox(height: 8),
@@ -1281,7 +1281,7 @@ void _loadRewardedAd() {
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black26,
+                              color: const Color.fromARGB(66, 255, 255, 255),
                               blurRadius: 10,
                               offset: Offset(0, 5),
                             ),
@@ -1453,7 +1453,7 @@ void _loadRewardedAd() {
                               style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.black87,
+                                color: const Color.fromARGB(221, 255, 255, 255),
                               ),
                             ),
                           ],
@@ -1633,7 +1633,7 @@ void _loadRewardedAd() {
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.2),
+                      color: const Color.fromARGB(255, 255, 255, 255).withValues(alpha: 0.2),
                       blurRadius: 8,
                       offset: const Offset(0, 4),
                     ),
@@ -1737,7 +1737,7 @@ void _loadRewardedAd() {
                   borderRadius: BorderRadius.circular(12),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
+                      color: const Color.fromARGB(255, 255, 255, 255).withValues(alpha: 0.1),
                       blurRadius: 8,
                       offset: const Offset(0, 4),
                     ),
