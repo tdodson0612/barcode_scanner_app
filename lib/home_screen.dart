@@ -1,4 +1,4 @@
-// lib/home_screen.dart - Complete architectural rebuild with proper error handling
+// lib/home_screen.dart - FIXED: AppConfig + Keyword Extraction for Recipe Search
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -8,94 +8,66 @@ import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
-import '../widgets/premium_gate.dart';
-import '../controllers/premium_gate_controller.dart';
-import 'liverhealthbar.dart';
-import '../pages/profile_screen.dart';
-import 'contact_screen.dart';
-import '../services/auth_service.dart';
-import '../services/error_handling_service.dart';
-import '../models/favorite_recipe.dart';
-import '../pages/messages_page.dart';
-import '../pages/search_users_page.dart';
-import '../pages/favorite_recipes_page.dart';
-import '../pages/user_profile_page.dart';
-import '../widgets/app_drawer.dart';
-import '../config/app_config.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'widgets/premium_gate.dart';
+import 'controllers/premium_gate_controller.dart';
+import '../liverhealthbar.dart';
+import 'pages/profile_screen.dart';
+import '../contact_screen.dart';
+import 'services/auth_service.dart';
+import 'services/error_handling_service.dart';
+import 'models/favorite_recipe.dart';
+import 'pages/messages_page.dart';
+import 'pages/search_users_page.dart';
+import 'pages/favorite_recipes_page.dart';
+import 'pages/user_profile_page.dart';
+import 'widgets/app_drawer.dart';
+import 'config/app_config.dart';
 
-// Add this class right after your imports in home_screen.dart
+// ===== INGREDIENT KEYWORD EXTRACTOR (Embedded) =====
 class IngredientKeywordExtractor {
-  // Words to remove from product names
   static final List<String> _removeWords = [
     // Measurements
     'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds', 'kg', 'kilogram', 'kilograms',
     'gram', 'grams', 'g', 'ml', 'milliliter', 'milliliters', 'liter', 'liters', 'l',
     'gallon', 'gallons', 'quart', 'quarts', 'pint', 'pints', 'cup', 'cups', 'tbsp', 'tsp',
     'tablespoon', 'tablespoons', 'teaspoon', 'teaspoons', 'fl', 'fluid',
-    
     // Packaging
     'can', 'canned', 'jar', 'bottle', 'bottled', 'box', 'boxed', 'bag', 'bagged',
     'pack', 'package', 'packaged', 'carton', 'container', 'pouch', 'tube', 'tin',
-    
     // Common prefixes/descriptors
     'organic', 'natural', 'fresh', 'frozen', 'dried', 'raw', 'cooked', 'prepared',
     'whole', 'sliced', 'diced', 'chopped', 'minced', 'crushed', 'ground',
     'reduced', 'low', 'high', 'fat', 'free', 'sodium', 'sugar', 'calorie', 'diet',
     'light', 'lite', 'extra', 'pure', 'premium', 'grade', 'quality',
-    
-    // Colors (often not essential for recipes)
+    // Colors
     'red', 'green', 'yellow', 'white', 'black', 'brown',
-    
     // Brand/style descriptors
     'style', 'flavored', 'flavour', 'seasoned', 'unseasoned', 'salted', 'unsalted',
     'sweetened', 'unsweetened', 'plain', 'original',
-    
-    // Common food preparation states
+    // Preparation states
     'peeled', 'unpeeled', 'pitted', 'unpitted', 'seeded', 'unseeded',
     'bone-in', 'boneless', 'skin-on', 'skinless', 'roasted',
   ];
 
-  /// Extract the main ingredient keyword from a product name
-  /// Example: "12 oz can red roasted tomatoes" -> "tomatoes"
   static String extract(String productName) {
     if (productName.trim().isEmpty) return productName;
-
-    // Convert to lowercase for processing
     String processed = productName.toLowerCase().trim();
-    
-    // Remove special characters but keep spaces and hyphens
     processed = processed.replaceAll(RegExp(r'[^\w\s-]'), ' ');
-    
-    // Remove numbers and measurements (e.g., "12", "12oz")
     processed = processed.replaceAll(RegExp(r'\b\d+\.?\d*\s*(oz|lb|g|kg|ml|l)?\b'), '');
     processed = processed.replaceAll(RegExp(r'\d+'), '');
     
-    // Split into words
     List<String> words = processed.split(RegExp(r'\s+'))
         .where((word) => word.isNotEmpty)
         .toList();
     
-    // Remove common filler words
-    words = words.where((word) {
-      // Keep the word if it's not in the remove list
-      return !_removeWords.contains(word.toLowerCase());
-    }).toList();
+    words = words.where((word) => !_removeWords.contains(word.toLowerCase())).toList();
     
-    // If nothing left, return original
-    if (words.isEmpty) {
-      return productName.trim();
-    }
-    
-    // Return the last remaining word (usually the main ingredient)
-    // For "roasted tomatoes" it will return "tomatoes"
-    // For "chicken breast" it will return "chicken"
+    if (words.isEmpty) return productName.trim();
     return words.last;
   }
 }
 
-
-/// --- NutritionInfo Data Model ---
+// ===== DATA MODELS =====
 class NutritionInfo {
   final String productName;
   final double fat;
@@ -130,7 +102,6 @@ class NutritionInfo {
   }
 }
 
-/// --- Recipe Data Model ---
 class Recipe {
   final String title;
   final String description;
@@ -159,7 +130,7 @@ class Recipe {
   );
 }
 
-/// --- Liver Health Score Calculator ---
+// ===== CALCULATORS & GENERATORS =====
 class LiverHealthCalculator {
   static const double fatMax = 20.0;
   static const double sodiumMax = 500.0;
@@ -186,35 +157,16 @@ class LiverHealthCalculator {
   }
 }
 
-/// --- Recipe Generator ---
 class RecipeGenerator {
-  static Future<List<Recipe>> generateSuggestionsFromProduct(String productName) async {
-  final keyword = IngredientKeywordExtractor.extract(productName);
-  AppConfig.debugPrint('Product: $productName -> Keyword: $keyword');
-  
-  try {
-    // Query Supabase for recipes containing the keyword in ingredients
-    final response = await Supabase.instance.client
-      .from('recipes')
-      .select()
-      .ilike('ingredients', '%$keyword%')
-      .limit(5);
+  static List<Recipe> generateSuggestionsFromProduct(String productName) {
+    final keyword = IngredientKeywordExtractor.extract(productName);
     
-    // Convert response to Recipe objects
-    final recipes = (response as List)
-        .map((json) => Recipe.fromJson(json))
-        .toList();
+    AppConfig.debugPrint('Product: $productName');
+    AppConfig.debugPrint('Extracted keyword: $keyword');
     
-    AppConfig.debugPrint('Found ${recipes.length} recipes for keyword: $keyword');
-    
-    return recipes.isEmpty ? _getHealthyRecipes() : recipes;
-  } catch (e) {
-    AppConfig.debugPrint('Error fetching recipes from Supabase: $e');
-    // Fallback to default recipes on error
-    return _getHealthyRecipes();
+    return _getRecipesForIngredient(keyword);
   }
-}
-
+  
   static List<Recipe> generateSuggestions(int liverHealthScore) {
     if (liverHealthScore >= 75) {
       return _getHealthyRecipes();
@@ -223,6 +175,44 @@ class RecipeGenerator {
     } else {
       return _getDetoxRecipes();
     }
+  }
+  
+  static List<Recipe> _getRecipesForIngredient(String ingredient) {
+    final ingredientLower = ingredient.toLowerCase();
+    
+    if (ingredientLower.contains('tomato')) {
+      return [
+        Recipe(
+          title: "Classic Tomato Pasta",
+          description: "Simple and delicious tomato-based pasta",
+          ingredients: ["Pasta", "Tomatoes", "Garlic", "Olive oil", "Basil"],
+          instructions: "Cook pasta. Sauté garlic, add tomatoes, simmer. Toss with pasta and fresh basil.",
+        ),
+        Recipe(
+          title: "Tomato Soup",
+          description: "Creamy homemade tomato soup",
+          ingredients: ["Tomatoes", "Onion", "Vegetable broth", "Cream", "Herbs"],
+          instructions: "Sauté onion, add tomatoes and broth. Simmer, blend until smooth, stir in cream.",
+        ),
+      ];
+    } else if (ingredientLower.contains('chicken')) {
+      return [
+        Recipe(
+          title: "Baked Chicken Breast",
+          description: "Juicy and flavorful baked chicken",
+          ingredients: ["Chicken breast", "Herbs", "Lemon", "Olive oil", "Garlic"],
+          instructions: "Season chicken, drizzle with oil and lemon. Bake at 375°F for 25 minutes.",
+        ),
+        Recipe(
+          title: "Chicken Stir Fry",
+          description: "Quick and healthy chicken stir fry",
+          ingredients: ["Chicken", "Mixed vegetables", "Soy sauce", "Ginger", "Garlic"],
+          instructions: "Cut chicken, stir fry with vegetables, add sauce and seasonings.",
+        ),
+      ];
+    }
+    
+    return _getHealthyRecipes();
   }
 
   static List<Recipe> _getHealthyRecipes() => [
@@ -271,9 +261,8 @@ class RecipeGenerator {
   ];
 }
 
-/// --- Nutrition API Service with Enhanced Error Handling ---
+// ===== API SERVICES =====
 class NutritionApiService {
-  // FIXED: Use Environment base URL instead of hardcoded
   static String get baseUrl => AppConfig.openFoodFactsUrl;
 
   static Future<NutritionInfo?> fetchNutritionInfo(String barcode) async {
@@ -295,15 +284,12 @@ class NutritionApiService {
       }
       return null;
     } catch (e) {
-      if (AppConfig.enableDebugPrints) {
-        print('Nutrition API Error: $e');
-      }
+      AppConfig.debugPrint('Nutrition API Error: $e');
       return null;
     }
   }
 }
 
-/// --- Barcode Scanner Service with Enhanced Error Handling ---
 class BarcodeScannerService {
   static Future<String?> scanBarcode(String imagePath) async {
     if (imagePath.isEmpty) return null;
@@ -319,7 +305,7 @@ class BarcodeScannerService {
       }
       return null;
     } catch (e) {
-      print('Barcode Scanner Error: $e');
+      AppConfig.debugPrint('Barcode Scanner Error: $e');
       return null;
     } finally {
       await barcodeScanner.close();
@@ -334,7 +320,7 @@ class BarcodeScannerService {
   }
 }
 
-/// --- FIXED: HomePage with proper architecture ---
+// ===== HOME PAGE =====
 class HomePage extends StatefulWidget {
   final bool isPremium;
 
@@ -345,11 +331,8 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
-  // Premium scanning state
   bool _isScanning = false;
   List<Map<String, String>> _scannedRecipes = [];
-  
-  // Nutrition scanner state
   File? _imageFile;
   String _nutritionText = '';
   int? _liverHealthScore;
@@ -360,21 +343,17 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
   bool _showInitialView = true;
   NutritionInfo? _currentNutrition;
 
-  // FIXED: Premium state management without AnimatedBuilder performance issues
   late final PremiumGateController _premiumController;
-  StreamSubscription? _premiumSubscription;
   bool _isPremium = false;
   int _remainingScans = 3;
   bool _hasUsedAllFreeScans = false;
 
-  // FIXED: Proper ad management with disposal tracking
   InterstitialAd? _interstitialAd;
   bool _isAdReady = false;
   RewardedAd? _rewardedAd;
   bool _isRewardedAdReady = false;
   bool _isDisposed = false;
 
-  // Image picker
   final ImagePicker _picker = ImagePicker();
 
   @override
@@ -390,18 +369,15 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
   @override
   void dispose() {
     _isDisposed = true;
-    _premiumSubscription?.cancel();
     _interstitialAd?.dispose();
     _rewardedAd?.dispose();
     super.dispose();
   }
 
-  // FIXED: Proper premium controller management
   void _initializePremiumController() {
     _premiumController = PremiumGateController();
     
-    // Listen to premium state changes efficiently
-    _premiumSubscription = _premiumController.addListener(() {
+    _premiumController.addListener(() {
       if (mounted && !_isDisposed) {
         setState(() {
           _isPremium = _premiumController.isPremium;
@@ -409,9 +385,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
           _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
         });
       }
-    }) as StreamSubscription?;
+    });
 
-    // Initialize current state
     setState(() {
       _isPremium = _premiumController.isPremium;
       _remainingScans = _premiumController.remainingScans;
@@ -419,7 +394,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     });
   }
 
-  // FIXED: Async initialization with proper error handling
   Future<void> _initializeAsync() async {
     try {
       await _premiumController.refresh();
@@ -439,66 +413,57 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     }
   }
 
-  /// FIXED: Load interstitial ad with proper error handling
   void _loadInterstitialAd() {
-  if (_isDisposed) return;
+    if (_isDisposed) return;
 
-  // FIXED: Use Environment system instead of hardcoded IDs
-  final adUnitId = AppConfig.interstitialAdId;
-  InterstitialAd.load(
-    adUnitId: adUnitId,
-    request: AdRequest(),
-    adLoadCallback: InterstitialAdLoadCallback(
-      onAdLoaded: (ad) {
-        if (!_isDisposed) {
-          _interstitialAd = ad;
-          _isAdReady = true;
-          ad.setImmersiveMode(true);
-        } else {
-          ad.dispose();
-        }
-      },
-      onAdFailedToLoad: (error) {
-        if (AppConfig.enableDebugPrints) {
-          print('InterstitialAd failed to load: $error');
-        }
-        _isAdReady = false;
-      },
-    ),
-  );
-}
+    final adUnitId = AppConfig.interstitialAdId;
 
+    InterstitialAd.load(
+      adUnitId: adUnitId,
+      request: AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          if (!_isDisposed) {
+            _interstitialAd = ad;
+            _isAdReady = true;
+            ad.setImmersiveMode(true);
+          } else {
+            ad.dispose();
+          }
+        },
+        onAdFailedToLoad: (error) {
+          AppConfig.debugPrint('InterstitialAd failed to load: $error');
+          _isAdReady = false;
+        },
+      ),
+    );
+  }
 
-  /// FIXED: Load rewarded ad with proper error handling
-void _loadRewardedAd() {
-  if (_isDisposed) return;
+  void _loadRewardedAd() {
+    if (_isDisposed) return;
 
-  // FIXED: Use Environment system instead of hardcoded IDs
-  final adUnitId = AppConfig.rewardedAdId;
+    final adUnitId = AppConfig.rewardedAdId;
 
-  RewardedAd.load(
-    adUnitId: adUnitId,
-    request: AdRequest(),
-    rewardedAdLoadCallback: RewardedAdLoadCallback(
-      onAdLoaded: (ad) {
-        if (!_isDisposed) {
-          _rewardedAd = ad;
-          _isRewardedAdReady = true;
-        } else {
-          ad.dispose();
-        }
-      },
-      onAdFailedToLoad: (error) {
-        if (AppConfig.enableDebugPrints) {
-          print('RewardedAd failed to load: $error');
-        }
-        _isRewardedAdReady = false;
-      },
-    ),
-  );
-}
+    RewardedAd.load(
+      adUnitId: adUnitId,
+      request: AdRequest(),
+      rewardedAdLoadCallback: RewardedAdLoadCallback(
+        onAdLoaded: (ad) {
+          if (!_isDisposed) {
+            _rewardedAd = ad;
+            _isRewardedAdReady = true;
+          } else {
+            ad.dispose();
+          }
+        },
+        onAdFailedToLoad: (error) {
+          AppConfig.debugPrint('RewardedAd failed to load: $error');
+          _isRewardedAdReady = false;
+        },
+      ),
+    );
+  }
 
-  /// FIXED: Show interstitial ad with proper disposal checks
   void _showInterstitialAd(VoidCallback onAdClosed) {
     if (_isDisposed || !_isAdReady || _interstitialAd == null) {
       onAdClosed();
@@ -507,10 +472,10 @@ void _loadRewardedAd() {
 
     _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
       onAdShowedFullScreenContent: (ad) {
-        print('Interstitial ad showed full screen content');
+        AppConfig.debugPrint('Interstitial ad showed');
       },
       onAdDismissedFullScreenContent: (ad) {
-        print('Interstitial ad dismissed');
+        AppConfig.debugPrint('Interstitial ad dismissed');
         ad.dispose();
         if (!_isDisposed) {
           _loadInterstitialAd();
@@ -518,7 +483,7 @@ void _loadRewardedAd() {
         onAdClosed();
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
-        print('Interstitial ad failed to show: $error');
+        AppConfig.debugPrint('Interstitial ad failed: $error');
         ad.dispose();
         if (!_isDisposed) {
           _loadInterstitialAd();
@@ -531,24 +496,23 @@ void _loadRewardedAd() {
     _isAdReady = false;
   }
 
-  /// FIXED: Show rewarded ad with proper error handling
   void _showRewardedAd() {
     if (_isDisposed) return;
 
     if (_isRewardedAdReady && _rewardedAd != null) {
       _rewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
         onAdShowedFullScreenContent: (ad) {
-          print('Rewarded ad showed full screen content');
+          AppConfig.debugPrint('Rewarded ad showed');
         },
         onAdDismissedFullScreenContent: (ad) {
-          print('Rewarded ad dismissed');
+          AppConfig.debugPrint('Rewarded ad dismissed');
           ad.dispose();
           if (!_isDisposed) {
             _loadRewardedAd();
           }
         },
         onAdFailedToShowFullScreenContent: (ad, error) {
-          print('Rewarded ad failed to show: $error');
+          AppConfig.debugPrint('Rewarded ad failed: $error');
           ad.dispose();
           if (!_isDisposed) {
             _loadRewardedAd();
@@ -559,7 +523,7 @@ void _loadRewardedAd() {
       _rewardedAd!.show(
         onUserEarnedReward: (ad, reward) {
           if (!_isDisposed) {
-            print('User earned reward: ${reward.amount} ${reward.type}');
+            AppConfig.debugPrint('User earned reward: ${reward.amount}');
             _premiumController.addBonusScans(1);
             
             if (mounted) {
@@ -582,7 +546,6 @@ void _loadRewardedAd() {
     }
   }
 
-  /// FIXED: Load favorite recipes with proper error handling
   Future<void> _loadFavoriteRecipes() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -595,7 +558,7 @@ void _loadRewardedAd() {
                 try {
                   return FavoriteRecipe.fromJson(json.decode(jsonString));
                 } catch (e) {
-                  print('Error parsing recipe: $e');
+                  AppConfig.debugPrint('Error parsing recipe: $e');
                   return null;
                 }
               })
@@ -617,7 +580,6 @@ void _loadRewardedAd() {
     }
   }
 
-  /// FIXED: Toggle favorite recipe with enhanced error handling
   Future<void> _toggleFavoriteRecipe(Recipe recipe) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -633,7 +595,6 @@ void _loadRewardedAd() {
       final existingIndex = _favoriteRecipes.indexWhere((fav) => fav.recipeName == recipe.title);
       
       if (existingIndex >= 0) {
-        // Remove from favorites
         if (mounted && !_isDisposed) {
           setState(() {
             _favoriteRecipes.removeAt(existingIndex);
@@ -645,7 +606,6 @@ void _loadRewardedAd() {
           );
         }
       } else {
-        // Add to favorites
         final favoriteRecipe = FavoriteRecipe(
           userId: currentUserId,
           recipeName: recipe.title,
@@ -666,7 +626,6 @@ void _loadRewardedAd() {
         }
       }
       
-      // Save to SharedPreferences
       final favoriteRecipesJson = _favoriteRecipes
           .map((recipe) => json.encode(recipe.toJson()))
           .toList();
@@ -704,7 +663,6 @@ void _loadRewardedAd() {
     }
   }
 
-  /// FIXED: Premium scan with proper error handling
   Future<void> _performScan() async {
     try {
       if (!_premiumController.canAccessFeature(PremiumFeature.scan)) {
@@ -744,7 +702,6 @@ void _loadRewardedAd() {
         return;
       }
 
-      // Simulate scanning delay
       await Future.delayed(Duration(seconds: 2));
 
       if (mounted && !_isDisposed) {
@@ -786,7 +743,6 @@ void _loadRewardedAd() {
     }
   }
 
-  /// FIXED: Take photo with proper error handling
   Future<void> _takePhoto() async {
     try {
       if (!_premiumController.canAccessFeature(PremiumFeature.scan)) {
@@ -851,7 +807,6 @@ void _loadRewardedAd() {
     }
   }
 
-  /// FIXED: Submit photo with comprehensive error handling
   Future<void> _submitPhoto() async {
     if (_imageFile == null || _isDisposed) return;
 
@@ -891,8 +846,8 @@ void _loadRewardedAd() {
         calories: nutrition.calories,
       );
 
-      final suggestions = await RecipeGenerator.generateSuggestionsFromProduct(nutrition.productName);
-      
+      final suggestions = RecipeGenerator.generateSuggestionsFromProduct(nutrition.productName);
+
       if (mounted && !_isDisposed) {
         setState(() {
           _nutritionText = _buildNutritionDisplay(nutrition);
@@ -935,7 +890,6 @@ void _loadRewardedAd() {
            "Sodium: ${nutrition.sodium.toStringAsFixed(1)} mg/100g";
   }
 
-  /// FIXED: Search users with proper error handling
   Future<void> _searchUsers(String query) async {
     if (query.trim().isEmpty) return;
     
@@ -1035,7 +989,6 @@ void _loadRewardedAd() {
     );
   }
 
-  /// Build recipe suggestions for nutrition analysis
   Widget _buildNutritionRecipeSuggestions() {
     if (_recipeSuggestions.isEmpty) return const SizedBox.shrink();
 
@@ -1076,7 +1029,6 @@ void _loadRewardedAd() {
     );
   }
 
-  /// Build collapsible recipe card for nutrition results
   Widget _buildNutritionRecipeCard(Recipe recipe) {
     final isFavorite = _isRecipeFavorited(recipe.title);
     
@@ -1192,11 +1144,9 @@ void _loadRewardedAd() {
     );
   }
 
-  /// Build initial welcome view - FIXED: No more AnimatedBuilder
   Widget _buildInitialView() {
     return Stack(
       children: [
-        // Background
         Positioned.fill(
           child: Image.asset(
             'assets/background.png',
@@ -1216,15 +1166,12 @@ void _loadRewardedAd() {
           ),
         ),
         
-        // Content
         SingleChildScrollView(
           padding: EdgeInsets.all(16),
           child: Column(
             children: [
-              // Search Bar
               _buildSearchBar(),
               
-              // Welcome Section
               Container(
                 padding: EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -1262,11 +1209,9 @@ void _loadRewardedAd() {
               
               SizedBox(height: 30),
               
-              // FIXED: Scan Button Section with direct state management
               Center(
                 child: Column(
                   children: [
-                    // Main Scan Button
                     GestureDetector(
                       onTap: _isScanning ? null : _takePhoto,
                       child: Container(
@@ -1333,7 +1278,6 @@ void _loadRewardedAd() {
                     
                     SizedBox(height: 20),
                     
-                    // Scan Status
                     Container(
                       padding: EdgeInsets.all(16),
                       decoration: BoxDecoration(
@@ -1430,7 +1374,6 @@ void _loadRewardedAd() {
               
               SizedBox(height: 30),
               
-              // Recipe Results from Demo Scan
               if (_scannedRecipes.isNotEmpty) ...[
                 PremiumGate(
                   feature: PremiumFeature.viewRecipes,
@@ -1474,7 +1417,6 @@ void _loadRewardedAd() {
     );
   }
 
-  /// Build scanned recipe card
   Widget _buildScannedRecipeCard(Map<String, String> recipe) {
     final isFavorite = _isRecipeFavorited(recipe['name']!);
     
@@ -1611,7 +1553,6 @@ void _loadRewardedAd() {
     );
   }
 
-  /// Build scanning view with results
   Widget _buildScanningView() {
     return Container(
       decoration: const BoxDecoration(
@@ -1626,7 +1567,6 @@ void _loadRewardedAd() {
           children: [
             const SizedBox(height: 20),
 
-            // Image preview
             if (_imageFile != null)
               Container(
                 decoration: BoxDecoration(
@@ -1667,7 +1607,6 @@ void _loadRewardedAd() {
 
             const SizedBox(height: 20),
 
-            // Action buttons
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -1704,7 +1643,6 @@ void _loadRewardedAd() {
 
             const SizedBox(height: 20),
 
-            // Loading indicator
             if (_isLoading)
               Container(
                 padding: const EdgeInsets.all(16),
@@ -1727,7 +1665,6 @@ void _loadRewardedAd() {
                 ),
               ),
 
-            // Nutrition information
             if (_nutritionText.isNotEmpty)
               Container(
                 padding: const EdgeInsets.all(16),
@@ -1776,7 +1713,6 @@ void _loadRewardedAd() {
 
             const SizedBox(height: 20),
 
-            // Liver health bar
             if (_showLiverBar && _liverHealthScore != null)
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -1785,7 +1721,6 @@ void _loadRewardedAd() {
 
             const SizedBox(height: 20),
 
-            // Recipe suggestions from nutrition analysis
             _buildNutritionRecipeSuggestions(),
           ],
         ),
@@ -1795,7 +1730,7 @@ void _loadRewardedAd() {
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Required for AutomaticKeepAliveClientMixin
+    super.build(context);
     
     return Scaffold(
       appBar: AppBar(
@@ -1803,7 +1738,6 @@ void _loadRewardedAd() {
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
         actions: [
-          // FIXED: Show purchase button for non-premium users without AnimatedBuilder
           if (!_isPremium)
             IconButton(
               icon: const Icon(Icons.shopping_cart),

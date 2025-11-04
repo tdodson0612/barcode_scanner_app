@@ -11,7 +11,7 @@ class SearchUsersPage extends StatefulWidget {
 
 
   @override
-  _SearchUsersPageState createState() => _SearchUsersPageState();
+  State<SearchUsersPage> createState() => _SearchUsersPageState();
 }
 
 class _SearchUsersPageState extends State<SearchUsersPage> {

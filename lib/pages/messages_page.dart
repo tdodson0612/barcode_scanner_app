@@ -7,7 +7,7 @@ import 'search_users_page.dart';
 
 class MessagesPage extends StatefulWidget {
   @override
-  _MessagesPageState createState() => _MessagesPageState();
+  State<MessagesPage> createState() => _MessagesPageState();
 }
 
 class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderStateMixin {
