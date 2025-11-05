@@ -83,7 +83,10 @@ class AuthService {
   }
 
   static Future<void> resetPassword(String email) async {
-    await _supabase.auth.resetPasswordForEmail(email);
+    await _supabase.auth.resetPasswordForEmail(
+      email,
+      redirectTo: 'com.terrydodson.liverWiseApp://reset-password',
+    );
   }
 
   static Stream<AuthState> get authStateChanges => 
