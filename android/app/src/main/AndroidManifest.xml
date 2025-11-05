@@ -36,6 +36,18 @@
             <!-- <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme" /> -->
+            
+            <intent-filter android:autoVerify="true">
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+
+            <!-- Your custom scheme -->
+            <data
+                android:scheme="com.terrydodson.liverWiseApp"
+                android:host="reset-password" />
+        </intent-filter>
+
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
