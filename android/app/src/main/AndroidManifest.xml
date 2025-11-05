@@ -1,5 +1,6 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- <-package="com.liverwise.app"-> -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.wiseapps.liverwise">
+
 
     <!-- ✅ Permissions go here -->
     <uses-permission android:name="android.permission.CAMERA" />

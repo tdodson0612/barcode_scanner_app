@@ -1,4 +1,4 @@
-package com.example.barcode_scanner_app
+package com.wiseapps.liverwise
 
 import io.flutter.embedding.android.FlutterActivity
 
