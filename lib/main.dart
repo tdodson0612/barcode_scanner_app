@@ -1,5 +1,6 @@
-// main.dart - FIXED: Added missing favorite-recipes route
+// main.dart - Fully updated with Uni Links & Supabase reset-password
 import 'package:flutter/material.dart';
+import 'package:uni_links/uni_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/app_config.dart';
@@ -87,6 +88,36 @@ class _MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
     _checkPremiumStatus();
+    _initUniLinks();
+  }
+
+  Future<void> _initUniLinks() async {
+    // Listen for links while app is running
+    linkStream.listen((String? link) async {
+      if (link != null && link.contains('reset-password')) {
+        final response = await Supabase.instance.client.auth.getSessionFromUrl(Uri.parse(link));
+        final session = response.session; // <-- extract the actual Session
+        if (mounted) {
+          Navigator.pushNamed(context, '/reset-password', arguments: session);
+        }
+      }
+    });
+
+    // Handle cold start (app launched via link)
+    try {
+      final initialLink = await getInitialLink();
+      if (initialLink != null && initialLink.contains('reset-password')) {
+        final response = await Supabase.instance.client.auth.getSessionFromUrl(Uri.parse(initialLink));
+        final session = response.session; // <-- extract Session
+        if (mounted) {
+          Navigator.pushNamed(context, '/reset-password', arguments: session);
+        }
+      }
+    } catch (e) {
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('Failed to handle initial link: $e');
+      }
+    }
   }
 
   Future<void> _checkPremiumStatus() async {
