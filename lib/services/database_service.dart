@@ -816,13 +816,27 @@ class DatabaseService {
       final searchQuery = query.trim();
       if (searchQuery.isEmpty) return [];
 
-      // Use RPC call for complex fuzzy search with ranking
-      final response = await _supabase.rpc('search_users_fuzzy', params: {
-        'search_query': searchQuery,
-        'current_user_id': currentUserId!,
-      });
+      // Try RPC call for complex fuzzy search with ranking
+      try {
+        final response = await _supabase.rpc('search_users_fuzzy', params: {
+          'search_query': searchQuery,
+          'current_user_id': currentUserId!,
+        });
 
-      return List<Map<String, dynamic>>.from(response);
+        return List<Map<String, dynamic>>.from(response);
+      } catch (rpcError) {
+        print('RPC search failed, falling back to basic search: $rpcError');
+        
+        // Fallback to basic search if RPC fails
+        final response = await _supabase
+            .from('user_profiles')
+            .select('id, email, username, first_name, last_name, avatar_url')
+            .or('email.ilike.%$searchQuery%,username.ilike.%$searchQuery%,first_name.ilike.%$searchQuery%,last_name.ilike.%$searchQuery%')
+            .neq('id', currentUserId!)
+            .limit(50);
+
+        return List<Map<String, dynamic>>.from(response);
+      }
     } catch (e) {
       throw Exception('Failed to search users: $e');
     }
