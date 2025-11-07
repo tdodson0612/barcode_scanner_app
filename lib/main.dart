@@ -1,6 +1,6 @@
-// main.dart - Fully updated with Uni Links & Supabase reset-password
+// main.dart – Fixed for Supabase + App Links (compatible version)
 import 'package:flutter/material.dart';
-import 'package:uni_links/uni_links.dart';
+import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/app_config.dart';
@@ -18,7 +18,7 @@ import 'contact_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   try {
     await Supabase.initialize(
       url: AppConfig.supabaseUrl,
@@ -32,39 +32,38 @@ void main() async {
     }
 
     runApp(const MyApp());
-    
   } catch (e) {
     if (AppConfig.enableDebugPrints) {
       print('❌ App initialization failed: $e');
     }
-    
+
     runApp(MaterialApp(
       home: Scaffold(
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.error, size: 64, color: Colors.red),
-              SizedBox(height: 16),
-              Text(
+              const Icon(Icons.error, size: 64, color: Colors.red),
+              const SizedBox(height: 16),
+              const Text(
                 'App Initialization Failed',
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 8),
               Padding(
-                padding: EdgeInsets.all(16),
+                padding: const EdgeInsets.all(16),
                 child: Text(
                   'Please check your configuration and try again.\n\nError: $e',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.grey[600]),
                 ),
               ),
-              SizedBox(height: 16),
+              const SizedBox(height: 16),
               ElevatedButton(
                 onPressed: () {
                   main();
                 },
-                child: Text('Retry'),
+                child: const Text('Retry'),
               ),
             ],
           ),
@@ -83,39 +82,53 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   bool _isPremium = false;
+  late final AppLinks _appLinks;
 
   @override
   void initState() {
     super.initState();
     _checkPremiumStatus();
-    _initUniLinks();
+    _initAppLinks();
   }
 
-  Future<void> _initUniLinks() async {
-    // Listen for links while app is running
-    linkStream.listen((String? link) async {
-      if (link != null && link.contains('reset-password')) {
-        final response = await Supabase.instance.client.auth.getSessionFromUrl(Uri.parse(link));
-        final session = response.session; // <-- extract the actual Session
-        if (mounted) {
-          Navigator.pushNamed(context, '/reset-password', arguments: session);
-        }
+  Future<void> _initAppLinks() async {
+    _appLinks = AppLinks();
+
+    // Handle deep links when app is already running
+    _appLinks.uriLinkStream.listen((Uri? uri) async {
+      if (uri != null && uri.toString().contains('reset-password')) {
+        await _handleResetPasswordLink(uri);
       }
     });
 
-    // Handle cold start (app launched via link)
+    // Handle deep links when app is launched by link (cold start)
     try {
-      final initialLink = await getInitialLink();
-      if (initialLink != null && initialLink.contains('reset-password')) {
-        final response = await Supabase.instance.client.auth.getSessionFromUrl(Uri.parse(initialLink));
-        final session = response.session; // <-- extract Session
-        if (mounted) {
-          Navigator.pushNamed(context, '/reset-password', arguments: session);
+      final initialUri = await _appLinks.getInitialLink(); // <-- FIXED HERE
+      if (initialUri != null && initialUri.toString().contains('reset-password')) {
+        await _handleResetPasswordLink(initialUri);
+      }
+    } catch (e) {
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('Failed to handle initial deep link: $e');
+      }
+    }
+  }
+
+  Future<void> _handleResetPasswordLink(Uri uri) async {
+    try {
+      final response = await Supabase.instance.client.auth.getSessionFromUrl(uri);
+      final session = response.session;
+
+      if (session != null && mounted) {
+        Navigator.pushNamed(context, '/reset-password', arguments: session);
+      } else {
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('⚠️ No valid session found in reset-password link.');
         }
       }
     } catch (e) {
       if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('Failed to handle initial link: $e');
+        AppConfig.debugPrint('❌ Error handling reset-password link: $e');
       }
     }
   }
@@ -151,13 +164,13 @@ class _MyAppState extends State<MyApp> {
       routes: {
         '/login': (context) => const LoginPage(),
         '/home': (context) => HomePage(isPremium: _isPremium),
-        '/profile': (context) => ProfileScreen(favoriteRecipes: []),
+        '/profile': (context) => ProfileScreen(favoriteRecipes: const []),
         '/purchase': (context) => const PremiumPage(),
         '/grocery-list': (context) => const GroceryListPage(),
         '/submit-recipe': (context) => const SubmitRecipePage(),
         '/messages': (context) => MessagesPage(),
         '/search-users': (context) => const SearchUsersPage(),
-        '/favorite-recipes': (context) => FavoriteRecipesPage(favoriteRecipes: []),
+        '/favorite-recipes': (context) => FavoriteRecipesPage(favoriteRecipes: const []),
         '/contact': (context) => const ContactScreen(),
       },
       onUnknownRoute: (settings) {
@@ -166,26 +179,26 @@ class _MyAppState extends State<MyApp> {
         }
         return MaterialPageRoute(
           builder: (context) => Scaffold(
-            appBar: AppBar(title: Text('Page Not Found')),
+            appBar: AppBar(title: const Text('Page Not Found')),
             body: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.error_outline, size: 64, color: Colors.grey),
-                  SizedBox(height: 16),
-                  Text(
+                  const Icon(Icons.error_outline, size: 64, color: Colors.grey),
+                  const SizedBox(height: 16),
+                  const Text(
                     'Page Not Found',
                     style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
                     'The page "${settings.name}" does not exist.',
                     style: TextStyle(color: Colors.grey[600]),
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
                   ElevatedButton(
                     onPressed: () => Navigator.pushReplacementNamed(context, '/home'),
-                    child: Text('Go Home'),
+                    child: const Text('Go Home'),
                   ),
                 ],
               ),
@@ -199,7 +212,7 @@ class _MyAppState extends State<MyApp> {
   String _getInitialRoute(SupabaseClient supabase) {
     try {
       final user = supabase.auth.currentUser;
-      
+
       if (user != null) {
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('User authenticated: ${user.email}');
