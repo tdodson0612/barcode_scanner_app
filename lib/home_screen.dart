@@ -936,105 +936,156 @@ void _loadRewardedAd() {
   }
 
   /// FIXED: Search users with proper error handling
-  Future<void> _searchUsers(String query) async {
-    if (query.trim().isEmpty) return;
-    
-    try {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => SearchUsersPage(initialQuery: query),
+  /// UPDATED: Search users with proper error handling
+Future<void> _searchUsers(String query) async {
+  if (query.trim().isEmpty) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please enter a search term'),
+          backgroundColor: Colors.orange,
         ),
       );
-    } catch (e) {
-      if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.navigationError,
-          customMessage: 'Error opening user search',
-        );
-      }
     }
+    return;
   }
-
-  Widget _buildSearchBar() {
-    final TextEditingController searchController = TextEditingController();
-    
-    return Container(
-      margin: EdgeInsets.only(bottom: 20),
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withAlpha((0.95 * 255).toInt()),
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Text(
-            'Find Friends & Share Recipes',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.blue.shade800,
-            ),
-          ),
-          SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: searchController,
-                  decoration: InputDecoration(
-                    hintText: 'Search for friends by name or email...',
-                    prefixIcon: Icon(Icons.person_search, color: Colors.grey.shade600),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(25),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(25),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(25),
-                      borderSide: BorderSide(color: Colors.blue, width: 2),
-                    ),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
-                    ),
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                  ),
-                  onSubmitted: (value) => _searchUsers(value),
-                ),
-              ),
-              SizedBox(width: 12),
-              ElevatedButton(
-                onPressed: () => _searchUsers(searchController.text),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                  shape: CircleBorder(),
-                  padding: EdgeInsets.all(14),
-                  elevation: 3,
-                ),
-                child: Icon(Icons.search, size: 24),
-              ),
-            ],
-          ),
-        ],
+  
+  try {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SearchUsersPage(initialQuery: query),
       ),
     );
+  } catch (e) {
+    if (mounted) {
+      await ErrorHandlingService.handleError(
+        context: context,
+        error: e,
+        category: ErrorHandlingService.navigationError,
+        customMessage: 'Error opening user search',
+      );
+    }
   }
-
+}
+Widget _buildSearchBar() {
+  final TextEditingController searchController = TextEditingController();
+  
+  return Container(
+    margin: EdgeInsets.only(bottom: 20),
+    padding: EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Colors.white.withAlpha((0.95 * 255).toInt()),
+      borderRadius: BorderRadius.circular(15),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.1),
+          blurRadius: 8,
+          offset: Offset(0, 2),
+        ),
+      ],
+    ),
+    child: Column(
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.people,
+              color: Colors.blue.shade700,
+              size: 24,
+            ),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Find Friends & Share Recipes',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue.shade800,
+                ),
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 4),
+        Text(
+          'Search by name, username, or email',
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.grey.shade600,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+        SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: searchController,
+                decoration: InputDecoration(
+                  hintText: 'Try "John Smith" or "jsmith"...',
+                  hintStyle: TextStyle(
+                    color: Colors.grey.shade400,
+                    fontSize: 14,
+                  ),
+                  prefixIcon: Icon(Icons.person_search, color: Colors.grey.shade600),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(25),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(25),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(25),
+                    borderSide: BorderSide(color: Colors.blue, width: 2),
+                  ),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  filled: true,
+                  fillColor: Colors.grey.shade50,
+                ),
+                textInputAction: TextInputAction.search,
+                onSubmitted: (value) => _searchUsers(value),
+              ),
+            ),
+            SizedBox(width: 12),
+            ElevatedButton(
+              onPressed: () => _searchUsers(searchController.text),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+                shape: CircleBorder(),
+                padding: EdgeInsets.all(14),
+                elevation: 3,
+              ),
+              child: Icon(Icons.search, size: 24),
+            ),
+          ],
+        ),
+        SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.check_circle, size: 14, color: Colors.green),
+            SizedBox(width: 4),
+            Text(
+              'Works with typos too!',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.green.shade600,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
   /// Build recipe suggestions for nutrition analysis
   Widget _buildNutritionRecipeSuggestions() {
     if (_recipeSuggestions.isEmpty) return const SizedBox.shrink();

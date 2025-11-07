@@ -1,4 +1,4 @@
-// lib/services/database_service.dart - FIXED: Proper error handling throughout
+// lib/services/database_service.dart - UPDATED: Enhanced fuzzy search
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/favorite_recipe.dart';
 import '../models/grocery_item.dart';
@@ -25,12 +25,6 @@ class DatabaseService {
   // ==================================================
   // USER PROFILE MANAGEMENT
   // ==================================================
-  
-  // NOTE: createUserProfile is no longer needed - profiles are created automatically
-  // by the database trigger when users sign up. Keeping this method commented out
-  // for reference in case manual profile creation is needed in the future.
-  
-  /*
   static Future<void> createUserProfile(
     String userId, 
     String email, 
@@ -51,7 +45,6 @@ class DatabaseService {
       throw Exception('Failed to create user profile: $e');
     }
   }
-  */
 
   static Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     try {
@@ -62,7 +55,6 @@ class DatabaseService {
           .single();
       return response;
     } catch (e) {
-      // FIXED: Don't return null on error - let caller handle it
       throw Exception('Failed to get user profile: $e');
     }
   }
@@ -586,7 +578,7 @@ class DatabaseService {
     try {
       final response = await _supabase
           .from('friend_requests')
-          .select('sender:user_profiles!friend_requests_sender_fkey(id, email, username, avatar_url), receiver:user_profiles!friend_requests_receiver_fkey(id, email, username, avatar_url)')
+          .select('sender:user_profiles!friend_requests_sender_fkey(id, email, username, first_name, last_name, avatar_url), receiver:user_profiles!friend_requests_receiver_fkey(id, email, username, first_name, last_name, avatar_url)')
           .or('sender.eq.$currentUserId,receiver.eq.$currentUserId')
           .eq('status', 'accepted');
 
@@ -610,7 +602,7 @@ class DatabaseService {
     try {
       final response = await _supabase
           .from('friend_requests')
-          .select('id, sender:user_profiles!friend_requests_sender_fkey(id, email, username, avatar_url)')
+          .select('id, sender:user_profiles!friend_requests_sender_fkey(id, email, username, first_name, last_name, avatar_url)')
           .eq('receiver', currentUserId!)
           .eq('status', 'pending');
 
@@ -816,17 +808,19 @@ class DatabaseService {
     }
   }
 
-  /// Search users (for adding friends)
+  /// Search users with fuzzy matching (first name, last name, username, email)
   static Future<List<Map<String, dynamic>>> searchUsers(String query) async {
     ensureUserAuthenticated();
     
     try {
-      final response = await _supabase
-          .from('user_profiles')
-          .select('id, email, username, avatar_url')
-          .or('email.ilike.%$query%,username.ilike.%$query%')
-          .neq('id', currentUserId!)
-          .limit(50);
+      final searchQuery = query.trim();
+      if (searchQuery.isEmpty) return [];
+
+      // Use RPC call for complex fuzzy search with ranking
+      final response = await _supabase.rpc('search_users_fuzzy', params: {
+        'search_query': searchQuery,
+        'current_user_id': currentUserId!,
+      });
 
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {

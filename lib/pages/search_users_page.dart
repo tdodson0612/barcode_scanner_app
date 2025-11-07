@@ -1,4 +1,4 @@
-// lib/pages/search_users_page.dart
+// lib/pages/search_users_page.dart - UPDATED: Enhanced search hint text
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 import 'user_profile_page.dart';
@@ -8,7 +8,6 @@ class SearchUsersPage extends StatefulWidget {
   final String? initialQuery; // optional
 
   const SearchUsersPage({Key? key, this.initialQuery}) : super(key: key);
-
 
   @override
   _SearchUsersPageState createState() => _SearchUsersPageState();
@@ -205,6 +204,41 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
     }
   }
 
+  String _buildUserDisplayName(Map<String, dynamic> user) {
+    final firstName = user['first_name'];
+    final lastName = user['last_name'];
+    final username = user['username'];
+    
+    // Build full name if available
+    if (firstName != null && lastName != null) {
+      return '$firstName $lastName';
+    } else if (firstName != null) {
+      return firstName;
+    } else if (lastName != null) {
+      return lastName;
+    } else if (username != null) {
+      return username;
+    } else {
+      return 'No name';
+    }
+  }
+
+  String _buildUserSubtitle(Map<String, dynamic> user) {
+    final username = user['username'];
+    final email = user['email'];
+    final firstName = user['first_name'];
+    final lastName = user['last_name'];
+    
+    // Show username if name is being used as title
+    if ((firstName != null || lastName != null) && username != null) {
+      return '@$username';
+    } else if (email != null) {
+      return email;
+    } else {
+      return '';
+    }
+  }
+
   Widget _buildUserTile(Map<String, dynamic> user) {
     return Card(
       margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -215,17 +249,17 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
               : null,
           child: user['avatar_url'] == null
               ? Text(
-                  (user['username'] ?? user['email'] ?? 'U')[0].toUpperCase(),
+                  _buildUserDisplayName(user)[0].toUpperCase(),
                   style: TextStyle(fontWeight: FontWeight.bold),
                 )
               : null,
         ),
         title: Text(
-          user['username'] ?? 'No username',
+          _buildUserDisplayName(user),
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         subtitle: Text(
-          user['email'] ?? '',
+          _buildUserSubtitle(user),
           style: TextStyle(color: Colors.grey.shade600),
         ),
         trailing: _buildFriendshipButton(user),
@@ -274,7 +308,7 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
                   child: TextField(
                     controller: _searchController,
                     decoration: InputDecoration(
-                      hintText: 'Search by username or email...',
+                      hintText: 'Search by name, username, or email...',
                       prefixIcon: Icon(Icons.search),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(25),
@@ -336,11 +370,28 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
                               ),
                             ),
                             SizedBox(height: 8),
-                            Text(
-                              'Enter a username or email to find friends',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey.shade500,
+                            Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 40),
+                              child: Text(
+                                'Find friends by their first name, last name, username, or email',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey.shade500,
+                                ),
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 40),
+                              child: Text(
+                                'Even works with typos!',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.green.shade400,
+                                  fontStyle: FontStyle.italic,
+                                ),
                               ),
                             ),
                           ],
