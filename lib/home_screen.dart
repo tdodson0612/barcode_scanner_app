@@ -23,6 +23,7 @@ import '../pages/user_profile_page.dart';
 import '../widgets/app_drawer.dart';
 import '../config/app_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../widgets/menu_icon_with_badge.dart';
 
 // Add this class right after your imports in home_screen.dart
 class IngredientKeywordExtractor {
@@ -1850,6 +1851,12 @@ Widget _buildSearchBar() {
     
     return Scaffold(
       appBar: AppBar(
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: MenuIconWithBadge(),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
         title: Text('Recipe Scanner'),
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,

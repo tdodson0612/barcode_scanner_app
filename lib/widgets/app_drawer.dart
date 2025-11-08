@@ -1,7 +1,8 @@
-// lib/widgets/app_drawer.dart - FIXED: Singleton controller usage
+// lib/widgets/app_drawer.dart - WITH NOTIFICATION BADGES (No duplicate MenuIconWithBadge)
 import 'package:flutter/material.dart';
 import '../controllers/premium_gate_controller.dart';
 import '../services/auth_service.dart';
+import '../services/database_service.dart';
 
 class AppDrawer extends StatefulWidget {
   final String currentPage;
@@ -17,12 +18,14 @@ class AppDrawer extends StatefulWidget {
 
 class _AppDrawerState extends State<AppDrawer> {
   late final PremiumGateController _controller;
+  int _unreadCount = 0;
 
   @override
   void initState() {
     super.initState();
     _controller = PremiumGateController();
     _controller.addListener(_onPremiumStateChanged);
+    _loadUnreadCount();
   }
 
   @override
@@ -34,6 +37,17 @@ class _AppDrawerState extends State<AppDrawer> {
   void _onPremiumStateChanged() {
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  Future<void> _loadUnreadCount() async {
+    try {
+      final count = await DatabaseService.getUnreadMessageCount();
+      if (mounted) {
+        setState(() => _unreadCount = count);
+      }
+    } catch (e) {
+      print('Error loading unread count: $e');
     }
   }
 
@@ -154,10 +168,41 @@ class _AppDrawerState extends State<AppDrawer> {
             },
           ),
           
+          // Messages with badge
           ListTile(
-            leading: Icon(
-              Icons.chat,
-              color: widget.currentPage == 'messages' ? Colors.green : null,
+            leading: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(
+                  Icons.chat,
+                  color: widget.currentPage == 'messages' ? Colors.green : null,
+                ),
+                if (_unreadCount > 0)
+                  Positioned(
+                    right: -8,
+                    top: -4,
+                    child: Container(
+                      padding: EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      constraints: BoxConstraints(
+                        minWidth: 18,
+                        minHeight: 18,
+                      ),
+                      child: Text(
+                        _unreadCount > 99 ? '99+' : '$_unreadCount',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
             ),
             title: Text(
               'Messages',
@@ -166,6 +211,23 @@ class _AppDrawerState extends State<AppDrawer> {
                 color: widget.currentPage == 'messages' ? Colors.green : null,
               ),
             ),
+            trailing: _unreadCount > 0
+                ? Container(
+                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _unreadCount > 99 ? '99+' : '$_unreadCount',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  )
+                : null,
             selected: widget.currentPage == 'messages',
             onTap: () {
               Navigator.pop(context);
