@@ -1,5 +1,6 @@
-// lib/pages/messages_page.dart
+// lib/pages/messages_page.dart - UPDATED: With Logger
 import 'package:flutter/material.dart';
+import 'package:logger/logger.dart';
 import '../services/database_service.dart';
 import '../widgets/app_drawer.dart';
 import 'chat_page.dart';
@@ -11,6 +12,7 @@ class MessagesPage extends StatefulWidget {
 }
 
 class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderStateMixin {
+  final Logger _logger = Logger();
   late TabController _tabController;
   List<Map<String, dynamic>> _chats = [];
   List<Map<String, dynamic>> _friendRequests = [];
@@ -40,34 +42,70 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
   Future<void> _loadChats() async {
     setState(() => _isLoadingChats = true);
     try {
+      _logger.d('📨 Loading chat list...');
       final chats = await DatabaseService.getChatList();
+      _logger.i('✅ Loaded ${chats.length} chats');
+      
       setState(() {
         _chats = chats;
         _isLoadingChats = false;
       });
     } catch (e) {
-      print('Error loading chats: $e');
+      _logger.e('❌ Error loading chats: $e');
       setState(() => _isLoadingChats = false);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to load messages'),
+            backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: _loadChats,
+            ),
+          ),
+        );
+      }
     }
   }
 
   Future<void> _loadFriendRequests() async {
     setState(() => _isLoadingRequests = true);
     try {
+      _logger.d('👥 Loading friend requests...');
       final requests = await DatabaseService.getFriendRequests();
+      _logger.i('✅ Loaded ${requests.length} friend requests');
+      
       setState(() {
         _friendRequests = requests;
         _isLoadingRequests = false;
       });
     } catch (e) {
-      print('Error loading friend requests: $e');
+      _logger.e('❌ Error loading friend requests: $e');
       setState(() => _isLoadingRequests = false);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to load friend requests'),
+            backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: _loadFriendRequests,
+            ),
+          ),
+        );
+      }
     }
   }
 
   Future<void> _acceptFriendRequest(String requestId) async {
     try {
+      _logger.d('✅ Accepting friend request: $requestId');
       await DatabaseService.acceptFriendRequest(requestId);
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Friend request accepted!'),
@@ -76,6 +114,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
       );
       _loadData(); // Refresh both tabs
     } catch (e) {
+      _logger.e('❌ Error accepting request: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error accepting request: $e'),
@@ -87,7 +126,9 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
 
   Future<void> _declineFriendRequest(String requestId) async {
     try {
+      _logger.d('❌ Declining friend request: $requestId');
       await DatabaseService.declineFriendRequest(requestId);
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Friend request declined'),
@@ -96,6 +137,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
       );
       _loadFriendRequests(); // Refresh requests tab
     } catch (e) {
+      _logger.e('❌ Error declining request: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error declining request: $e'),
