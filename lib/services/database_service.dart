@@ -602,9 +602,10 @@ class DatabaseService {
     try {
       final response = await _supabase
           .from('friend_requests')
-          .select('id, sender:user_profiles!friend_requests_sender_fkey(id, email, username, first_name, last_name, avatar_url)')
+          .select('id, created_at, sender:user_profiles!friend_requests_sender_fkey(id, email, username, first_name, last_name, avatar_url)')
           .eq('receiver', currentUserId!)
-          .eq('status', 'pending');
+          .eq('status', 'pending')
+          .order('created_at', ascending: false);
 
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
@@ -612,50 +613,104 @@ class DatabaseService {
     }
   }
 
-  /// Send friend request
-  static Future<String?> sendFriendRequest(String receiverId) async {
+  /// Get sent friend requests (outgoing, still pending)
+  static Future<List<Map<String, dynamic>>> getSentFriendRequests() async {
     ensureUserAuthenticated();
     
     try {
-      // Check if request already exists
+      final response = await _supabase
+          .from('friend_requests')
+          .select('id, created_at, receiver:user_profiles!friend_requests_receiver_fkey(id, email, username, first_name, last_name, avatar_url)')
+          .eq('sender', currentUserId!)
+          .eq('status', 'pending')
+          .order('created_at', ascending: false);
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      throw Exception('Failed to load sent friend requests: $e');
+    }
+  }
+
+  /// Send friend request with better error handling
+  static Future<String?> sendFriendRequest(String receiverId) async {
+    ensureUserAuthenticated();
+    
+    // Can't send request to yourself
+    if (receiverId == currentUserId) {
+      throw Exception('Cannot send friend request to yourself');
+    }
+    
+    try {
+      // Check if request already exists (in either direction)
       final existing = await _supabase
           .from('friend_requests')
-          .select('id, status')
+          .select('id, status, sender, receiver')
           .or('and(sender.eq.$currentUserId,receiver.eq.$receiverId),and(sender.eq.$receiverId,receiver.eq.$currentUserId)')
           .maybeSingle();
 
       if (existing != null) {
         if (existing['status'] == 'accepted') {
-          throw Exception('Already friends');
+          throw Exception('You are already friends with this user');
         } else if (existing['status'] == 'pending') {
+          // Check if it's an incoming request they should accept instead
+          if (existing['sender'] == receiverId) {
+            throw Exception('This user has already sent you a friend request. Check your pending requests!');
+          }
           throw Exception('Friend request already sent');
         }
       }
 
+      // Insert new friend request
       final response = await _supabase
           .from('friend_requests')
           .insert({
             'sender': currentUserId!,
             'receiver': receiverId,
             'status': 'pending',
+            'created_at': DateTime.now().toIso8601String(),
           })
           .select()
           .single();
 
       return response['id'];
+    } on PostgrestException catch (e) {
+      // Handle specific Postgres errors
+      if (e.code == '23505') {
+        // Unique constraint violation
+        throw Exception('Friend request already exists');
+      }
+      throw Exception('Failed to send friend request: ${e.message}');
     } catch (e) {
       throw Exception('Failed to send friend request: $e');
     }
   }
 
-  /// Accept friend request
+  /// Accept friend request with validation
   static Future<void> acceptFriendRequest(String requestId) async {
     ensureUserAuthenticated();
     
     try {
+      // Verify this request is actually for the current user
+      final request = await _supabase
+          .from('friend_requests')
+          .select('receiver, status')
+          .eq('id', requestId)
+          .single();
+      
+      if (request['receiver'] != currentUserId) {
+        throw Exception('You cannot accept this friend request');
+      }
+      
+      if (request['status'] != 'pending') {
+        throw Exception('This friend request has already been ${request['status']}');
+      }
+
       await _supabase
           .from('friend_requests')
-          .update({'status': 'accepted'})
+          .update({
+            'status': 'accepted',
+            'updated_at': DateTime.now().toIso8601String(),
+          })
           .eq('id', requestId);
     } catch (e) {
       throw Exception('Failed to accept friend request: $e');
@@ -676,7 +731,32 @@ class DatabaseService {
     }
   }
 
-  /// Cancel outgoing friend request
+  /// Cancel outgoing friend request by request ID (more reliable)
+  static Future<void> cancelFriendRequestById(String requestId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      // Verify this is the user's own request
+      final request = await _supabase
+          .from('friend_requests')
+          .select('sender')
+          .eq('id', requestId)
+          .single();
+      
+      if (request['sender'] != currentUserId) {
+        throw Exception('You cannot cancel this friend request');
+      }
+
+      await _supabase
+          .from('friend_requests')
+          .delete()
+          .eq('id', requestId);
+    } catch (e) {
+      throw Exception('Failed to cancel friend request: $e');
+    }
+  }
+
+  /// Cancel outgoing friend request (legacy method - kept for backward compatibility)
   static Future<void> cancelFriendRequest(String receiverId) async {
     ensureUserAuthenticated();
     
@@ -691,41 +771,97 @@ class DatabaseService {
     }
   }
 
-  /// Check friendship status
+  /// Remove friend (unfriend)
+  static Future<void> removeFriend(String friendId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('friend_requests')
+          .delete()
+          .or('and(sender.eq.$currentUserId,receiver.eq.$friendId),and(sender.eq.$friendId,receiver.eq.$currentUserId)')
+          .eq('status', 'accepted');
+    } catch (e) {
+      throw Exception('Failed to remove friend: $e');
+    }
+  }
+
+  /// Check friendship status with enhanced info
   static Future<Map<String, dynamic>> checkFriendshipStatus(String userId) async {
     ensureUserAuthenticated();
+    
+    if (userId == currentUserId) {
+      return {
+        'status': 'self',
+        'requestId': null,
+        'canSendRequest': false,
+        'isOutgoing': false,
+        'message': 'This is you!',
+      };
+    }
     
     try {
       final response = await _supabase
           .from('friend_requests')
-          .select('id, status, sender, receiver')
+          .select('id, status, sender, receiver, created_at')
           .or('and(sender.eq.$currentUserId,receiver.eq.$userId),and(sender.eq.$userId,receiver.eq.$currentUserId)')
           .maybeSingle();
 
       if (response == null) {
         return {
-          'status': 'none', 
-          'requestId': null, 
+          'status': 'none',
+          'requestId': null,
           'canSendRequest': true,
           'isOutgoing': false,
+          'message': 'Not friends',
         };
       }
 
       final isOutgoing = response['sender'] == currentUserId;
       final status = response['status'];
 
+      if (status == 'accepted') {
+        return {
+          'status': 'accepted',
+          'requestId': response['id'],
+          'canSendRequest': false,
+          'isOutgoing': isOutgoing,
+          'message': 'Friends',
+        };
+      } else if (status == 'pending') {
+        if (isOutgoing) {
+          return {
+            'status': 'pending_sent',
+            'requestId': response['id'],
+            'canSendRequest': false,
+            'isOutgoing': true,
+            'message': 'Friend request sent',
+          };
+        } else {
+          return {
+            'status': 'pending_received',
+            'requestId': response['id'],
+            'canSendRequest': false,
+            'isOutgoing': false,
+            'message': 'Friend request received',
+          };
+        }
+      }
+
       return {
-        'status': status,
-        'requestId': response['id'],
-        'isOutgoing': isOutgoing,
-        'canSendRequest': status == 'none',
+        'status': 'unknown',
+        'requestId': null,
+        'canSendRequest': false,
+        'isOutgoing': false,
+        'message': 'Unknown status',
       };
     } catch (e) {
       return {
-        'status': 'error', 
-        'requestId': null, 
+        'status': 'error',
+        'requestId': null,
         'canSendRequest': false,
         'isOutgoing': false,
+        'message': 'Error checking status',
       };
     }
   }
