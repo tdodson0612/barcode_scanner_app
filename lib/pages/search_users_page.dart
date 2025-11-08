@@ -1,5 +1,6 @@
-// lib/pages/search_users_page.dart - UPDATED: Enhanced search hint text
+// lib/pages/search_users_page.dart - UPDATED: Enhanced search with debug logging
 import 'package:flutter/material.dart';
+import 'package:logger/logger.dart';
 import '../services/database_service.dart';
 import 'user_profile_page.dart';
 import '../widgets/app_drawer.dart';
@@ -15,6 +16,7 @@ class SearchUsersPage extends StatefulWidget {
 
 class _SearchUsersPageState extends State<SearchUsersPage> {
   late TextEditingController _searchController;
+  final Logger _logger = Logger();
 
   @override
   void initState() {
@@ -31,6 +33,7 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
   Map<String, Map<String, dynamic>> _friendshipStatuses = {};
   bool _isLoading = false;
   bool _hasSearched = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -38,17 +41,55 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
     super.dispose();
   }
 
+  Future<void> _runDebugTest() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await DatabaseService.debugTestUserSearch();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Debug test completed! Check your console logs.'),
+          backgroundColor: Colors.blue,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Debug test error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
   Future<void> _searchUsers() async {
     final query = _searchController.text.trim();
-    if (query.isEmpty) return;
+    if (query.isEmpty) {
+      setState(() {
+        _errorMessage = 'Please enter a search term';
+      });
+      return;
+    }
 
     setState(() {
       _isLoading = true;
       _hasSearched = true;
+      _errorMessage = null;
     });
 
     try {
+      _logger.d('🔎 Starting user search from UI...');
       final results = await DatabaseService.searchUsers(query);
+      _logger.i('📱 UI received ${results.length} results');
       
       // Get friendship status for each user
       final statusMap = <String, Map<String, dynamic>>{};
@@ -61,13 +102,24 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
         _searchResults = results;
         _friendshipStatuses = statusMap;
         _isLoading = false;
+        
+        if (results.isEmpty) {
+          _errorMessage = 'No users found matching "$query"';
+        }
       });
     } catch (e) {
+      _logger.e('❌ UI search error: $e');
       setState(() {
         _isLoading = false;
+        _errorMessage = 'Error searching users: $e';
       });
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error searching users: $e')),
+        SnackBar(
+          content: Text('Error searching users: $e'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 4),
+        ),
       );
     }
   }
@@ -289,6 +341,14 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
+        actions: [
+          // Debug button
+          IconButton(
+            icon: Icon(Icons.bug_report),
+            tooltip: 'Run Debug Test',
+            onPressed: _runDebugTest,
+          ),
+        ],
       ),
       drawer: AppDrawer(currentPage: 'find_friends'),
       body: Column(
@@ -346,6 +406,39 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
             ),
           ),
 
+          // Error message banner (if exists)
+          if (_errorMessage != null)
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(12),
+              margin: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade100,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade300),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.orange.shade700),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(color: Colors.orange.shade900),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close, size: 20),
+                    onPressed: () {
+                      setState(() {
+                        _errorMessage = null;
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ),
+
           // Search Results
           Expanded(
             child: _isLoading
@@ -394,6 +487,26 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
                                 ),
                               ),
                             ),
+                            SizedBox(height: 24),
+                            // Debug hint
+                            ElevatedButton.icon(
+                              onPressed: _runDebugTest,
+                              icon: Icon(Icons.bug_report),
+                              label: Text('Run Debug Test'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.grey.shade700,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                            SizedBox(height: 8),
+                            Text(
+                              'Check console logs after running',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey.shade400,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
                           ],
                         ),
                       )
@@ -422,6 +535,16 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
                                   style: TextStyle(
                                     fontSize: 14,
                                     color: Colors.grey.shade500,
+                                  ),
+                                ),
+                                SizedBox(height: 16),
+                                ElevatedButton.icon(
+                                  onPressed: _runDebugTest,
+                                  icon: Icon(Icons.bug_report, size: 18),
+                                  label: Text('Debug: Check Database'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.orange,
+                                    foregroundColor: Colors.white,
                                   ),
                                 ),
                               ],

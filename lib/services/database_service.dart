@@ -1,5 +1,6 @@
-// lib/services/database_service.dart - UPDATED: Enhanced fuzzy search
+// lib/services/database_service.dart - UPDATED: Enhanced fuzzy search with debug logging
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:logger/logger.dart';
 import '../models/favorite_recipe.dart';
 import '../models/grocery_item.dart';
 import '../models/submitted_recipe.dart';
@@ -7,6 +8,7 @@ import 'auth_service.dart';
 
 class DatabaseService {
   static final SupabaseClient _supabase = Supabase.instance.client;
+  static final Logger _logger = Logger();
 
   // ==================================================
   // CURRENT USER ID & AUTH CHECK
@@ -944,6 +946,10 @@ class DatabaseService {
     }
   }
 
+  // ==================================================
+  // USER SEARCH - WITH DEBUG LOGGING
+  // ==================================================
+
   /// Search users with fuzzy matching (first name, last name, username, email)
   static Future<List<Map<String, dynamic>>> searchUsers(String query) async {
     ensureUserAuthenticated();
@@ -952,29 +958,96 @@ class DatabaseService {
       final searchQuery = query.trim();
       if (searchQuery.isEmpty) return [];
 
-      // Try RPC call for complex fuzzy search with ranking
-      try {
-        final response = await _supabase.rpc('search_users_fuzzy', params: {
-          'search_query': searchQuery,
-          'current_user_id': currentUserId!,
-        });
+      _logger.d('🔍 Searching for: "$searchQuery"');
+      _logger.d('👤 Current user ID: $currentUserId');
 
-        return List<Map<String, dynamic>>.from(response);
-      } catch (rpcError) {
-        print('RPC search failed, falling back to basic search: $rpcError');
-        
-        // Fallback to basic search if RPC fails
-        final response = await _supabase
-            .from('user_profiles')
-            .select('id, email, username, first_name, last_name, avatar_url')
-            .or('email.ilike.%$searchQuery%,username.ilike.%$searchQuery%,first_name.ilike.%$searchQuery%,last_name.ilike.%$searchQuery%')
-            .neq('id', currentUserId!)
-            .limit(50);
+      // Use basic search with proper ILIKE pattern
+      final searchPattern = '%$searchQuery%';
+      
+      _logger.d('📊 Executing search query...');
+      
+      final response = await _supabase
+          .from('user_profiles')
+          .select('id, email, username, first_name, last_name, avatar_url')
+          .or('email.ilike.$searchPattern,username.ilike.$searchPattern,first_name.ilike.$searchPattern,last_name.ilike.$searchPattern')
+          .neq('id', currentUserId!)
+          .limit(50);
 
-        return List<Map<String, dynamic>>.from(response);
+      _logger.i('✅ Search completed. Results count: ${response.length}');
+      
+      if (response.isNotEmpty) {
+        _logger.d('📋 Sample results:');
+        for (var i = 0; i < (response.length > 3 ? 3 : response.length); i++) {
+          final user = response[i];
+          _logger.d('   - ${user['username']} (${user['email']}) - ${user['first_name']} ${user['last_name']}');
+        }
+      } else {
+        _logger.w('⚠️ No users found matching "$searchQuery"');
       }
+      
+      return List<Map<String, dynamic>>.from(response);
     } catch (e) {
+      _logger.e('❌ Search error: $e');
       throw Exception('Failed to search users: $e');
+    }
+  }
+
+  /// Test function to check if any users exist
+  static Future<void> debugTestUserSearch() async {
+    ensureUserAuthenticated();
+    
+    try {
+      _logger.i('\n🧪 === DEBUG: Testing User Search ===');
+      _logger.d('Current user ID: $currentUserId');
+      
+      // Test 1: Get all users
+      _logger.d('\n📝 Test 1: Fetching all users (excluding self)...');
+      final allUsers = await _supabase
+          .from('user_profiles')
+          .select('id, email, username, first_name, last_name')
+          .neq('id', currentUserId!)
+          .limit(10);
+      
+      _logger.i('Total users found: ${allUsers.length}');
+      
+      if (allUsers.isEmpty) {
+        _logger.w('⚠️ WARNING: No other users found in database!');
+        _logger.w('   This means either:');
+        _logger.w('   1. You are the only user in the system');
+        _logger.w('   2. RLS policies are blocking access to user_profiles');
+      } else {
+        _logger.i('✅ Users found:');
+        for (var user in allUsers) {
+          _logger.d('   - ID: ${user['id']}');
+          _logger.d('     Email: ${user['email']}');
+          _logger.d('     Username: ${user['username']}');
+          _logger.d('     Name: ${user['first_name']} ${user['last_name']}');
+          _logger.d('');
+        }
+      }
+
+      // Test 2: Try a simple search
+      if (allUsers.isNotEmpty) {
+        final testUsername = allUsers[0]['username'];
+        _logger.d('\n📝 Test 2: Searching for username "$testUsername"...');
+        
+        final searchResults = await _supabase
+            .from('user_profiles')
+            .select('id, email, username, first_name, last_name')
+            .ilike('username', '%$testUsername%')
+            .neq('id', currentUserId!);
+        
+        _logger.i('Search results: ${searchResults.length}');
+        if (searchResults.isNotEmpty) {
+          _logger.i('✅ Search is working!');
+        } else {
+          _logger.e('❌ Search failed even though user exists!');
+        }
+      }
+
+      _logger.i('\n🧪 === End Debug Test ===\n');
+    } catch (e) {
+      _logger.e('❌ Debug test error: $e');
     }
   }
 }
