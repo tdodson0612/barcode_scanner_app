@@ -1,7 +1,8 @@
-// lib/pages/create_post_page.dart - FIXED: Handle nullable recipe ID
+// lib/pages/create_post_page.dart - Create Post with Photo or Video
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:video_player/video_player.dart';
 import '../services/database_service.dart';
 import '../services/error_handling_service.dart';
 import '../models/submitted_recipe.dart';
@@ -15,11 +16,15 @@ class CreatePostPage extends StatefulWidget {
 
 class _CreatePostPageState extends State<CreatePostPage> {
   File? _imageFile;
+  File? _videoFile;
+  File? _thumbnailFile;
+  VideoPlayerController? _videoController;
   final TextEditingController _captionController = TextEditingController();
   List<SubmittedRecipe> _myRecipes = [];
   SubmittedRecipe? _selectedRecipe;
   bool _isLoading = false;
   bool _isLoadingRecipes = false;
+  String _mediaType = 'none'; // 'none', 'photo', 'video'
 
   @override
   void initState() {
@@ -30,6 +35,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
   @override
   void dispose() {
     _captionController.dispose();
+    _videoController?.dispose();
     super.dispose();
   }
 
@@ -74,7 +80,13 @@ class _CreatePostPageState extends State<CreatePostPage> {
       if (pickedFile != null && mounted) {
         setState(() {
           _imageFile = File(pickedFile.path);
+          _videoFile = null;
+          _thumbnailFile = null;
+          _mediaType = 'photo';
         });
+        
+        _videoController?.dispose();
+        _videoController = null;
       }
     } catch (e) {
       if (mounted) {
@@ -86,29 +98,162 @@ class _CreatePostPageState extends State<CreatePostPage> {
     }
   }
 
-  void _showImageSourceDialog() {
+  Future<void> _pickVideo(ImageSource source) async {
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickVideo(
+        source: source,
+        maxDuration: const Duration(minutes: 3), // 3 minute max
+      );
+
+      if (pickedFile != null && mounted) {
+        final videoFile = File(pickedFile.path);
+        
+        // Initialize video controller
+        final controller = VideoPlayerController.file(videoFile);
+        await controller.initialize();
+        
+        // Generate thumbnail from first frame
+        await controller.seekTo(Duration.zero);
+        
+        setState(() {
+          _videoFile = videoFile;
+          _imageFile = null;
+          _mediaType = 'video';
+          _videoController = controller;
+        });
+        
+        // Create thumbnail file (you'll need to implement this or use video_thumbnail package)
+        await _generateThumbnail();
+      }
+    } catch (e) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'Failed to pick video',
+        );
+      }
+    }
+  }
+
+  Future<void> _generateThumbnail() async {
+    if (_videoFile == null) return;
+    
+    try {
+      // For now, we'll require user to take a photo as thumbnail
+      // You can use video_thumbnail package for automatic generation
+      final picker = ImagePicker();
+      final thumbnailPicked = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
+      );
+      
+      if (thumbnailPicked != null && mounted) {
+        setState(() {
+          _thumbnailFile = File(thumbnailPicked.path);
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'Failed to capture thumbnail',
+        );
+      }
+    }
+  }
+
+  void _showMediaPickerDialog() {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text('Select Image Source'),
+          title: const Text('Select Media Type'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: Icon(Icons.camera_alt, color: Colors.blue),
-                title: Text('Take Photo'),
+                leading: const Icon(Icons.photo_library, color: Colors.blue),
+                title: const Text('Photo'),
+                subtitle: const Text('Take or choose a photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showPhotoSourceDialog();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.videocam, color: Colors.red),
+                title: const Text('Video'),
+                subtitle: const Text('Record or choose a video (max 3 min)'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showVideoSourceDialog();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showPhotoSourceDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Select Photo Source'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Colors.blue),
+                title: const Text('Take Photo'),
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(ImageSource.camera);
                 },
               ),
               ListTile(
-                leading: Icon(Icons.photo_library, color: Colors.blue),
-                title: Text('Choose from Gallery'),
+                leading: const Icon(Icons.photo_library, color: Colors.blue),
+                title: const Text('Choose from Gallery'),
                 onTap: () {
                   Navigator.pop(context);
                   _pickImage(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showVideoSourceDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Select Video Source'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.videocam, color: Colors.red),
+                title: const Text('Record Video'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickVideo(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.video_library, color: Colors.red),
+                title: const Text('Choose from Gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickVideo(ImageSource.gallery);
                 },
               ),
             ],
@@ -123,9 +268,9 @@ class _CreatePostPageState extends State<CreatePostPage> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text('Select Recipe'),
+          title: const Text('Select Recipe'),
           content: _isLoadingRecipes
-              ? Center(
+              ? const Center(
                   child: Padding(
                     padding: EdgeInsets.all(20),
                     child: CircularProgressIndicator(),
@@ -133,52 +278,47 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 )
               : _myRecipes.isEmpty
                   ? Padding(
-                      padding: EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(20),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.restaurant_menu, size: 50, color: Colors.grey),
-                          SizedBox(height: 16),
-                          Text(
+                          const Icon(Icons.restaurant_menu, size: 50, color: Colors.grey),
+                          const SizedBox(height: 16),
+                          const Text(
                             'No recipes yet',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          SizedBox(height: 8),
-                          Text(
+                          const SizedBox(height: 8),
+                          const Text(
                             'Submit a recipe first before creating a post',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: Colors.grey),
                           ),
-                          SizedBox(height: 16),
+                          const SizedBox(height: 16),
                           ElevatedButton(
                             onPressed: () {
                               Navigator.pop(context);
                               Navigator.pushNamed(context, '/submit-recipe');
                             },
-                            child: Text('Submit Recipe'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
                               foregroundColor: Colors.white,
                             ),
+                            child: const Text('Submit Recipe'),
                           ),
                         ],
                       ),
                     )
-                  : Container(
+                  : SizedBox(
                       width: double.maxFinite,
                       child: ListView.builder(
                         shrinkWrap: true,
                         itemCount: _myRecipes.length,
                         itemBuilder: (context, index) {
                           final recipe = _myRecipes[index];
-                          // Skip recipes with null IDs
-                          if (recipe.id == null) {
-                            return SizedBox.shrink();
-                          }
-                          
                           return ListTile(
                             title: Text(recipe.recipeName),
                             subtitle: Text(
@@ -199,7 +339,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('Cancel'),
+              child: const Text('Cancel'),
             ),
           ],
         );
@@ -213,10 +353,18 @@ class _CreatePostPageState extends State<CreatePostPage> {
   }
 
   Future<void> _submitPost() async {
-    if (_imageFile == null) {
+    if (_imageFile == null && _videoFile == null) {
       ErrorHandlingService.showSimpleError(
         context,
-        'Please select an image',
+        'Please select a photo or video',
+      );
+      return;
+    }
+
+    if (_videoFile != null && _thumbnailFile == null) {
+      ErrorHandlingService.showSimpleError(
+        context,
+        'Please capture a thumbnail for your video',
       );
       return;
     }
@@ -229,29 +377,22 @@ class _CreatePostPageState extends State<CreatePostPage> {
       return;
     }
 
-    // FIXED: Check if recipe ID is valid
-    if (_selectedRecipe!.id == null) {
-      ErrorHandlingService.showSimpleError(
-        context,
-        'Invalid recipe selected. Please try again.',
-      );
-      return;
-    }
-
     setState(() {
       _isLoading = true;
     });
 
     try {
       await DatabaseService.createPost(
-        recipeId: _selectedRecipe!.id!, // FIXED: Use null-assertion after validation
-        imageFile: _imageFile!,
+        recipeId: _selectedRecipe!.id!,
+        imageFile: _imageFile,
+        videoFile: _videoFile,
+        thumbnailFile: _thumbnailFile,
         caption: _captionController.text.trim(),
       );
 
       if (mounted) {
         ErrorHandlingService.showSuccess(context, 'Post created successfully!');
-        Navigator.pop(context, true); // Return true to refresh feed
+        Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
@@ -274,12 +415,12 @@ class _CreatePostPageState extends State<CreatePostPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Create Post'),
+        title: const Text('Create Post'),
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
         actions: [
           if (_isLoading)
-            Center(
+            const Center(
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 16),
                 child: SizedBox(
@@ -295,7 +436,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
           else
             TextButton(
               onPressed: _submitPost,
-              child: Text(
+              child: const Text(
                 'POST',
                 style: TextStyle(
                   color: Colors.white,
@@ -306,13 +447,13 @@ class _CreatePostPageState extends State<CreatePostPage> {
         ],
       ),
       body: SingleChildScrollView(
-        padding: EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Image preview
+            // Media preview
             GestureDetector(
-              onTap: _showImageSourceDialog,
+              onTap: _showMediaPickerDialog,
               child: Container(
                 width: double.infinity,
                 height: 300,
@@ -321,51 +462,143 @@ class _CreatePostPageState extends State<CreatePostPage> {
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: Colors.grey.shade300),
                 ),
-                child: _imageFile == null
+                child: _mediaType == 'none'
                     ? Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.add_photo_alternate, size: 60, color: Colors.grey),
-                          SizedBox(height: 8),
-                          Text(
-                            'Tap to add photo',
+                          const Icon(Icons.add_photo_alternate, size: 60, color: Colors.grey),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Tap to add photo or video',
                             style: TextStyle(color: Colors.grey),
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.photo, size: 20, color: Colors.grey.shade600),
+                              const SizedBox(width: 4),
+                              Text('Photo', style: TextStyle(color: Colors.grey.shade600)),
+                              const SizedBox(width: 16),
+                              Icon(Icons.videocam, size: 20, color: Colors.grey.shade600),
+                              const SizedBox(width: 4),
+                              Text('Video (max 3min)', style: TextStyle(color: Colors.grey.shade600)),
+                            ],
                           ),
                         ],
                       )
-                    : ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.file(
-                          _imageFile!,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
+                    : _mediaType == 'photo' && _imageFile != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.file(
+                              _imageFile!,
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        : _mediaType == 'video' && _videoController != null
+                            ? Stack(
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: AspectRatio(
+                                      aspectRatio: _videoController!.value.aspectRatio,
+                                      child: VideoPlayer(_videoController!),
+                                    ),
+                                  ),
+                                  Positioned.fill(
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withOpacity(0.3),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: const Center(
+                                        child: Icon(
+                                          Icons.play_circle_outline,
+                                          size: 80,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 8,
+                                    right: 8,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withOpacity(0.7),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: const Row(
+                                        children: [
+                                          Icon(Icons.videocam, size: 16, color: Colors.white),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'VIDEO',
+                                            style: TextStyle(color: Colors.white, fontSize: 12),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : Container(),
               ),
             ),
 
-            SizedBox(height: 24),
+            if (_mediaType == 'video' && _thumbnailFile == null)
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.warning_amber, color: Colors.orange.shade700),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Please capture a thumbnail photo for your video',
+                          style: TextStyle(fontSize: 14),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _generateThumbnail,
+                        child: const Text('Capture'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            const SizedBox(height: 24),
 
             // Recipe selection
-            Text(
+            const Text(
               'Tag Recipe *',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             InkWell(
               onTap: _showRecipeSelectionDialog,
               child: Container(
-                padding: EdgeInsets.all(16),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.grey.shade300),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.restaurant_menu, color: Colors.green),
-                    SizedBox(width: 12),
+                    const Icon(Icons.restaurant_menu, color: Colors.green),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         _selectedRecipe?.recipeName ?? 'Select a recipe',
@@ -376,23 +609,23 @@ class _CreatePostPageState extends State<CreatePostPage> {
                         ),
                       ),
                     ),
-                    Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                    const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
                   ],
                 ),
               ),
             ),
 
-            SizedBox(height: 24),
+            const SizedBox(height: 24),
 
             // Caption
-            Text(
+            const Text(
               'Caption (Optional)',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             TextField(
               controller: _captionController,
               decoration: InputDecoration(
@@ -405,7 +638,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
               maxLength: 500,
             ),
 
-            SizedBox(height: 24),
+            const SizedBox(height: 24),
 
             // Submit button
             SizedBox(
@@ -413,7 +646,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
               child: ElevatedButton.icon(
                 onPressed: _isLoading ? null : _submitPost,
                 icon: _isLoading
-                    ? SizedBox(
+                    ? const SizedBox(
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(
@@ -421,13 +654,13 @@ class _CreatePostPageState extends State<CreatePostPage> {
                           valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                         ),
                       )
-                    : Icon(Icons.send),
+                    : const Icon(Icons.send),
                 label: Text(_isLoading ? 'Posting...' : 'Share Post'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  textStyle: TextStyle(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
