@@ -1,4 +1,4 @@
-// lib/widgets/rating_dialog.dart
+// lib/widgets/rating_dialog.dart - FIXED
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 import '../services/error_handling_service.dart';

@@ -1,4 +1,4 @@
-// lib/pages/create_post_page.dart - Create Post with Recipe Tag
+// lib/pages/create_post_page.dart - FIXED: Handle nullable recipe ID
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -174,6 +174,11 @@ class _CreatePostPageState extends State<CreatePostPage> {
                         itemCount: _myRecipes.length,
                         itemBuilder: (context, index) {
                           final recipe = _myRecipes[index];
+                          // Skip recipes with null IDs
+                          if (recipe.id == null) {
+                            return SizedBox.shrink();
+                          }
+                          
                           return ListTile(
                             title: Text(recipe.recipeName),
                             subtitle: Text(
@@ -224,13 +229,22 @@ class _CreatePostPageState extends State<CreatePostPage> {
       return;
     }
 
+    // FIXED: Check if recipe ID is valid
+    if (_selectedRecipe!.id == null) {
+      ErrorHandlingService.showSimpleError(
+        context,
+        'Invalid recipe selected. Please try again.',
+      );
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
 
     try {
       await DatabaseService.createPost(
-        recipeId: _selectedRecipe!.id,
+        recipeId: _selectedRecipe!.id!, // FIXED: Use null-assertion after validation
         imageFile: _imageFile!,
         caption: _captionController.text.trim(),
       );

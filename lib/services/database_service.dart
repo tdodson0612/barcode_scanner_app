@@ -1,4 +1,4 @@
-// lib/services/database_service.dart - COMPLETE WITH PHASE 1 + ALL EXISTING FEATURES
+// lib/services/database_service.dart - COMPLETE WITH ALL FEATURES
 import 'dart:convert';
 import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -43,6 +43,7 @@ class DatabaseService {
           .from('user_profiles')
           .update({
             'xp': newXP,
+            'level': newLevel,
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', currentUserId!);
@@ -225,21 +226,16 @@ class DatabaseService {
     String sortBy = 'recent',
   }) async {
     try {
-      var query = _supabase
+      final response = await _supabase
           .from('posts')
           .select('''
             *,
             user:user_profiles!posts_user_id_fkey(id, username, first_name, last_name, avatar_url),
             recipe:submitted_recipes!posts_recipe_id_fkey(id, recipe_name, ingredients, directions)
-          ''');
+          ''')
+          .order('created_at', ascending: sortBy != 'recent')
+          .range(offset, offset + limit - 1);
       
-      if (sortBy == 'recent') {
-        query = query.order('created_at', ascending: false);
-      }
-      
-      query = query.range(offset, offset + limit - 1);
-      
-      final response = await query;
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       throw Exception('Failed to get feed posts: $e');
@@ -1164,6 +1160,184 @@ class DatabaseService {
     } catch (e) {
       throw Exception('Failed to delete submitted recipe: $e');
     }
+  }
+
+  // ==================================================
+  // RECIPE RATINGS & MANAGEMENT
+  // ==================================================
+
+  /// Rate a recipe (1-5 stars)
+  static Future<void> rateRecipe(int recipeId, int rating) async {
+    ensureUserAuthenticated();
+    
+    if (rating < 1 || rating > 5) {
+      throw Exception('Rating must be between 1 and 5');
+    }
+
+    try {
+      // Check if user is the recipe owner
+      final recipe = await _supabase
+          .from('submitted_recipes')
+          .select('user_id')
+          .eq('id', recipeId)
+          .single();
+      
+      if (recipe['user_id'] == currentUserId) {
+        throw Exception('You cannot rate your own recipe');
+      }
+
+      // Upsert rating (insert or update if exists)
+      await _supabase.from('recipe_ratings').upsert({
+        'recipe_id': recipeId,
+        'user_id': currentUserId!,
+        'rating': rating,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      throw Exception('Failed to rate recipe: $e');
+    }
+  }
+
+  /// Get all ratings for a recipe
+  static Future<List<Map<String, dynamic>>> getRecipeRatings(int recipeId) async {
+    try {
+      final response = await _supabase
+          .from('recipe_ratings')
+          .select('*, user_profiles!recipe_ratings_user_id_fkey(username, first_name, last_name)')
+          .eq('recipe_id', recipeId)
+          .order('created_at', ascending: false);
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      throw Exception('Failed to get recipe ratings: $e');
+    }
+  }
+
+  /// Get average rating and count for a recipe
+  static Future<Map<String, dynamic>> getRecipeAverageRating(int recipeId) async {
+    try {
+      final response = await _supabase
+          .from('recipe_ratings')
+          .select('rating')
+          .eq('recipe_id', recipeId);
+
+      if (response.isEmpty) {
+        return {'average': 0.0, 'count': 0};
+      }
+
+      final ratings = List<Map<String, dynamic>>.from(response);
+      final sum = ratings.fold<int>(0, (sum, item) => sum + (item['rating'] as int));
+      final average = sum / ratings.length;
+
+      return {
+        'average': double.parse(average.toStringAsFixed(1)),
+        'count': ratings.length,
+      };
+    } catch (e) {
+      return {'average': 0.0, 'count': 0};
+    }
+  }
+
+  /// Check if current user has rated a recipe
+  static Future<bool> hasUserRatedRecipe(int recipeId) async {
+    if (currentUserId == null) return false;
+
+    try {
+      final response = await _supabase
+          .from('recipe_ratings')
+          .select('id')
+          .eq('recipe_id', recipeId)
+          .eq('user_id', currentUserId!)
+          .maybeSingle();
+
+      return response != null;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Get user's rating for a recipe
+  static Future<int?> getUserRecipeRating(int recipeId) async {
+    if (currentUserId == null) return null;
+
+    try {
+      final response = await _supabase
+          .from('recipe_ratings')
+          .select('rating')
+          .eq('recipe_id', recipeId)
+          .eq('user_id', currentUserId!)
+          .maybeSingle();
+
+      return response?['rating'];
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Update an existing recipe
+  static Future<void> updateSubmittedRecipe({
+    required int recipeId,
+    required String recipeName,
+    required String ingredients,
+    required String directions,
+  }) async {
+    ensureUserAuthenticated();
+
+    try {
+      // Verify the recipe belongs to the current user
+      final recipe = await _supabase
+          .from('submitted_recipes')
+          .select('user_id')
+          .eq('id', recipeId)
+          .single();
+
+      if (recipe['user_id'] != currentUserId) {
+        throw Exception('You can only edit your own recipes');
+      }
+
+      await _supabase.from('submitted_recipes').update({
+        'recipe_name': recipeName,
+        'ingredients': ingredients,
+        'directions': directions,
+      }).eq('id', recipeId);
+    } catch (e) {
+      throw Exception('Failed to update recipe: $e');
+    }
+  }
+
+  /// Get a single recipe by ID
+  static Future<Map<String, dynamic>?> getRecipeById(int recipeId) async {
+    try {
+      final response = await _supabase
+          .from('submitted_recipes')
+          .select()
+          .eq('id', recipeId)
+          .single();
+
+      return response;
+    } catch (e) {
+      throw Exception('Failed to get recipe: $e');
+    }
+  }
+
+  /// Generate shareable recipe text
+  static String generateShareableRecipeText(Map<String, dynamic> recipe) {
+    final name = recipe['recipe_name'] ?? 'Unnamed Recipe';
+    final ingredients = recipe['ingredients'] ?? 'No ingredients listed';
+    final directions = recipe['directions'] ?? 'No directions provided';
+
+    return '''
+🍽️ Recipe: $name
+
+📋 Ingredients:
+$ingredients
+
+👨‍🍳 Directions:
+$directions
+
+---
+Shared from Recipe Scanner App
+''';
   }
 
   // ==================================================
