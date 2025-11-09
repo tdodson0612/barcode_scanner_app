@@ -1074,7 +1074,7 @@ Widget _buildSearchBar() {
             Icon(Icons.check_circle, size: 14, color: Colors.green),
             SizedBox(width: 4),
             Text(
-              'Works with typos too!',
+              'Search by Name, Username or Email!',
               style: TextStyle(
                 fontSize: 11,
                 color: Colors.green.shade600,
@@ -1292,7 +1292,7 @@ Widget _buildSearchBar() {
                     ),
                     SizedBox(height: 12),
                     Text(
-                      'Welcome to Recipe Scanner',
+                      'Welcome to Liver Food Scanner',
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
@@ -1470,7 +1470,7 @@ Widget _buildSearchBar() {
                     ElevatedButton.icon(
                       onPressed: _performScan,
                       icon: Icon(Icons.qr_code_scanner),
-                      label: Text('Quick Recipe Scan Demo'),
+                      label: Text('Quick Scan Demo'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
@@ -1857,7 +1857,7 @@ Widget _buildSearchBar() {
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        title: Text('Recipe Scanner'),
+        title: Text('Liver Food Scanner'),
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
         actions: [

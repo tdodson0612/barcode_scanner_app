@@ -1,4 +1,4 @@
-// lib/pages/profile_screen.dart - FIXED: Premium controller listener + navigation
+// lib/pages/profile_screen.dart - ADDED: Custom profile background upload feature
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -22,6 +22,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveClientMixin {
   File? _profileImage;
+  File? _backgroundImage; // NEW: Custom background image
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   bool _isEditingName = false;
@@ -58,7 +59,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     super.dispose();
   }
 
-  // FIXED: Proper listener registration without StreamSubscription
   void _initializePremiumController() {
     _premiumController = PremiumGateController();
     _premiumController.addListener(_updatePremiumState);
@@ -86,7 +86,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 
-  // FIXED: Silent error handling for friends list
   Future<void> _loadFriends() async {
     if (!mounted) return;
     
@@ -165,6 +164,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     try {
       final prefs = await SharedPreferences.getInstance();
       final imagePath = prefs.getString('profile_image_path');
+      final backgroundPath = prefs.getString('profile_background_path'); // NEW
       final savedName = prefs.getString('user_name') ?? 'User';
       final savedEmail = prefs.getString('user_email') ?? '';
       
@@ -176,6 +176,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
           _emailController.text = savedEmail;
           if (imagePath != null && imagePath.isNotEmpty) {
             _profileImage = File(imagePath);
+          }
+          // NEW: Load custom background if exists
+          if (backgroundPath != null && backgroundPath.isNotEmpty) {
+            _backgroundImage = File(backgroundPath);
           }
         });
       }
@@ -233,6 +237,65 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     }
   }
 
+  // NEW: Pick background image
+  Future<void> _pickBackgroundImage(ImageSource source) async {
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(
+        source: source,
+        maxWidth: 1920, // Limit size for backgrounds
+        maxHeight: 1920,
+        imageQuality: 85,
+      );
+
+      if (pickedFile != null && mounted) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('profile_background_path', pickedFile.path);
+        
+        setState(() {
+          _backgroundImage = File(pickedFile.path);
+        });
+
+        ErrorHandlingService.showSuccess(context, 'Background updated!');
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.imageError,
+          customMessage: 'Unable to update background',
+          onRetry: () => _pickBackgroundImage(source),
+        );
+      }
+    }
+  }
+
+  // NEW: Remove custom background and revert to default
+  Future<void> _removeBackgroundImage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('profile_background_path');
+      
+      if (mounted) {
+        setState(() {
+          _backgroundImage = null;
+        });
+        
+        ErrorHandlingService.showSuccess(context, 'Background reset to default');
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Unable to reset background',
+        );
+      }
+    }
+  }
+
   Future<void> _saveUserName() async {
     if (_nameController.text.trim().isEmpty) {
       ErrorHandlingService.showSimpleError(context, 'Name cannot be empty');
@@ -282,7 +345,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
       return;
     }
 
-    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(_emailController.text.trim())) {      ErrorHandlingService.showSimpleError(context, 'Please enter a valid email address');
+    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(_emailController.text.trim())) {
+      ErrorHandlingService.showSimpleError(context, 'Please enter a valid email address');
       return;
     }
 
@@ -387,7 +451,50 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 
-  // FIXED: Safe navigation with error handling
+  // NEW: Show background image picker dialog
+  void _showBackgroundPickerDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Select Background'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Colors.blue),
+                title: const Text('Take Photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickBackgroundImage(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: Colors.blue),
+                title: const Text('Choose from Gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickBackgroundImage(ImageSource.gallery);
+                },
+              ),
+              if (_backgroundImage != null) ...[
+                Divider(),
+                ListTile(
+                  leading: const Icon(Icons.restore, color: Colors.orange),
+                  title: const Text('Reset to Default'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _removeBackgroundImage();
+                  },
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void _navigateToUserProfile(String userId) {
     try {
       Navigator.push(
@@ -574,6 +681,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
           ),
         ),
         actions: [
+          // NEW: Background edit button
+          IconButton(
+            icon: Icon(Icons.wallpaper),
+            tooltip: 'Change Background',
+            onPressed: _showBackgroundPickerDialog,
+          ),
           if (_isLoading)
             Center(
               child: SizedBox(
@@ -590,23 +703,41 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
       drawer: AppDrawer(currentPage: 'profile'),
       body: Stack(
         children: [
+          // NEW: Background - Custom or Default
           Positioned.fill(
-            child: Image.asset(
-              'assets/background.png',
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) {
-                return Container(
-                  color: Colors.green.shade50,
-                  child: Center(
-                    child: Icon(
-                      Icons.image_not_supported,
-                      size: 50,
-                      color: Colors.grey,
-                    ),
+            child: _backgroundImage != null
+                ? Image.file(
+                    _backgroundImage!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      // Fallback to default if custom image fails
+                      return Image.asset(
+                        'assets/background.png',
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            color: Colors.green.shade50,
+                          );
+                        },
+                      );
+                    },
+                  )
+                : Image.asset(
+                    'assets/background.png',
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        color: Colors.green.shade50,
+                        child: Center(
+                          child: Icon(
+                            Icons.image_not_supported,
+                            size: 50,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
           ),
           
           SingleChildScrollView(
@@ -1094,4 +1225,3 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 }
-  

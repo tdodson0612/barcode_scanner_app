@@ -1,7 +1,8 @@
-// lib/login.dart - FIXED: Resolved "invalid login" issue
+// lib/login.dart - Group B Changes: Remember Me + Autofill
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'services/auth_service.dart';
 import 'services/error_handling_service.dart';
 import 'config/app_config.dart';
@@ -28,11 +29,13 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  bool _rememberMe = true; // NEW: Default to checked
 
   @override
   void initState() {
     super.initState();
     _setupAuthListener();
+    _loadSavedCredentials(); // NEW: Load saved preferences
     
     // Pre-fill controllers with saved values
     _emailController.text = _email;
@@ -47,6 +50,41 @@ class _LoginPageState extends State<LoginPage> {
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
+  }
+
+  // NEW: Load saved remember me preference and email
+  Future<void> _loadSavedCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final rememberMe = prefs.getBool('remember_me') ?? true;
+      final savedEmail = prefs.getString('saved_email') ?? '';
+      
+      setState(() {
+        _rememberMe = rememberMe;
+        if (rememberMe && savedEmail.isNotEmpty) {
+          _email = savedEmail;
+          _emailController.text = savedEmail;
+        }
+      });
+    } catch (e) {
+      AppConfig.debugPrint('Error loading saved credentials: $e');
+    }
+  }
+
+  // NEW: Save remember me preference and email
+  Future<void> _saveCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('remember_me', _rememberMe);
+      
+      if (_rememberMe) {
+        await prefs.setString('saved_email', _email.trim());
+      } else {
+        await prefs.remove('saved_email');
+      }
+    } catch (e) {
+      AppConfig.debugPrint('Error saving credentials: $e');
+    }
   }
 
   Future<void> _submitForm() async {
@@ -64,11 +102,9 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       if (mounted) {
-        // Enhanced error message to help debug
         String errorMessage = e.toString();
         AppConfig.debugPrint('Auth error details: $errorMessage');
         
-        // Provide more specific error messages
         if (errorMessage.contains('Invalid login credentials')) {
           errorMessage = 'Invalid email or password. Please check your credentials and try again.';
         } else if (errorMessage.contains('Email not confirmed')) {
@@ -93,11 +129,13 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _handleLogin() async {
     try {
-      // Trim email and password to remove any accidental whitespace
       final trimmedEmail = _email.trim();
-      final trimmedPassword = _password; // Don't trim password - it might be intentional
+      final trimmedPassword = _password;
       
       AppConfig.debugPrint('Attempting login for: $trimmedEmail');
+      
+      // NEW: Save credentials before login attempt
+      await _saveCredentials();
       
       final response = await AuthService.signIn(
         email: trimmedEmail,
@@ -130,7 +168,6 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     try {
-      // Trim email for signup
       final trimmedEmail = _email.trim();
       
       final response = await AuthService.signUp(
@@ -141,11 +178,11 @@ class _LoginPageState extends State<LoginPage> {
       if (response.user != null) {
         AppConfig.debugPrint('Sign up successful: ${response.user?.email}');
 
-        // Add delay to ensure auth context is ready
         await Future.delayed(const Duration(milliseconds: 1000));
-
-        // Create user profile
         await _createUserProfile(response.user!);
+
+        // NEW: Save credentials after successful signup
+        await _saveCredentials();
 
         if (mounted) {
           if (response.session == null) {
@@ -196,7 +233,6 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _sendPasswordResetEmail() async {
-    // Get email from form or show input dialog
     String resetEmail = _emailController.text.trim();
     
     if (resetEmail.isEmpty) {
@@ -208,7 +244,6 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    // Validate email format
     if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(resetEmail)) {
       ErrorHandlingService.showSimpleError(context, 'Please enter a valid email address');
       return;
@@ -298,7 +333,6 @@ class _LoginPageState extends State<LoginPage> {
   void _toggleMode() {
     setState(() {
       _isLogin = !_isLogin;
-      // Clear form when switching modes
       _formKey.currentState?.reset();
       _emailController.clear();
       _passwordController.clear();
@@ -326,8 +360,6 @@ class _LoginPageState extends State<LoginPage> {
       return 'Password is required';
     }
     
-    // CRITICAL FIX: Only enforce length requirement during signup
-    // Don't validate password length during login - let Supabase handle it
     if (!_isLogin) {
       if (value.length < 6) {
         return 'Password must be at least 6 characters';
@@ -382,103 +414,79 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(24),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // App Logo/Icon
-                        Icon(
-                          Icons.restaurant_menu,
-                          size: 64,
-                          color: Colors.blue.shade600,
-                        ),
-                        SizedBox(height: 16),
-                        
-                        // Title
-                        Text(
-                          _isLogin ? 'Welcome Back!' : 'Create Your Account',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey.shade800,
+                  child: AutofillGroup( // NEW: Wrap form in AutofillGroup for password manager support
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // App Logo/Icon
+                          Icon(
+                            Icons.restaurant_menu,
+                            size: 64,
+                            color: Colors.blue.shade600,
                           ),
-                          textAlign: TextAlign.center,
-                        ),
-                        
-                        SizedBox(height: 8),
-                        
-                        Text(
-                          _isLogin 
-                              ? 'Sign in to access your recipes and scan history'
-                              : 'Join Recipe Scanner to unlock premium features',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey.shade600,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        
-                        SizedBox(height: 32),
-
-                        // Email Field
-                        TextFormField(
-                          controller: _emailController,
-                          decoration: InputDecoration(
-                            labelText: "Email Address",
-                            prefixIcon: Icon(Icons.email_outlined),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            filled: true,
-                            fillColor: Colors.grey.shade50,
-                          ),
-                          keyboardType: TextInputType.emailAddress,
-                          textInputAction: TextInputAction.next,
-                          validator: _validateEmail,
-                          onSaved: (val) => _email = val?.trim() ?? '',
-                          autocorrect: false,
-                          enableSuggestions: false,
-                        ),
-                        
-                        SizedBox(height: 16),
-
-                        // Password Field
-                        TextFormField(
-                          controller: _passwordController,
-                          decoration: InputDecoration(
-                            labelText: "Password",
-                            prefixIcon: Icon(Icons.lock_outline),
-                            suffixIcon: IconButton(
-                              icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off),
-                              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            filled: true,
-                            fillColor: Colors.grey.shade50,
-                          ),
-                          obscureText: _obscurePassword,
-                          textInputAction: _isLogin ? TextInputAction.done : TextInputAction.next,
-                          validator: _validatePassword,
-                          onSaved: (val) => _password = val ?? '',
-                          autocorrect: false,
-                          enableSuggestions: false,
-                        ),
-
-                        // Confirm Password Field (Sign Up only)
-                        if (!_isLogin) ...[
                           SizedBox(height: 16),
+                          
+                          // Title
+                          Text(
+                            _isLogin ? 'Welcome Back!' : 'Create Your Account',
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey.shade800,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          
+                          SizedBox(height: 8),
+                          
+                          Text(
+                            _isLogin 
+                                ? 'Sign in to access your recipes and scan history'
+                                : 'Join Liver Food Scanner to unlock premium features',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey.shade600,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          
+                          SizedBox(height: 32),
+
+                          // Email Field with Autofill
                           TextFormField(
-                            controller: _confirmPasswordController,
+                            controller: _emailController,
                             decoration: InputDecoration(
-                              labelText: "Confirm Password",
+                              labelText: "Email Address",
+                              prefixIcon: Icon(Icons.email_outlined),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              filled: true,
+                              fillColor: Colors.grey.shade50,
+                            ),
+                            keyboardType: TextInputType.emailAddress,
+                            textInputAction: TextInputAction.next,
+                            validator: _validateEmail,
+                            onSaved: (val) => _email = val?.trim() ?? '',
+                            autocorrect: false,
+                            enableSuggestions: false,
+                            autofillHints: [AutofillHints.email], // NEW: Enable autofill
+                          ),
+                          
+                          SizedBox(height: 16),
+
+                          // Password Field with Autofill
+                          TextFormField(
+                            controller: _passwordController,
+                            decoration: InputDecoration(
+                              labelText: "Password",
                               prefixIcon: Icon(Icons.lock_outline),
                               suffixIcon: IconButton(
-                                icon: Icon(_obscureConfirmPassword ? Icons.visibility : Icons.visibility_off),
-                                onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                                icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off),
+                                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                               ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
@@ -486,117 +494,182 @@ class _LoginPageState extends State<LoginPage> {
                               filled: true,
                               fillColor: Colors.grey.shade50,
                             ),
-                            obscureText: _obscureConfirmPassword,
-                            textInputAction: TextInputAction.done,
-                            validator: _validateConfirmPassword,
-                            onSaved: (val) => _confirmPassword = val ?? '',
+                            obscureText: _obscurePassword,
+                            textInputAction: _isLogin ? TextInputAction.done : TextInputAction.next,
+                            validator: _validatePassword,
+                            onSaved: (val) => _password = val ?? '',
                             autocorrect: false,
                             enableSuggestions: false,
+                            autofillHints: _isLogin 
+                                ? [AutofillHints.password] // NEW: Login autofill
+                                : [AutofillHints.newPassword], // NEW: Signup autofill
                           ),
-                        ],
 
-                        SizedBox(height: 24),
-
-                        // Submit Button
-                        SizedBox(
-                          height: 50,
-                          child: ElevatedButton(
-                            onPressed: _isLoading ? null : _submitForm,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue.shade600,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              elevation: 2,
-                            ),
-                            child: _isLoading 
-                                ? Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                          color: Colors.white,
-                                          strokeWidth: 2,
-                                        ),
-                                      ),
-                                      SizedBox(width: 12),
-                                      Text(
-                                        _isLogin ? 'Signing In...' : 'Creating Account...',
-                                        style: TextStyle(fontSize: 16),
-                                      ),
-                                    ],
-                                  )
-                                : Text(
-                                    _isLogin ? 'Sign In' : 'Create Account',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                          ),
-                        ),
-
-                        // Forgot Password (Login only)
-                        if (_isLogin) ...[
-                          SizedBox(height: 16),
-                          TextButton(
-                            onPressed: _sendPasswordResetEmail,
-                            child: Text(
-                              "Forgot your password?",
-                              style: TextStyle(color: Colors.blue.shade600),
-                            ),
-                          ),
-                        ],
-
-                        SizedBox(height: 24),
-
-                        // Divider
-                        Row(
-                          children: [
-                            Expanded(child: Divider()),
-                            Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 16),
-                              child: Text(
-                                'OR',
-                                style: TextStyle(
-                                  color: Colors.grey.shade600,
-                                  fontWeight: FontWeight.w500,
+                          // Confirm Password Field (Sign Up only)
+                          if (!_isLogin) ...[
+                            SizedBox(height: 16),
+                            TextFormField(
+                              controller: _confirmPasswordController,
+                              decoration: InputDecoration(
+                                labelText: "Confirm Password",
+                                prefixIcon: Icon(Icons.lock_outline),
+                                suffixIcon: IconButton(
+                                  icon: Icon(_obscureConfirmPassword ? Icons.visibility : Icons.visibility_off),
+                                  onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
                                 ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                filled: true,
+                                fillColor: Colors.grey.shade50,
                               ),
+                              obscureText: _obscureConfirmPassword,
+                              textInputAction: TextInputAction.done,
+                              validator: _validateConfirmPassword,
+                              onSaved: (val) => _confirmPassword = val ?? '',
+                              autocorrect: false,
+                              enableSuggestions: false,
+                              autofillHints: [AutofillHints.newPassword], // NEW: Confirm password autofill
                             ),
-                            Expanded(child: Divider()),
                           ],
-                        ),
 
-                        SizedBox(height: 24),
-
-                        // Toggle Mode Button
-                        TextButton(
-                          onPressed: _toggleMode,
-                          child: RichText(
-                            text: TextSpan(
-                              style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+                          // NEW: Remember Me Checkbox (Login only)
+                          if (_isLogin) ...[
+                            SizedBox(height: 16),
+                            Row(
                               children: [
-                                TextSpan(
-                                  text: _isLogin 
-                                      ? "Don't have an account? "
-                                      : "Already have an account? ",
+                                Checkbox(
+                                  value: _rememberMe,
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _rememberMe = value ?? true;
+                                    });
+                                  },
+                                  activeColor: Colors.blue.shade600,
                                 ),
-                                TextSpan(
-                                  text: _isLogin ? 'Create one' : 'Sign in',
-                                  style: TextStyle(
-                                    color: Colors.blue.shade600,
-                                    fontWeight: FontWeight.w600,
+                                Expanded(
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      setState(() {
+                                        _rememberMe = !_rememberMe;
+                                      });
+                                    },
+                                    child: Text(
+                                      'Remember me on this device',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.grey.shade700,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ],
                             ),
+                          ],
+
+                          SizedBox(height: 24),
+
+                          // Submit Button
+                          SizedBox(
+                            height: 50,
+                            child: ElevatedButton(
+                              onPressed: _isLoading ? null : _submitForm,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue.shade600,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                elevation: 2,
+                              ),
+                              child: _isLoading 
+                                  ? Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                            color: Colors.white,
+                                            strokeWidth: 2,
+                                          ),
+                                        ),
+                                        SizedBox(width: 12),
+                                        Text(
+                                          _isLogin ? 'Signing In...' : 'Creating Account...',
+                                          style: TextStyle(fontSize: 16),
+                                        ),
+                                      ],
+                                    )
+                                  : Text(
+                                      _isLogin ? 'Sign In' : 'Create Account',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                            ),
                           ),
-                        ),
-                      ],
+
+                          // Forgot Password (Login only)
+                          if (_isLogin) ...[
+                            SizedBox(height: 16),
+                            TextButton(
+                              onPressed: _sendPasswordResetEmail,
+                              child: Text(
+                                "Forgot your password?",
+                                style: TextStyle(color: Colors.blue.shade600),
+                              ),
+                            ),
+                          ],
+
+                          SizedBox(height: 24),
+
+                          // Divider
+                          Row(
+                            children: [
+                              Expanded(child: Divider()),
+                              Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 16),
+                                child: Text(
+                                  'OR',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                              Expanded(child: Divider()),
+                            ],
+                          ),
+
+                          SizedBox(height: 24),
+
+                          // Toggle Mode Button
+                          TextButton(
+                            onPressed: _toggleMode,
+                            child: RichText(
+                              text: TextSpan(
+                                style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+                                children: [
+                                  TextSpan(
+                                    text: _isLogin 
+                                        ? "Don't have an account? "
+                                        : "Already have an account? ",
+                                  ),
+                                  TextSpan(
+                                    text: _isLogin ? 'Create one' : 'Sign in',
+                                    style: TextStyle(
+                                      color: Colors.blue.shade600,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
