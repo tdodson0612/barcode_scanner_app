@@ -1,4 +1,4 @@
-// lib/pages/profile_screen.dart - ADDED: Custom profile background upload feature
+// lib/pages/profile_screen.dart - UPDATED: Added Pictures Gallery Feature
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -22,7 +22,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveClientMixin {
   File? _profileImage;
-  File? _backgroundImage; // NEW: Custom background image
+  File? _backgroundImage;
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   bool _isEditingName = false;
@@ -34,6 +34,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
   List<Map<String, dynamic>> _friends = [];
   bool _friendsListVisible = true;
   bool _isLoadingFriends = false;
+
+  // NEW: Pictures management
+  List<String> _pictures = [];
+  bool _isLoadingPictures = false;
+  static const int _maxPictures = 20;
 
   late final PremiumGateController _premiumController;
   bool _isPremium = false;
@@ -49,6 +54,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     _initializePremiumController();
     _loadProfile();
     _loadFriends();
+    _loadPictures(); // NEW
   }
 
   @override
@@ -83,6 +89,294 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
         borderRadius: BorderRadius.circular(10),
       ),
       child: child,
+    );
+  }
+
+  // NEW: Load pictures from database
+  Future<void> _loadPictures() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _isLoadingPictures = true;
+    });
+
+    try {
+      final pictures = await DatabaseService.getCurrentUserPictures();
+      
+      if (mounted) {
+        setState(() {
+          _pictures = pictures;
+          _isLoadingPictures = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading pictures: $e');
+      if (mounted) {
+        setState(() {
+          _pictures = [];
+          _isLoadingPictures = false;
+        });
+      }
+    }
+  }
+
+  // NEW: Upload a picture
+  Future<void> _uploadPicture(ImageSource source) async {
+    if (_pictures.length >= _maxPictures) {
+      ErrorHandlingService.showSimpleError(
+        context, 
+        'Maximum $_maxPictures pictures allowed. Please delete some first.'
+      );
+      return;
+    }
+
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(
+        source: source,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 85,
+      );
+
+      if (pickedFile != null && mounted) {
+        setState(() {
+          _isLoadingPictures = true;
+        });
+
+        final imageFile = File(pickedFile.path);
+        await DatabaseService.uploadPicture(imageFile);
+        
+        await _loadPictures();
+        
+        if (mounted) {
+          ErrorHandlingService.showSuccess(context, 'Picture uploaded successfully!');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingPictures = false;
+        });
+        
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.imageError,
+          customMessage: 'Unable to upload picture',
+          onRetry: () => _uploadPicture(source),
+        );
+      }
+    }
+  }
+
+  // NEW: Delete a picture
+  Future<void> _deletePicture(String pictureUrl) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Delete Picture'),
+          content: const Text('Are you sure you want to delete this picture?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true && mounted) {
+      setState(() {
+        _isLoadingPictures = true;
+      });
+
+      try {
+        await DatabaseService.deletePicture(pictureUrl);
+        await _loadPictures();
+        
+        if (mounted) {
+          ErrorHandlingService.showSuccess(context, 'Picture deleted successfully');
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _isLoadingPictures = false;
+          });
+          
+          await ErrorHandlingService.handleError(
+            context: context,
+            error: e,
+            category: ErrorHandlingService.databaseError,
+            customMessage: 'Unable to delete picture',
+            onRetry: () => _deletePicture(pictureUrl),
+          );
+        }
+      }
+    }
+  }
+
+  // NEW: Show picture options dialog
+  void _showPictureOptionsDialog(String pictureUrl) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Picture Options'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.account_circle, color: Colors.blue),
+                title: const Text('Set as Profile Picture'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _setAsProfilePicture(pictureUrl);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text('Delete Picture'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _deletePicture(pictureUrl);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // NEW: Set picture as profile picture
+  Future<void> _setAsProfilePicture(String pictureUrl) async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      await DatabaseService.setPictureAsProfilePicture(pictureUrl);
+      
+      if (mounted) {
+        ErrorHandlingService.showSuccess(context, 'Profile picture updated!');
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Unable to set profile picture',
+          onRetry: () => _setAsProfilePicture(pictureUrl),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  // NEW: Show full-screen picture viewer
+  void _showFullScreenImage(String imageUrl, int index) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            title: Text('Picture ${index + 1} of ${_pictures.length}'),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.more_vert),
+                onPressed: () {
+                  Navigator.pop(context);
+                  _showPictureOptionsDialog(imageUrl);
+                },
+              ),
+            ],
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.contain,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Center(
+                    child: CircularProgressIndicator(
+                      value: loadingProgress.expectedTotalBytes != null
+                          ? loadingProgress.cumulativeBytesLoaded /
+                              loadingProgress.expectedTotalBytes!
+                          : null,
+                    ),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) {
+                  return const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.error, size: 50, color: Colors.red),
+                        SizedBox(height: 10),
+                        Text(
+                          'Failed to load image',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // NEW: Show picture upload dialog
+  void _showPictureUploadDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Add Picture'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt, color: Colors.blue),
+                title: const Text('Take Photo'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _uploadPicture(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library, color: Colors.blue),
+                title: const Text('Choose from Gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _uploadPicture(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -164,7 +458,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     try {
       final prefs = await SharedPreferences.getInstance();
       final imagePath = prefs.getString('profile_image_path');
-      final backgroundPath = prefs.getString('profile_background_path'); // NEW
+      final backgroundPath = prefs.getString('profile_background_path');
       final savedName = prefs.getString('user_name') ?? 'User';
       final savedEmail = prefs.getString('user_email') ?? '';
       
@@ -177,7 +471,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
           if (imagePath != null && imagePath.isNotEmpty) {
             _profileImage = File(imagePath);
           }
-          // NEW: Load custom background if exists
           if (backgroundPath != null && backgroundPath.isNotEmpty) {
             _backgroundImage = File(backgroundPath);
           }
@@ -237,13 +530,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     }
   }
 
-  // NEW: Pick background image
   Future<void> _pickBackgroundImage(ImageSource source) async {
     try {
       final picker = ImagePicker();
       final pickedFile = await picker.pickImage(
         source: source,
-        maxWidth: 1920, // Limit size for backgrounds
+        maxWidth: 1920,
         maxHeight: 1920,
         imageQuality: 85,
       );
@@ -271,7 +563,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     }
   }
 
-  // NEW: Remove custom background and revert to default
   Future<void> _removeBackgroundImage() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -451,7 +742,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 
-  // NEW: Show background image picker dialog
   void _showBackgroundPickerDialog() {
     showDialog(
       context: context,
@@ -664,6 +954,127 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 
+  // NEW: Build pictures gallery section
+  Widget _buildPicturesSection() {
+    return _sectionContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Pictures (${_pictures.length}/$_maxPictures)',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              if (_pictures.length < _maxPictures)
+                IconButton(
+                  icon: Icon(Icons.add_photo_alternate, color: Colors.blue),
+                  onPressed: _showPictureUploadDialog,
+                  tooltip: 'Add Picture',
+                ),
+            ],
+          ),
+          SizedBox(height: 12),
+          
+          if (_isLoadingPictures) ...[
+            Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: CircularProgressIndicator(),
+              ),
+            ),
+          ] else if (_pictures.isEmpty) ...[
+            Center(
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.photo_library,
+                    size: 50,
+                    color: Colors.grey.shade400,
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'No pictures yet',
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: _showPictureUploadDialog,
+                    icon: Icon(Icons.add_photo_alternate),
+                    label: Text('Add Your First Picture'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            GridView.builder(
+              shrinkWrap: true,
+              physics: NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+                childAspectRatio: 1,
+              ),
+              itemCount: _pictures.length,
+              itemBuilder: (context, index) {
+                final pictureUrl = _pictures[index];
+                return GestureDetector(
+                  onTap: () => _showFullScreenImage(pictureUrl, index),
+                  onLongPress: () => _showPictureOptionsDialog(pictureUrl),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        pictureUrl,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              value: loadingProgress.expectedTotalBytes != null
+                                  ? loadingProgress.cumulativeBytesLoaded /
+                                      loadingProgress.expectedTotalBytes!
+                                  : null,
+                            ),
+                          );
+                        },
+                        errorBuilder: (context, error, stackTrace) {
+                          return Center(
+                            child: Icon(
+                              Icons.broken_image,
+                              color: Colors.grey.shade400,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -681,7 +1092,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
           ),
         ),
         actions: [
-          // NEW: Background edit button
           IconButton(
             icon: Icon(Icons.wallpaper),
             tooltip: 'Change Background',
@@ -703,14 +1113,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
       drawer: AppDrawer(currentPage: 'profile'),
       body: Stack(
         children: [
-          // NEW: Background - Custom or Default
           Positioned.fill(
             child: _backgroundImage != null
                 ? Image.file(
                     _backgroundImage!,
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) {
-                      // Fallback to default if custom image fails
                       return Image.asset(
                         'assets/background.png',
                         fit: BoxFit.cover,
@@ -936,6 +1344,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                     ],
                   ),
                 ),
+
+                const SizedBox(height: 20),
+
+                // NEW: Pictures Section
+                _buildPicturesSection(),
 
                 const SizedBox(height: 20),
 
@@ -1217,6 +1630,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                     ),
                   ),
                 ),
+
+                const SizedBox(height: 100), // Extra padding at bottom
               ],
             ),
           ), 

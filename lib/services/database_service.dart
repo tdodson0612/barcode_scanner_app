@@ -1,4 +1,6 @@
-// lib/services/database_service.dart - UPDATED: Enhanced fuzzy search + Unread Messages
+// lib/services/database_service.dart - UPDATED: Added Profile Pictures Management
+import 'dart:convert';
+import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/favorite_recipe.dart';
 import '../models/grocery_item.dart';
@@ -94,6 +96,7 @@ class DatabaseService {
     String? firstName,
     String? lastName,
     String? avatarUrl,
+    String? profilePicture,
   }) async {
     ensureUserAuthenticated();
     
@@ -107,6 +110,7 @@ class DatabaseService {
       if (firstName != null) updates['first_name'] = firstName;
       if (lastName != null) updates['last_name'] = lastName;
       if (avatarUrl != null) updates['avatar_url'] = avatarUrl;
+      if (profilePicture != null) updates['profile_picture'] = profilePicture;
 
       await _supabase
           .from('user_profiles')
@@ -147,6 +151,159 @@ class DatabaseService {
     } catch (e) {
       // If we can't check premium status, default to free
       return false;
+    }
+  }
+
+  // ==================================================
+  // PROFILE PICTURES MANAGEMENT
+  // ==================================================
+
+  /// Upload a picture to Supabase Storage and add to user's pictures array
+  static Future<String> uploadPicture(File imageFile) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final userId = currentUserId!;
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = 'picture_$timestamp.jpg';
+      final filePath = '$userId/$fileName';
+      
+      // Upload to Supabase Storage
+      await _supabase.storage
+          .from('profile-pictures')
+          .upload(filePath, imageFile);
+      
+      // Get public URL
+      final publicUrl = _supabase.storage
+          .from('profile-pictures')
+          .getPublicUrl(filePath);
+      
+      // Add to user's pictures array in database
+      final profile = await getCurrentUserProfile();
+      final currentPictures = profile?['pictures'];
+      
+      List<String> picturesList = [];
+      if (currentPictures != null && currentPictures.isNotEmpty) {
+        try {
+          picturesList = List<String>.from(jsonDecode(currentPictures));
+        } catch (e) {
+          print('Error parsing pictures: $e');
+        }
+      }
+      
+      picturesList.add(publicUrl);
+      
+      await _supabase
+          .from('user_profiles')
+          .update({
+            'pictures': jsonEncode(picturesList),
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', userId);
+      
+      return publicUrl;
+    } catch (e) {
+      throw Exception('Failed to upload picture: $e');
+    }
+  }
+
+  /// Get user's pictures array
+  static Future<List<String>> getUserPictures(String userId) async {
+    try {
+      final profile = await getUserProfile(userId);
+      final picturesJson = profile?['pictures'];
+      
+      if (picturesJson == null || picturesJson.isEmpty) {
+        return [];
+      }
+      
+      try {
+        return List<String>.from(jsonDecode(picturesJson));
+      } catch (e) {
+        print('Error parsing pictures: $e');
+        return [];
+      }
+    } catch (e) {
+      print('Error getting pictures: $e');
+      return [];
+    }
+  }
+
+  /// Get current user's pictures
+  static Future<List<String>> getCurrentUserPictures() async {
+    if (currentUserId == null) return [];
+    return getUserPictures(currentUserId!);
+  }
+
+  /// Delete a picture from storage and database
+  static Future<void> deletePicture(String pictureUrl) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final userId = currentUserId!;
+      
+      // Extract file path from URL
+      // URL format: https://{project}.supabase.co/storage/v1/object/public/profile-pictures/{userId}/picture_123.jpg
+      final uri = Uri.parse(pictureUrl);
+      final pathSegments = uri.pathSegments;
+      
+      // Find the index of 'profile-pictures' and get everything after it
+      final bucketIndex = pathSegments.indexOf('profile-pictures');
+      if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
+        final filePath = pathSegments.sublist(bucketIndex + 1).join('/');
+        
+        // Delete from storage
+        await _supabase.storage
+            .from('profile-pictures')
+            .remove([filePath]);
+      }
+      
+      // Remove from user's pictures array in database
+      final profile = await getCurrentUserProfile();
+      final currentPictures = profile?['pictures'];
+      
+      if (currentPictures != null && currentPictures.isNotEmpty) {
+        List<String> picturesList = List<String>.from(jsonDecode(currentPictures));
+        picturesList.remove(pictureUrl);
+        
+        await _supabase
+            .from('user_profiles')
+            .update({
+              'pictures': jsonEncode(picturesList),
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', userId);
+      }
+    } catch (e) {
+      throw Exception('Failed to delete picture: $e');
+    }
+  }
+
+  /// Set a picture as the main profile picture
+  static Future<void> setPictureAsProfilePicture(String pictureUrl) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('user_profiles')
+          .update({
+            'profile_picture': pictureUrl,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', currentUserId!);
+    } catch (e) {
+      throw Exception('Failed to set profile picture: $e');
+    }
+  }
+
+  /// Get user's main profile picture URL
+  static Future<String?> getProfilePictureUrl(String userId) async {
+    try {
+      final profile = await getUserProfile(userId);
+      return profile?['profile_picture'];
+    } catch (e) {
+      print('Error getting profile picture: $e');
+      return null;
     }
   }
 
