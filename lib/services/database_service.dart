@@ -1,4 +1,4 @@
-// lib/services/database_service.dart - COMPLETE WITH RECIPE RATINGS
+// lib/services/database_service.dart - COMPLETE WITH PHASE 1 + ALL EXISTING FEATURES
 import 'dart:convert';
 import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -15,7 +15,6 @@ class DatabaseService {
   // ==================================================
   static String? get currentUserId => _supabase.auth.currentUser?.id;
 
-  /// Throws an exception if no user is signed in
   static void ensureUserAuthenticated() {
     if (currentUserId == null) {
       throw Exception('Please sign in to continue');
@@ -25,8 +24,487 @@ class DatabaseService {
   static bool get isUserLoggedIn => currentUserId != null;
 
   // ==================================================
+  // XP & LEVEL SYSTEM
+  // ==================================================
+
+  static Future<Map<String, dynamic>> addXP(int xpAmount, {String? reason}) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final profile = await getCurrentUserProfile();
+      final currentXP = profile?['xp'] ?? 0;
+      final currentLevel = profile?['level'] ?? 1;
+      final newXP = currentXP + xpAmount;
+      
+      int newLevel = _calculateLevel(newXP);
+      bool leveledUp = newLevel > currentLevel;
+      
+      await _supabase
+          .from('user_profiles')
+          .update({
+            'xp': newXP,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', currentUserId!);
+      
+      return {
+        'xp_gained': xpAmount,
+        'total_xp': newXP,
+        'new_level': newLevel,
+        'leveled_up': leveledUp,
+        'reason': reason,
+      };
+    } catch (e) {
+      throw Exception('Failed to add XP: $e');
+    }
+  }
+
+  static int _calculateLevel(int xp) {
+    int level = 1;
+    int xpNeeded = 100;
+    
+    while (xp >= xpNeeded) {
+      level++;
+      xpNeeded += (level * 50);
+    }
+    
+    return level;
+  }
+
+  static int getXPForNextLevel(int currentLevel) {
+    int xpNeeded = 100;
+    for (int i = 2; i <= currentLevel + 1; i++) {
+      xpNeeded += (i * 50);
+    }
+    return xpNeeded;
+  }
+
+  static double getLevelProgress(int currentXP, int currentLevel) {
+    int xpForCurrentLevel = getXPForNextLevel(currentLevel - 1);
+    int xpForNextLevel = getXPForNextLevel(currentLevel);
+    int xpIntoLevel = currentXP - xpForCurrentLevel;
+    int xpNeededForLevel = xpForNextLevel - xpForCurrentLevel;
+    
+    return xpIntoLevel / xpNeededForLevel;
+  }
+
+  // ==================================================
+  // ACHIEVEMENTS & BADGES
+  // ==================================================
+
+  static Future<List<Map<String, dynamic>>> getAllBadges() async {
+    try {
+      final response = await _supabase
+          .from('badges')
+          .select()
+          .order('xp_reward');
+      
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      throw Exception('Failed to get badges: $e');
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getUserBadges(String userId) async {
+    try {
+      final response = await _supabase
+          .from('user_achievements')
+          .select('*, badge:badges(*)')
+          .eq('user_id', userId)
+          .order('earned_at', ascending: false);
+      
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      throw Exception('Failed to get user badges: $e');
+    }
+  }
+
+  static Future<bool> awardBadge(String badgeId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final existing = await _supabase
+          .from('user_achievements')
+          .select()
+          .eq('user_id', currentUserId!)
+          .eq('badge_id', badgeId)
+          .maybeSingle();
+      
+      if (existing != null) {
+        return false;
+      }
+      
+      await _supabase.from('user_achievements').insert({
+        'user_id': currentUserId!,
+        'badge_id': badgeId,
+        'earned_at': DateTime.now().toIso8601String(),
+      });
+      
+      final badge = await _supabase
+          .from('badges')
+          .select('xp_reward')
+          .eq('id', badgeId)
+          .single();
+      
+      if (badge['xp_reward'] != null && badge['xp_reward'] > 0) {
+        await addXP(badge['xp_reward'], reason: 'Badge: $badgeId');
+      }
+      
+      return true;
+    } catch (e) {
+      print('Failed to award badge: $e');
+      return false;
+    }
+  }
+
+  static Future<void> checkAchievements() async {
+    ensureUserAuthenticated();
+    
+    try {
+      final recipeCount = (await getSubmittedRecipes()).length;
+      
+      if (recipeCount >= 1) await awardBadge('first_recipe');
+      if (recipeCount >= 5) await awardBadge('recipe_5');
+      if (recipeCount >= 25) await awardBadge('recipe_25');
+      if (recipeCount >= 50) await awardBadge('recipe_50');
+      if (recipeCount >= 100) await awardBadge('recipe_100');
+    } catch (e) {
+      print('Error checking achievements: $e');
+    }
+  }
+
+  // ==================================================
+  // DISCOVERY FEED - POSTS
+  // ==================================================
+
+  static Future<String> createPost({
+    required int recipeId,
+    required File imageFile,
+    String? caption,
+  }) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final userId = currentUserId!;
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = 'post_$timestamp.jpg';
+      final filePath = '$userId/posts/$fileName';
+      
+      await _supabase.storage
+          .from('profile-pictures')
+          .upload(filePath, imageFile);
+      
+      final imageUrl = _supabase.storage
+          .from('profile-pictures')
+          .getPublicUrl(filePath);
+      
+      final response = await _supabase
+          .from('posts')
+          .insert({
+            'user_id': userId,
+            'recipe_id': recipeId,
+            'image_url': imageUrl,
+            'caption': caption,
+            'created_at': DateTime.now().toIso8601String(),
+          })
+          .select()
+          .single();
+      
+      await awardBadge('first_post');
+      await addXP(25, reason: 'Posted photo');
+      
+      return response['id'];
+    } catch (e) {
+      throw Exception('Failed to create post: $e');
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getFeedPosts({
+    int limit = 20,
+    int offset = 0,
+    String sortBy = 'recent',
+  }) async {
+    try {
+      var query = _supabase
+          .from('posts')
+          .select('''
+            *,
+            user:user_profiles!posts_user_id_fkey(id, username, first_name, last_name, avatar_url),
+            recipe:submitted_recipes!posts_recipe_id_fkey(id, recipe_name, ingredients, directions)
+          ''');
+      
+      if (sortBy == 'recent') {
+        query = query.order('created_at', ascending: false);
+      }
+      
+      query = query.range(offset, offset + limit - 1);
+      
+      final response = await query;
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      throw Exception('Failed to get feed posts: $e');
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getUserPosts(String userId) async {
+    try {
+      final response = await _supabase
+          .from('posts')
+          .select('''
+            *,
+            user:user_profiles!posts_user_id_fkey(id, username, first_name, last_name, avatar_url),
+            recipe:submitted_recipes!posts_recipe_id_fkey(id, recipe_name, ingredients, directions)
+          ''')
+          .eq('user_id', userId)
+          .order('created_at', ascending: false);
+      
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      throw Exception('Failed to get user posts: $e');
+    }
+  }
+
+  static Future<void> deletePost(String postId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final post = await _supabase
+          .from('posts')
+          .select('image_url')
+          .eq('id', postId)
+          .single();
+      
+      final uri = Uri.parse(post['image_url']);
+      final pathSegments = uri.pathSegments;
+      final bucketIndex = pathSegments.indexOf('profile-pictures');
+      if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
+        final filePath = pathSegments.sublist(bucketIndex + 1).join('/');
+        
+        await _supabase.storage
+            .from('profile-pictures')
+            .remove([filePath]);
+      }
+      
+      await _supabase
+          .from('posts')
+          .delete()
+          .eq('id', postId);
+    } catch (e) {
+      throw Exception('Failed to delete post: $e');
+    }
+  }
+
+  static Future<void> likePost(String postId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase.from('post_likes').insert({
+        'post_id': postId,
+        'user_id': currentUserId!,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      if (!e.toString().contains('duplicate key')) {
+        throw Exception('Failed to like post: $e');
+      }
+    }
+  }
+
+  static Future<void> unlikePost(String postId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('post_likes')
+          .delete()
+          .eq('post_id', postId)
+          .eq('user_id', currentUserId!);
+    } catch (e) {
+      throw Exception('Failed to unlike post: $e');
+    }
+  }
+
+  static Future<int> getPostLikeCount(String postId) async {
+    try {
+      final response = await _supabase
+          .from('post_likes')
+          .select('id')
+          .eq('post_id', postId);
+      
+      return (response as List).length;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  static Future<bool> hasUserLikedPost(String postId) async {
+    if (currentUserId == null) return false;
+    
+    try {
+      final response = await _supabase
+          .from('post_likes')
+          .select('id')
+          .eq('post_id', postId)
+          .eq('user_id', currentUserId!)
+          .maybeSingle();
+      
+      return response != null;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // ==================================================
+  // COMMENTS & REVIEWS
+  // ==================================================
+
+  static Future<List<Map<String, dynamic>>> getRecipeComments(int recipeId) async {
+    try {
+      final response = await _supabase
+          .from('recipe_comments')
+          .select('''
+            *,
+            user:user_profiles!recipe_comments_user_id_fkey(id, username, first_name, last_name, avatar_url)
+          ''')
+          .eq('recipe_id', recipeId)
+          .order('created_at', ascending: false);
+      
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      throw Exception('Failed to get comments: $e');
+    }
+  }
+
+  static Future<String> addComment({
+    required int recipeId,
+    required String commentText,
+    String? parentCommentId,
+  }) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final response = await _supabase
+          .from('recipe_comments')
+          .insert({
+            'recipe_id': recipeId,
+            'user_id': currentUserId!,
+            'comment_text': commentText,
+            'parent_comment_id': parentCommentId,
+            'created_at': DateTime.now().toIso8601String(),
+          })
+          .select()
+          .single();
+      
+      await awardBadge('first_comment');
+      await addXP(5, reason: 'Comment posted');
+      
+      final commentCount = await _getUserCommentCount();
+      if (commentCount >= 10) await awardBadge('comments_10');
+      if (commentCount >= 50) await awardBadge('comments_50');
+      
+      return response['id'];
+    } catch (e) {
+      throw Exception('Failed to add comment: $e');
+    }
+  }
+
+  static Future<int> _getUserCommentCount() async {
+    if (currentUserId == null) return 0;
+    
+    try {
+      final response = await _supabase
+          .from('recipe_comments')
+          .select('id')
+          .eq('user_id', currentUserId!);
+      
+      return (response as List).length;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  static Future<void> updateComment(String commentId, String newText) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('recipe_comments')
+          .update({
+            'comment_text': newText,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', commentId)
+          .eq('user_id', currentUserId!);
+    } catch (e) {
+      throw Exception('Failed to update comment: $e');
+    }
+  }
+
+  static Future<void> deleteComment(String commentId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('recipe_comments')
+          .delete()
+          .eq('id', commentId)
+          .eq('user_id', currentUserId!);
+    } catch (e) {
+      throw Exception('Failed to delete comment: $e');
+    }
+  }
+
+  static Future<void> likeComment(String commentId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase.from('comment_likes').insert({
+        'comment_id': commentId,
+        'user_id': currentUserId!,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      if (!e.toString().contains('duplicate key')) {
+        throw Exception('Failed to like comment: $e');
+      }
+    }
+  }
+
+  static Future<void> unlikeComment(String commentId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('comment_likes')
+          .delete()
+          .eq('comment_id', commentId)
+          .eq('user_id', currentUserId!);
+    } catch (e) {
+      throw Exception('Failed to unlike comment: $e');
+    }
+  }
+
+  static Future<void> reportComment(String commentId, String reason) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase.from('comment_reports').insert({
+        'comment_id': commentId,
+        'reporter_id': currentUserId!,
+        'reason': reason,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      if (!e.toString().contains('duplicate key')) {
+        throw Exception('Failed to report comment: $e');
+      }
+    }
+  }
+
+  // ==================================================
   // USER PROFILE MANAGEMENT
   // ==================================================
+  
   static Future<void> createUserProfile(
     String userId, 
     String email, 
@@ -40,9 +518,13 @@ class DatabaseService {
         'daily_scans_used': 0,
         'last_scan_date': DateTime.now().toIso8601String().split('T')[0],
         'created_at': DateTime.now().toIso8601String(),
-        'username': email.split('@')[0], // Default username from email
-        'friends_list_visible': true, // Default to visible
+        'username': email.split('@')[0],
+        'friends_list_visible': true,
+        'xp': 0,
+        'level': 1,
       });
+      
+      await awardBadge('early_adopter');
     } catch (e) {
       throw Exception('Failed to create user profile: $e');
     }
@@ -61,7 +543,6 @@ class DatabaseService {
     }
   }
 
-  // Get current user's profile (needed by profile screen)
   static Future<Map<String, dynamic>?> getCurrentUserProfile() async {
     final userId = currentUserId;
     if (userId == null) return null;
@@ -69,12 +550,10 @@ class DatabaseService {
     try {
       return await getUserProfile(userId);
     } catch (e) {
-      // Return null for current user profile if not found (not an error condition)
       return null;
     }
   }
 
-  // Check username availability
   static Future<bool> isUsernameAvailable(String username) async {
     try {
       final response = await _supabase
@@ -83,13 +562,12 @@ class DatabaseService {
           .ilike('username', username)
           .maybeSingle();
       
-      return response == null; // null means username is available
+      return response == null;
     } catch (e) {
       throw Exception('Failed to check username availability: $e');
     }
   }
 
-  // Update profile
   static Future<void> updateProfile({
     String? username,
     String? email,
@@ -118,7 +596,6 @@ class DatabaseService {
           .eq('id', currentUserId!);
           
     } catch (e) {
-      // Check if it's a unique constraint violation
       if (e.toString().contains('duplicate key value') || 
           e.toString().contains('unique constraint')) {
         throw Exception('Username is already taken. Please choose a different username.');
@@ -127,7 +604,6 @@ class DatabaseService {
     }
   }
 
-  // Set premium status
   static Future<void> setPremiumStatus(String userId, bool isPremium) async {
     ensureUserAuthenticated();
     
@@ -149,7 +625,6 @@ class DatabaseService {
       final profile = await getUserProfile(userId);
       return profile?['is_premium'] ?? false;
     } catch (e) {
-      // If we can't check premium status, default to free
       return false;
     }
   }
@@ -158,7 +633,6 @@ class DatabaseService {
   // PROFILE PICTURES MANAGEMENT
   // ==================================================
 
-  /// Upload a picture to Supabase Storage and add to user's pictures array
   static Future<String> uploadPicture(File imageFile) async {
     ensureUserAuthenticated();
     
@@ -168,17 +642,14 @@ class DatabaseService {
       final fileName = 'picture_$timestamp.jpg';
       final filePath = '$userId/$fileName';
       
-      // Upload to Supabase Storage
       await _supabase.storage
           .from('profile-pictures')
           .upload(filePath, imageFile);
       
-      // Get public URL
       final publicUrl = _supabase.storage
           .from('profile-pictures')
           .getPublicUrl(filePath);
       
-      // Add to user's pictures array in database
       final profile = await getCurrentUserProfile();
       final currentPictures = profile?['pictures'];
       
@@ -207,7 +678,6 @@ class DatabaseService {
     }
   }
 
-  /// Get user's pictures array
   static Future<List<String>> getUserPictures(String userId) async {
     try {
       final profile = await getUserProfile(userId);
@@ -229,36 +699,29 @@ class DatabaseService {
     }
   }
 
-  /// Get current user's pictures
   static Future<List<String>> getCurrentUserPictures() async {
     if (currentUserId == null) return [];
     return getUserPictures(currentUserId!);
   }
 
-  /// Delete a picture from storage and database
   static Future<void> deletePicture(String pictureUrl) async {
     ensureUserAuthenticated();
     
     try {
       final userId = currentUserId!;
       
-      // Extract file path from URL
-      // URL format: https://{project}.supabase.co/storage/v1/object/public/profile-pictures/{userId}/picture_123.jpg
       final uri = Uri.parse(pictureUrl);
       final pathSegments = uri.pathSegments;
       
-      // Find the index of 'profile-pictures' and get everything after it
       final bucketIndex = pathSegments.indexOf('profile-pictures');
       if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
         final filePath = pathSegments.sublist(bucketIndex + 1).join('/');
         
-        // Delete from storage
         await _supabase.storage
             .from('profile-pictures')
             .remove([filePath]);
       }
       
-      // Remove from user's pictures array in database
       final profile = await getCurrentUserProfile();
       final currentPictures = profile?['pictures'];
       
@@ -279,7 +742,6 @@ class DatabaseService {
     }
   }
 
-  /// Set a picture as the main profile picture
   static Future<void> setPictureAsProfilePicture(String pictureUrl) async {
     ensureUserAuthenticated();
     
@@ -296,7 +758,6 @@ class DatabaseService {
     }
   }
 
-  /// Get user's main profile picture URL
   static Future<String?> getProfilePictureUrl(String userId) async {
     try {
       final profile = await getUserProfile(userId);
@@ -308,10 +769,9 @@ class DatabaseService {
   }
 
   // ==================================================
-  // FRIENDS LIST VISIBILITY METHODS
+  // FRIENDS LIST VISIBILITY
   // ==================================================
   
-  /// Get user's friends list for profile display
   static Future<List<Map<String, dynamic>>> getUserFriends(String userId) async {
     try {
       final response = await _supabase
@@ -336,19 +796,17 @@ class DatabaseService {
     }
   }
 
-  /// Get friends list visibility setting
   static Future<bool> getFriendsListVisibility() async {
     ensureUserAuthenticated();
     
     try {
       final profile = await getCurrentUserProfile();
-      return profile?['friends_list_visible'] ?? true; // Default to visible
+      return profile?['friends_list_visible'] ?? true;
     } catch (e) {
-      return true; // Default to visible on error
+      return true;
     }
   }
 
-  /// Update friends list visibility setting
   static Future<void> updateFriendsListVisibility(bool isVisible) async {
     ensureUserAuthenticated();
     
@@ -368,6 +826,7 @@ class DatabaseService {
   // ==================================================
   // SCAN COUNT MANAGEMENT
   // ==================================================
+  
   static Future<int> getDailyScanCount() async {
     final userId = AuthService.currentUserId;
     if (userId == null) return 0;
@@ -377,7 +836,6 @@ class DatabaseService {
       final today = DateTime.now().toIso8601String().split('T')[0];
       final lastScanDate = profile?['last_scan_date'] ?? '';
 
-      // Reset count if it's a new day
       if (lastScanDate != today) {
         await _supabase.from('user_profiles').update({
           'daily_scans_used': 0,
@@ -388,7 +846,6 @@ class DatabaseService {
 
       return profile?['daily_scans_used'] ?? 0;
     } catch (e) {
-      // If we can't get scan count, assume 0
       return 0;
     }
   }
@@ -398,21 +855,25 @@ class DatabaseService {
       if (await isPremiumUser()) return true;
       
       final dailyCount = await getDailyScanCount();
-      return dailyCount < 3; // Free users get 3 scans per day
+      return dailyCount < 3;
     } catch (e) {
-      // If we can't check, allow the scan
       return true;
     }
   }
 
   static Future<void> incrementScanCount() async {
     try {
-      if (await isPremiumUser()) return; // Premium users have unlimited scans
+      if (await isPremiumUser()) return;
 
       final currentCount = await getDailyScanCount();
       await _supabase.from('user_profiles').update({
         'daily_scans_used': currentCount + 1,
       }).eq('id', currentUserId!);
+      
+      await awardBadge('first_scan');
+      final totalScans = currentCount + 1;
+      if (totalScans >= 10) await awardBadge('scans_10');
+      if (totalScans >= 50) await awardBadge('scans_50');
     } catch (e) {
       throw Exception('Failed to update scan count: $e');
     }
@@ -421,6 +882,7 @@ class DatabaseService {
   // ==================================================
   // FAVORITE RECIPES
   // ==================================================
+  
   static Future<List<FavoriteRecipe>> getFavoriteRecipes() async {
     if (currentUserId == null) return [];
 
@@ -479,7 +941,6 @@ class DatabaseService {
 
       return response != null;
     } catch (e) {
-      // If we can't check, assume not favorited
       return false;
     }
   }
@@ -487,6 +948,7 @@ class DatabaseService {
   // ==================================================
   // GROCERY LIST
   // ==================================================
+  
   static Future<List<GroceryItem>> getGroceryList() async {
     if (currentUserId == null) return [];
 
@@ -509,13 +971,11 @@ class DatabaseService {
     ensureUserAuthenticated();
 
     try {
-      // Delete existing items
       await _supabase
           .from('grocery_items')
           .delete()
           .eq('user_id', currentUserId!);
 
-      // Insert new items if any
       if (items.isNotEmpty) {
         final groceryItems = items.asMap().entries.map((entry) => {
               'user_id': currentUserId!,
@@ -562,7 +1022,6 @@ class DatabaseService {
     }
   }
 
-  // Enhanced shopping list methods
   static List<String> _parseIngredients(String ingredientsText) {
     final items = ingredientsText
         .split(RegExp(r'[,\n•\-\*]|\d+\.'))
@@ -658,6 +1117,7 @@ class DatabaseService {
   // ==================================================
   // SUBMITTED RECIPES
   // ==================================================
+  
   static Future<List<SubmittedRecipe>> getSubmittedRecipes() async {
     if (currentUserId == null) return [];
 
@@ -688,6 +1148,9 @@ class DatabaseService {
         'directions': directions,
         'created_at': DateTime.now().toIso8601String(),
       });
+      
+      await addXP(50, reason: 'Recipe submitted');
+      await checkAchievements();
     } catch (e) {
       throw Exception('Failed to submit recipe: $e');
     }
@@ -704,186 +1167,9 @@ class DatabaseService {
   }
 
   // ==================================================
-  // RECIPE RATINGS & MANAGEMENT
-  // ==================================================
-
-  /// Rate a recipe (1-5 stars)
-  static Future<void> rateRecipe(int recipeId, int rating) async {
-    ensureUserAuthenticated();
-    
-    if (rating < 1 || rating > 5) {
-      throw Exception('Rating must be between 1 and 5');
-    }
-
-    try {
-      // Check if user is the recipe owner
-      final recipe = await _supabase
-          .from('submitted_recipes')
-          .select('user_id')
-          .eq('id', recipeId)
-          .single();
-      
-      if (recipe['user_id'] == currentUserId) {
-        throw Exception('You cannot rate your own recipe');
-      }
-
-      // Upsert rating (insert or update if exists)
-      await _supabase.from('recipe_ratings').upsert({
-        'recipe_id': recipeId,
-        'user_id': currentUserId!,
-        'rating': rating,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      throw Exception('Failed to rate recipe: $e');
-    }
-  }
-
-  /// Get all ratings for a recipe
-  static Future<List<Map<String, dynamic>>> getRecipeRatings(int recipeId) async {
-    try {
-      final response = await _supabase
-          .from('recipe_ratings')
-          .select('*, user_profiles!recipe_ratings_user_id_fkey(username, first_name, last_name)')
-          .eq('recipe_id', recipeId)
-          .order('created_at', ascending: false);
-
-      return List<Map<String, dynamic>>.from(response);
-    } catch (e) {
-      throw Exception('Failed to get recipe ratings: $e');
-    }
-  }
-
-  /// Get average rating and count for a recipe
-  static Future<Map<String, dynamic>> getRecipeAverageRating(int recipeId) async {
-    try {
-      final response = await _supabase
-          .from('recipe_ratings')
-          .select('rating')
-          .eq('recipe_id', recipeId);
-
-      if (response.isEmpty) {
-        return {'average': 0.0, 'count': 0};
-      }
-
-      final ratings = List<Map<String, dynamic>>.from(response);
-      final sum = ratings.fold<int>(0, (sum, item) => sum + (item['rating'] as int));
-      final average = sum / ratings.length;
-
-      return {
-        'average': double.parse(average.toStringAsFixed(1)),
-        'count': ratings.length,
-      };
-    } catch (e) {
-      return {'average': 0.0, 'count': 0};
-    }
-  }
-
-  /// Check if current user has rated a recipe
-  static Future<bool> hasUserRatedRecipe(int recipeId) async {
-    if (currentUserId == null) return false;
-
-    try {
-      final response = await _supabase
-          .from('recipe_ratings')
-          .select('id')
-          .eq('recipe_id', recipeId)
-          .eq('user_id', currentUserId!)
-          .maybeSingle();
-
-      return response != null;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  /// Get user's rating for a recipe
-  static Future<int?> getUserRecipeRating(int recipeId) async {
-    if (currentUserId == null) return null;
-
-    try {
-      final response = await _supabase
-          .from('recipe_ratings')
-          .select('rating')
-          .eq('recipe_id', recipeId)
-          .eq('user_id', currentUserId!)
-          .maybeSingle();
-
-      return response?['rating'];
-    } catch (e) {
-      return null;
-    }
-  }
-
-  /// Update an existing recipe
-  static Future<void> updateSubmittedRecipe({
-    required int recipeId,
-    required String recipeName,
-    required String ingredients,
-    required String directions,
-  }) async {
-    ensureUserAuthenticated();
-
-    try {
-      // Verify the recipe belongs to the current user
-      final recipe = await _supabase
-          .from('submitted_recipes')
-          .select('user_id')
-          .eq('id', recipeId)
-          .single();
-
-      if (recipe['user_id'] != currentUserId) {
-        throw Exception('You can only edit your own recipes');
-      }
-
-      await _supabase.from('submitted_recipes').update({
-        'recipe_name': recipeName,
-        'ingredients': ingredients,
-        'directions': directions,
-      }).eq('id', recipeId);
-    } catch (e) {
-      throw Exception('Failed to update recipe: $e');
-    }
-  }
-
-  /// Get a single recipe by ID
-  static Future<Map<String, dynamic>?> getRecipeById(int recipeId) async {
-    try {
-      final response = await _supabase
-          .from('submitted_recipes')
-          .select()
-          .eq('id', recipeId)
-          .single();
-
-      return response;
-    } catch (e) {
-      throw Exception('Failed to get recipe: $e');
-    }
-  }
-
-  /// Generate shareable recipe text
-  static String generateShareableRecipeText(Map<String, dynamic> recipe) {
-    final name = recipe['recipe_name'] ?? 'Unnamed Recipe';
-    final ingredients = recipe['ingredients'] ?? 'No ingredients listed';
-    final directions = recipe['directions'] ?? 'No directions provided';
-
-    return '''
-🍽️ Recipe: $name
-
-📋 Ingredients:
-$ingredients
-
-👨‍🍳 Directions:
-$directions
-
----
-Shared from Recipe Scanner App
-''';
-  }
-
-  // ==================================================
   // CONTACT MESSAGES
   // ==================================================
+  
   static Future<void> submitContactMessage({
     required String name,
     required String email,
@@ -894,7 +1180,7 @@ Shared from Recipe Scanner App
         'name': name,
         'email': email,
         'message': message,
-        'user_id': currentUserId, // Optional: link to user if logged in
+        'user_id': currentUserId,
         'created_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
@@ -903,10 +1189,9 @@ Shared from Recipe Scanner App
   }
 
   // ==================================================
-  // SOCIAL FEATURES - FRIENDS & MESSAGING
+  // SOCIAL FEATURES - FRIENDS
   // ==================================================
 
-  /// Fetch friends list (accepted friend requests)
   static Future<List<Map<String, dynamic>>> getFriends() async {
     ensureUserAuthenticated();
     
@@ -930,7 +1215,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Get pending friend requests (received)
   static Future<List<Map<String, dynamic>>> getFriendRequests() async {
     ensureUserAuthenticated();
     
@@ -948,7 +1232,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Get sent friend requests (outgoing, still pending)
   static Future<List<Map<String, dynamic>>> getSentFriendRequests() async {
     ensureUserAuthenticated();
     
@@ -966,17 +1249,14 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Send friend request with better error handling
   static Future<String?> sendFriendRequest(String receiverId) async {
     ensureUserAuthenticated();
     
-    // Can't send request to yourself
     if (receiverId == currentUserId) {
       throw Exception('Cannot send friend request to yourself');
     }
     
     try {
-      // Check if request already exists (in either direction)
       final existing = await _supabase
           .from('friend_requests')
           .select('id, status, sender, receiver')
@@ -987,7 +1267,6 @@ Shared from Recipe Scanner App
         if (existing['status'] == 'accepted') {
           throw Exception('You are already friends with this user');
         } else if (existing['status'] == 'pending') {
-          // Check if it's an incoming request they should accept instead
           if (existing['sender'] == receiverId) {
             throw Exception('This user has already sent you a friend request. Check your pending requests!');
           }
@@ -995,7 +1274,6 @@ Shared from Recipe Scanner App
         }
       }
 
-      // Insert new friend request
       final response = await _supabase
           .from('friend_requests')
           .insert({
@@ -1009,9 +1287,7 @@ Shared from Recipe Scanner App
 
       return response['id'];
     } on PostgrestException catch (e) {
-      // Handle specific Postgres errors
       if (e.code == '23505') {
-        // Unique constraint violation
         throw Exception('Friend request already exists');
       }
       throw Exception('Failed to send friend request: ${e.message}');
@@ -1020,12 +1296,10 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Accept friend request with validation
   static Future<void> acceptFriendRequest(String requestId) async {
     ensureUserAuthenticated();
     
     try {
-      // Verify this request is actually for the current user
       final request = await _supabase
           .from('friend_requests')
           .select('receiver, status')
@@ -1052,7 +1326,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Decline/Cancel friend request
   static Future<void> declineFriendRequest(String requestId) async {
     ensureUserAuthenticated();
     
@@ -1066,12 +1339,10 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Cancel outgoing friend request by request ID (more reliable)
   static Future<void> cancelFriendRequestById(String requestId) async {
     ensureUserAuthenticated();
     
     try {
-      // Verify this is the user's own request
       final request = await _supabase
           .from('friend_requests')
           .select('sender')
@@ -1091,7 +1362,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Cancel outgoing friend request (legacy method - kept for backward compatibility)
   static Future<void> cancelFriendRequest(String receiverId) async {
     ensureUserAuthenticated();
     
@@ -1106,7 +1376,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Remove friend (unfriend)
   static Future<void> removeFriend(String friendId) async {
     ensureUserAuthenticated();
     
@@ -1121,7 +1390,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Check friendship status with enhanced info
   static Future<Map<String, dynamic>> checkFriendshipStatus(String userId) async {
     ensureUserAuthenticated();
     
@@ -1202,10 +1470,9 @@ Shared from Recipe Scanner App
   }
 
   // ==================================================
-  // MESSAGING - WITH UNREAD TRACKING
+  // MESSAGING
   // ==================================================
 
-  /// Get messages between two users
   static Future<List<Map<String, dynamic>>> getMessages(String friendId) async {
     ensureUserAuthenticated();
     
@@ -1222,7 +1489,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Send message with is_read field
   static Future<void> sendMessage(String receiverId, String content) async {
     ensureUserAuthenticated();
     
@@ -1239,7 +1505,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Get unread message count for current user
   static Future<int> getUnreadMessageCount() async {
     ensureUserAuthenticated();
     
@@ -1257,7 +1522,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Mark a message as read
   static Future<void> markMessageAsRead(String messageId) async {
     ensureUserAuthenticated();
     
@@ -1271,7 +1535,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Mark all messages from a specific user as read
   static Future<void> markMessagesAsReadFrom(String senderId) async {
     ensureUserAuthenticated();
     
@@ -1287,7 +1550,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Get chat list (recent conversations)
   static Future<List<Map<String, dynamic>>> getChatList() async {
     ensureUserAuthenticated();
     
@@ -1316,7 +1578,6 @@ Shared from Recipe Scanner App
         }
       }
 
-      // Sort by last message time
       chats.sort((a, b) {
         final aTime = a['lastMessage']?['created_at'];
         final bTime = b['lastMessage']?['created_at'];
@@ -1332,7 +1593,10 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Search users with fuzzy matching (first name, last name, username, email)
+  // ==================================================
+  // USER SEARCH
+  // ==================================================
+
   static Future<List<Map<String, dynamic>>> searchUsers(String query) async {
     ensureUserAuthenticated();
     
@@ -1340,7 +1604,6 @@ Shared from Recipe Scanner App
       final searchQuery = query.trim();
       if (searchQuery.isEmpty) return [];
 
-      // Try RPC call for complex fuzzy search with ranking
       try {
         final response = await _supabase.rpc('search_users_fuzzy', params: {
           'search_query': searchQuery,
@@ -1351,7 +1614,6 @@ Shared from Recipe Scanner App
       } catch (rpcError) {
         print('RPC search failed, falling back to basic search: $rpcError');
         
-        // Fallback to basic search if RPC fails
         final response = await _supabase
             .from('user_profiles')
             .select('id, email, username, first_name, last_name, avatar_url')
@@ -1366,7 +1628,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Debug method to test user search functionality
   static Future<void> debugTestUserSearch() async {
     ensureUserAuthenticated();
     
@@ -1374,7 +1635,6 @@ Shared from Recipe Scanner App
       print('🔍 DEBUG: Starting user search test...');
       print('📝 Current user ID: $currentUserId');
       
-      // Test 1: Get all users
       print('\n--- TEST 1: Fetching all users ---');
       final allUsers = await _supabase
           .from('user_profiles')
@@ -1387,7 +1647,6 @@ Shared from Recipe Scanner App
         print('  👤 ${user['username'] ?? user['email']} (${user['first_name']} ${user['last_name']})');
       }
       
-      // Test 2: Try basic search
       print('\n--- TEST 2: Testing basic search ---');
       final searchResult = await _supabase
           .from('user_profiles')
@@ -1398,7 +1657,6 @@ Shared from Recipe Scanner App
       
       print('✅ Basic search found ${(searchResult as List).length} results');
       
-      // Test 3: Check RPC function
       print('\n--- TEST 3: Testing RPC function ---');
       try {
         final rpcResult = await _supabase.rpc('search_users_fuzzy', params: {
