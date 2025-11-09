@@ -1,6 +1,6 @@
 name: liver_wise
 description: A Flutter app to scan food barcodes and show nutrition info.
-version: 1.0.3+8
+version: 1.0.3+9
 
 environment:
   sdk: ">=3.1.0 <4.0.0"
@@ -21,6 +21,7 @@ dependencies:
   intl: ^0.19.0
   change_app_package_name: ^1.2.0
   app_links: ^6.3.2
+  share_plus: ^7.0.0  # For sharing recipes
 
 
 

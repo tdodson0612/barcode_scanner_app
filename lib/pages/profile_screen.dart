@@ -1,15 +1,18 @@
-// lib/pages/profile_screen.dart - UPDATED: Added Pictures Gallery Feature
+// lib/pages/profile_screen.dart - UPDATED: Added Recipe Management with Ratings
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/premium_gate.dart';
+import '../widgets/recipe_card.dart';
 import '../controllers/premium_gate_controller.dart';
+import '../models/submitted_recipe.dart';
 import '../services/database_service.dart';
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
 import '../pages/user_profile_page.dart';
+import '../pages/edit_recipe_page.dart';
 
 class ProfileScreen extends StatefulWidget {
   final List<String> favoriteRecipes;
@@ -35,10 +38,14 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
   bool _friendsListVisible = true;
   bool _isLoadingFriends = false;
 
-  // NEW: Pictures management
+  // Pictures management
   List<String> _pictures = [];
   bool _isLoadingPictures = false;
   static const int _maxPictures = 20;
+
+  // NEW: Submitted recipes
+  List<SubmittedRecipe> _submittedRecipes = [];
+  bool _isLoadingRecipes = false;
 
   late final PremiumGateController _premiumController;
   bool _isPremium = false;
@@ -54,7 +61,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     _initializePremiumController();
     _loadProfile();
     _loadFriends();
-    _loadPictures(); // NEW
+    _loadPictures();
+    _loadSubmittedRecipes(); // NEW
   }
 
   @override
@@ -92,7 +100,81 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 
-  // NEW: Load pictures from database
+  // NEW: Load submitted recipes
+  Future<void> _loadSubmittedRecipes() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _isLoadingRecipes = true;
+    });
+
+    try {
+      final recipes = await DatabaseService.getSubmittedRecipes();
+      
+      if (mounted) {
+        setState(() {
+          _submittedRecipes = recipes;
+          _isLoadingRecipes = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading recipes: $e');
+      if (mounted) {
+        setState(() {
+          _submittedRecipes = [];
+          _isLoadingRecipes = false;
+        });
+      }
+    }
+  }
+
+  // NEW: Delete recipe
+  Future<void> _deleteRecipe(int recipeId) async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      await DatabaseService.deleteSubmittedRecipe(recipeId);
+      
+      if (mounted) {
+        await _loadSubmittedRecipes();
+        ErrorHandlingService.showSuccess(context, 'Recipe deleted successfully');
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Unable to delete recipe',
+          onRetry: () => _deleteRecipe(recipeId),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  // NEW: Edit recipe
+  Future<void> _editRecipe(SubmittedRecipe recipe) async {
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EditRecipePage(recipe: recipe),
+      ),
+    );
+
+    if (result == true) {
+      await _loadSubmittedRecipes();
+    }
+  }
+
+  // Load pictures from database
   Future<void> _loadPictures() async {
     if (!mounted) return;
     
@@ -120,7 +202,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     }
   }
 
-  // NEW: Upload a picture
+  // Upload a picture
   Future<void> _uploadPicture(ImageSource source) async {
     if (_pictures.length >= _maxPictures) {
       ErrorHandlingService.showSimpleError(
@@ -170,7 +252,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     }
   }
 
-  // NEW: Delete a picture
+  // Delete a picture
   Future<void> _deletePicture(String pictureUrl) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -223,7 +305,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     }
   }
 
-  // NEW: Show picture options dialog
+  // Show picture options dialog
   void _showPictureOptionsDialog(String pictureUrl) {
     showDialog(
       context: context,
@@ -256,7 +338,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 
-  // NEW: Set picture as profile picture
+  // Set picture as profile picture
   Future<void> _setAsProfilePicture(String pictureUrl) async {
     setState(() {
       _isLoading = true;
@@ -287,7 +369,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     }
   }
 
-  // NEW: Show full-screen picture viewer
+  // Show full-screen picture viewer
   void _showFullScreenImage(String imageUrl, int index) {
     Navigator.push(
       context,
@@ -347,7 +429,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 
-  // NEW: Show picture upload dialog
+  // Show picture upload dialog
   void _showPictureUploadDialog() {
     showDialog(
       context: context,
@@ -954,7 +1036,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 
-  // NEW: Build pictures gallery section
+  // Build pictures gallery section
   Widget _buildPicturesSection() {
     return _sectionContainer(
       child: Column(
@@ -1066,6 +1148,126 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                       ),
                     ),
                   ),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // NEW: Build submitted recipes section
+  Widget _buildSubmittedRecipesSection() {
+    return _sectionContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'My Submitted Recipes (${_submittedRecipes.length})',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              IconButton(
+                icon: Icon(Icons.add_circle, color: Colors.green),
+                onPressed: () async {
+                  try {
+                    final result = await Navigator.pushNamed(context, '/submit-recipe');
+                    if (result == true) {
+                      await _loadSubmittedRecipes();
+                    }
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Recipe page unavailable')),
+                    );
+                  }
+                },
+                tooltip: 'Submit New Recipe',
+              ),
+            ],
+          ),
+          SizedBox(height: 12),
+          
+          if (_isLoadingRecipes) ...[
+            Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: CircularProgressIndicator(),
+              ),
+            ),
+          ] else if (_submittedRecipes.isEmpty) ...[
+            Center(
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.restaurant_menu,
+                    size: 50,
+                    color: Colors.grey.shade400,
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'No recipes submitted yet',
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Share your favorite recipes with the community!',
+                    style: TextStyle(
+                      color: Colors.grey.shade500,
+                      fontSize: 12,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      try {
+                        final result = await Navigator.pushNamed(context, '/submit-recipe');
+                        if (result == true) {
+                          await _loadSubmittedRecipes();
+                        }
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Recipe page unavailable')),
+                        );
+                      }
+                    },
+                    icon: Icon(Icons.add),
+                    label: Text('Submit Your First Recipe'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            ListView.builder(
+              shrinkWrap: true,
+              physics: NeverScrollableScrollPhysics(),
+              itemCount: _submittedRecipes.length,
+              itemBuilder: (context, index) {
+                final recipe = _submittedRecipes[index];
+                
+                // Skip recipes with null IDs
+                if (recipe.id == null) {
+                  return SizedBox.shrink();
+                }
+                
+                return RecipeCard(
+                  recipe: recipe,
+                  onDelete: () => _deleteRecipe(recipe.id!),
+                  onEdit: () => _editRecipe(recipe),
+                  onRatingChanged: () => _loadSubmittedRecipes(),
                 );
               },
             ),
@@ -1347,7 +1549,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
                 const SizedBox(height: 20),
 
-                // NEW: Pictures Section
                 _buildPicturesSection(),
 
                 const SizedBox(height: 20),
@@ -1532,46 +1733,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
                 const SizedBox(height: 20),
 
+                // NEW: Submitted Recipes Section (with Premium Gate)
                 PremiumGate(
                   feature: PremiumFeature.submitRecipes,
                   featureName: 'Recipe Submission',
                   featureDescription: 'Share your favorite recipes with the community.',
-                  child: _sectionContainer(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Recipe Features',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              try {
-                                Navigator.pushNamed(context, '/submit-recipe');
-                              } catch (e) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Recipe page unavailable')),
-                                );
-                              }
-                            },
-                            icon: Icon(Icons.add),
-                            label: Text('Submit Your Own Recipe'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              foregroundColor: Colors.white,
-                              padding: EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  child: _buildSubmittedRecipesSection(),
                 ),
 
                 const SizedBox(height: 20),
@@ -1631,7 +1798,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                   ),
                 ),
 
-                const SizedBox(height: 100), // Extra padding at bottom
+                const SizedBox(height: 100),
               ],
             ),
           ), 
