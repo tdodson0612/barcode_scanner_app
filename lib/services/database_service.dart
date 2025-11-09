@@ -180,24 +180,68 @@ class DatabaseService {
 
   static Future<String> createPost({
     required int recipeId,
-    required File imageFile,
+    File? imageFile,
+    File? videoFile,
+    File? thumbnailFile,
     String? caption,
   }) async {
     ensureUserAuthenticated();
     
+    // Must have either image or video
+    if (imageFile == null && videoFile == null) {
+      throw Exception('Must provide either an image or video');
+    }
+    
+    // If video is provided, thumbnail is required
+    if (videoFile != null && thumbnailFile == null) {
+      throw Exception('Video posts require a thumbnail image');
+    }
+    
     try {
       final userId = currentUserId!;
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final fileName = 'post_$timestamp.jpg';
-      final filePath = '$userId/posts/$fileName';
       
-      await _supabase.storage
-          .from('profile-pictures')
-          .upload(filePath, imageFile);
+      String? imageUrl;
+      String? videoUrl;
+      String? thumbnailUrl;
       
-      final imageUrl = _supabase.storage
-          .from('profile-pictures')
-          .getPublicUrl(filePath);
+      // Upload image or video
+      if (imageFile != null) {
+        final fileName = 'post_$timestamp.jpg';
+        final filePath = '$userId/posts/$fileName';
+        
+        await _supabase.storage
+            .from('profile-pictures')
+            .upload(filePath, imageFile);
+        
+        imageUrl = _supabase.storage
+            .from('profile-pictures')
+            .getPublicUrl(filePath);
+      } else if (videoFile != null) {
+        // Upload video
+        final videoFileName = 'post_$timestamp.mp4';
+        final videoFilePath = '$userId/posts/$videoFileName';
+        
+        await _supabase.storage
+            .from('profile-pictures')
+            .upload(videoFilePath, videoFile);
+        
+        videoUrl = _supabase.storage
+            .from('profile-pictures')
+            .getPublicUrl(videoFilePath);
+        
+        // Upload thumbnail
+        final thumbFileName = 'thumb_$timestamp.jpg';
+        final thumbFilePath = '$userId/posts/$thumbFileName';
+        
+        await _supabase.storage
+            .from('profile-pictures')
+            .upload(thumbFilePath, thumbnailFile!);
+        
+        thumbnailUrl = _supabase.storage
+            .from('profile-pictures')
+            .getPublicUrl(thumbFilePath);
+      }
       
       final response = await _supabase
           .from('posts')
@@ -205,6 +249,8 @@ class DatabaseService {
             'user_id': userId,
             'recipe_id': recipeId,
             'image_url': imageUrl,
+            'video_url': videoUrl,
+            'thumbnail_url': thumbnailUrl,
             'caption': caption,
             'created_at': DateTime.now().toIso8601String(),
           })
@@ -230,7 +276,7 @@ class DatabaseService {
           .from('posts')
           .select('''
             *,
-            user:user_profiles!posts_user_id_fkey(id, username, first_name, last_name, avatar_url),
+            user:user_profiles!posts_user_id_fkey(id, username, first_name, last_name, avatar_url, level, xp),
             recipe:submitted_recipes!posts_recipe_id_fkey(id, recipe_name, ingredients, directions)
           ''')
           .order('created_at', ascending: sortBy != 'recent')

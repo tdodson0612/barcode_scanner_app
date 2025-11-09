@@ -1,9 +1,9 @@
-// lib/pages/discovery_feed_page.dart - Discovery Feed (New Home Page)
+// lib/pages/discovery_feed_page.dart - Discovery Feed with Video Support
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 import '../services/database_service.dart';
 import '../services/error_handling_service.dart';
 import '../widgets/app_drawer.dart';
-import '../pages/recipe_detail_page.dart';
 import '../pages/create_post_page.dart';
 import '../pages/user_profile_page.dart';
 
@@ -20,9 +20,10 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
   bool _hasMore = true;
   int _offset = 0;
   final int _limit = 20;
-  String _sortBy = 'recent'; // 'recent', 'trending', 'following'
+  String _sortBy = 'recent';
   
   final ScrollController _scrollController = ScrollController();
+  final Map<String, VideoPlayerController> _videoControllers = {};
 
   @override
   void initState() {
@@ -34,7 +35,15 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _disposeAllVideoControllers();
     super.dispose();
+  }
+
+  void _disposeAllVideoControllers() {
+    for (var controller in _videoControllers.values) {
+      controller.dispose();
+    }
+    _videoControllers.clear();
   }
 
   void _onScroll() {
@@ -53,6 +62,7 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
         _posts = [];
         _hasMore = true;
       });
+      _disposeAllVideoControllers();
     }
 
     setState(() {
@@ -103,9 +113,10 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
 
   Future<void> _toggleLike(Map<String, dynamic> post, int index) async {
     final postId = post['id'];
-    final isLiked = await DatabaseService.hasUserLikedPost(postId);
-
+    
     try {
+      final isLiked = await DatabaseService.hasUserLikedPost(postId);
+      
       if (isLiked) {
         await DatabaseService.unlikePost(postId);
       } else {
@@ -129,17 +140,94 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
     }
   }
 
-  void _navigateToRecipe(Map<String, dynamic> recipe) {
+  void _navigateToRecipe(Map<String, dynamic>? recipe) {
     if (recipe == null) return;
     
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => RecipeDetailPage(
-          recipeName: recipe['recipe_name'] ?? 'Recipe',
-          ingredients: recipe['ingredients'] ?? '',
-          directions: recipe['directions'] ?? '',
-          recipeId: recipe['id'],
+    final recipeName = recipe['recipe_name'] ?? 'Recipe';
+    final ingredients = recipe['ingredients'] ?? '';
+    final directions = recipe['directions'] ?? '';
+    final recipeId = recipe['id'];
+    
+    // Show recipe details in a bottom sheet
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.9,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                margin: EdgeInsets.symmetric(vertical: 8),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: scrollController,
+                  padding: EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.restaurant_menu, color: Colors.green, size: 28),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              recipeName,
+                              style: TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 24),
+                      Text(
+                        'Ingredients',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 12),
+                      Text(
+                        ingredients,
+                        style: TextStyle(fontSize: 16, height: 1.5),
+                      ),
+                      SizedBox(height: 24),
+                      Text(
+                        'Directions',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 12),
+                      Text(
+                        directions,
+                        style: TextStyle(fontSize: 16, height: 1.5),
+                      ),
+                      SizedBox(height: 24),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -167,13 +255,32 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
     }
   }
 
+  VideoPlayerController? _getOrCreateVideoController(String postId, String videoUrl) {
+    if (_videoControllers.containsKey(postId)) {
+      return _videoControllers[postId];
+    }
+    
+    final controller = VideoPlayerController.network(videoUrl);
+    controller.initialize().then((_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+    
+    _videoControllers[postId] = controller;
+    return controller;
+  }
+
   Widget _buildPostCard(Map<String, dynamic> post, int index) {
     final user = post['user'] ?? {};
     final recipe = post['recipe'] ?? {};
     final username = user['username'] ?? 'Unknown User';
     final recipeName = recipe['recipe_name'] ?? 'Recipe';
     final caption = post['caption'] ?? '';
-    final imageUrl = post['image_url'] ?? '';
+    final imageUrl = post['image_url'];
+    final videoUrl = post['video_url'];
+    final thumbnailUrl = post['thumbnail_url'];
+    final isVideo = videoUrl != null && videoUrl.isNotEmpty;
     
     return FutureBuilder<Map<String, int>>(
       future: _getPostStats(post['id']),
@@ -201,9 +308,39 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
                 ),
                 title: GestureDetector(
                   onTap: () => _navigateToUserProfile(user['id']),
-                  child: Text(
-                    username,
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                  child: Row(
+                    children: [
+                      Text(
+                        username,
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      if (user['level'] != null && user['level'] > 1) ...[
+                        SizedBox(width: 8),
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.shade100,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.amber.shade700),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.star, size: 12, color: Colors.amber.shade700),
+                              SizedBox(width: 2),
+                              Text(
+                                'Lv ${user['level']}',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.amber.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 subtitle: Text(
@@ -212,8 +349,10 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
                 ),
               ),
 
-              // Image
-              if (imageUrl.isNotEmpty)
+              // Media (Image or Video)
+              if (isVideo) ...[
+                _buildVideoPlayer(post['id'], videoUrl, thumbnailUrl),
+              ] else if (imageUrl != null && imageUrl.isNotEmpty) ...[
                 GestureDetector(
                   onDoubleTap: () => _toggleLike(post, index),
                   child: Image.network(
@@ -246,6 +385,7 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
                     },
                   ),
                 ),
+              ],
 
               // Action buttons
               Padding(
@@ -268,9 +408,10 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
                     Text('${stats['comments']}'),
                     Spacer(),
                     IconButton(
-                      icon: Icon(Icons.bookmark_border),
+                      icon: Icon(Icons.share),
                       onPressed: () {
-                        // TODO: Implement save post
+                        // TODO: Implement share
+                        ErrorHandlingService.showSimpleError(context, 'Share coming soon!');
                       },
                     ),
                   ],
@@ -305,6 +446,8 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        SizedBox(width: 4),
+                        Icon(Icons.arrow_forward_ios, size: 12, color: Colors.green),
                       ],
                     ),
                   ),
@@ -334,6 +477,77 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildVideoPlayer(String postId, String videoUrl, String? thumbnailUrl) {
+    final controller = _getOrCreateVideoController(postId, videoUrl);
+    
+    if (controller == null || !controller.value.isInitialized) {
+      return Container(
+        height: 300,
+        color: Colors.black,
+        child: Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      );
+    }
+    
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          if (controller.value.isPlaying) {
+            controller.pause();
+          } else {
+            controller.play();
+          }
+        });
+      },
+      child: Container(
+        height: 300,
+        color: Colors.black,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            AspectRatio(
+              aspectRatio: controller.value.aspectRatio,
+              child: VideoPlayer(controller),
+            ),
+            if (!controller.value.isPlaying)
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.3),
+                ),
+                child: Icon(
+                  Icons.play_circle_outline,
+                  size: 80,
+                  color: Colors.white,
+                ),
+              ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.7),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.videocam, size: 16, color: Colors.white),
+                    SizedBox(width: 4),
+                    Text(
+                      'VIDEO',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -401,11 +615,23 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
             itemBuilder: (context) => [
               PopupMenuItem(
                 value: 'recent',
-                child: Text('Recent'),
+                child: Row(
+                  children: [
+                    Icon(Icons.access_time, size: 20),
+                    SizedBox(width: 8),
+                    Text('Recent'),
+                  ],
+                ),
               ),
               PopupMenuItem(
                 value: 'trending',
-                child: Text('Trending'),
+                child: Row(
+                  children: [
+                    Icon(Icons.trending_up, size: 20),
+                    SizedBox(width: 8),
+                    Text('Trending'),
+                  ],
+                ),
               ),
             ],
           ),
