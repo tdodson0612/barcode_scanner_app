@@ -7,6 +7,8 @@ import 'chat_page.dart';
 import 'search_users_page.dart';
 
 class MessagesPage extends StatefulWidget {
+  const MessagesPage({super.key});
+
   @override
   _MessagesPageState createState() => _MessagesPageState();
 }

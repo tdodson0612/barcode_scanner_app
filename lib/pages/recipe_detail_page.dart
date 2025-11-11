@@ -251,8 +251,8 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
                   }
                 }
               },
-              child: Text('Report'),
               style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: Text('Report'),
             ),
           ],
         );

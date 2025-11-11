@@ -127,7 +127,7 @@ class PremiumGateController extends ChangeNotifier {
     if (_retryCount < maxRetries) {
       // Exponential backoff: 2s, 4s, 8s
       final delaySeconds = 2 * _retryCount;
-      print('DEBUG: Retrying initialization in ${delaySeconds} seconds...');
+      print('DEBUG: Retrying initialization in $delaySeconds seconds...');
       
       // FIXED: Use managed Timer instead of unmanaged Future.delayed
       _retryTimer?.cancel(); // Cancel any existing timer

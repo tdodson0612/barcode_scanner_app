@@ -362,7 +362,7 @@ class _DiscoveryFeedPageState extends State<DiscoveryFeedPage> {
                     fit: BoxFit.cover,
                     loadingBuilder: (context, child, loadingProgress) {
                       if (loadingProgress == null) return child;
-                      return Container(
+                      return SizedBox(
                         height: 300,
                         child: Center(
                           child: CircularProgressIndicator(

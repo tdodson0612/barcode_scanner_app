@@ -119,7 +119,7 @@ class _MyAppState extends State<MyApp> {
       final response = await Supabase.instance.client.auth.getSessionFromUrl(uri);
       final session = response.session;
 
-      if (session != null && mounted) {
+      if (mounted) {
         Navigator.pushNamed(context, '/reset-password', arguments: session);
       } else {
         if (AppConfig.enableDebugPrints) {

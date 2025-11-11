@@ -11,11 +11,11 @@ class ChatPage extends StatefulWidget {
   final String? friendAvatar;
 
   const ChatPage({
-    Key? key,
+    super.key,
     required this.friendId,
     required this.friendName,
     this.friendAvatar,
-  }) : super(key: key);
+  });
 
   @override
   _ChatPageState createState() => _ChatPageState();

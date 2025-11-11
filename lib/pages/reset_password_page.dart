@@ -1,7 +1,6 @@
 // pages/reset_password_page.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../services/auth_service.dart';
 
 class ResetPasswordPage extends StatefulWidget {
   final Session? session; // Optional: session from deep link

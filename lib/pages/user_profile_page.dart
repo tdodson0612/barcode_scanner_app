@@ -7,7 +7,7 @@ import 'chat_page.dart';
 class UserProfilePage extends StatefulWidget {
   final String userId;
 
-  const UserProfilePage({Key? key, required this.userId}) : super(key: key);
+  const UserProfilePage({super.key, required this.userId});
 
   @override
   State<UserProfilePage> createState() => _UserProfilePageState();
@@ -37,7 +37,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
       
       if (mounted) {
         setState(() {
-          userProfile = results[0] as Map<String, dynamic>?;
+          userProfile = results[0];
           friendshipStatus = results[1] as Map<String, dynamic>;
           isLoading = false;
         });

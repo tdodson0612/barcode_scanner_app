@@ -8,7 +8,7 @@ import '../widgets/app_drawer.dart';
 class SearchUsersPage extends StatefulWidget {
   final String? initialQuery; // optional
 
-  const SearchUsersPage({Key? key, this.initialQuery}) : super(key: key);
+  const SearchUsersPage({super.key, this.initialQuery});
 
   @override
   _SearchUsersPageState createState() => _SearchUsersPageState();

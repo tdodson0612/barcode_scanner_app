@@ -10,9 +10,9 @@ class FavoriteRecipesPage extends StatefulWidget {
   final List<FavoriteRecipe> favoriteRecipes;
 
   const FavoriteRecipesPage({
-    Key? key,
+    super.key,
     required this.favoriteRecipes,
-  }) : super(key: key);
+  });
 
   @override
   _FavoriteRecipesPageState createState() => _FavoriteRecipesPageState();
