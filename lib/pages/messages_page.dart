@@ -1,6 +1,7 @@
-// lib/pages/messages_page.dart - UPDATED: With Logger
+// lib/pages/messages_page.dart - FIXED: Proper timezone handling
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
+import 'package:intl/intl.dart';
 import '../services/database_service.dart';
 import '../widgets/app_drawer.dart';
 import 'chat_page.dart';
@@ -46,6 +47,25 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     try {
       _logger.d('📨 Loading chat list...');
       final chats = await DatabaseService.getChatList();
+      
+      // Sort chats by last message timestamp (newest first)
+      chats.sort((a, b) {
+        try {
+          final timeA = a['lastMessage']?['created_at'];
+          final timeB = b['lastMessage']?['created_at'];
+          
+          if (timeA == null && timeB == null) return 0;
+          if (timeA == null) return 1; // No message goes to bottom
+          if (timeB == null) return -1;
+          
+          final dateA = DateTime.parse(timeA);
+          final dateB = DateTime.parse(timeB);
+          return dateB.compareTo(dateA); // Descending order (newest first)
+        } catch (e) {
+          return 0;
+        }
+      });
+      
       _logger.i('✅ Loaded ${chats.length} chats');
       
       setState(() {
@@ -509,18 +529,33 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     if (timestamp == null) return '';
     
     try {
-      final messageTime = DateTime.parse(timestamp);
-      final now = DateTime.now();
-      final difference = now.difference(messageTime);
+      // Parse UTC timestamp and convert to local time
+      final utcDateTime = DateTime.parse(timestamp);
+      final localDateTime = utcDateTime.toLocal();
       
-      if (difference.inDays > 0) {
-        return '${difference.inDays}d';
-      } else if (difference.inHours > 0) {
-        return '${difference.inHours}h';
-      } else if (difference.inMinutes > 0) {
-        return '${difference.inMinutes}m';
-      } else {
-        return 'now';
+      final now = DateTime.now();
+      final difference = now.difference(localDateTime);
+      
+      // If today, show time
+      if (difference.inDays == 0 && localDateTime.day == now.day) {
+        return DateFormat('h:mm a').format(localDateTime);
+      }
+      // If yesterday
+      else if (difference.inDays == 1 || 
+               (localDateTime.day == now.day - 1 && localDateTime.month == now.month)) {
+        return 'Yesterday';
+      }
+      // If this week
+      else if (difference.inDays < 7) {
+        return DateFormat('EEE').format(localDateTime); // "Mon", "Tue", etc.
+      }
+      // If this year
+      else if (localDateTime.year == now.year) {
+        return DateFormat('MMM d').format(localDateTime); // "Jan 15"
+      }
+      // Older
+      else {
+        return DateFormat('MMM d, y').format(localDateTime); // "Jan 15, 2024"
       }
     } catch (e) {
       return '';

@@ -1,4 +1,4 @@
-// lib/pages/chat_page.dart - FIXED: Enhanced with ErrorHandlingService integration
+// lib/pages/chat_page.dart - FIXED: Proper message ordering and timezone display
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/database_service.dart';
@@ -49,21 +49,24 @@ class _ChatPageState extends State<ChatPage> {
       final messages = await DatabaseService.getMessages(widget.friendId);
       
       if (mounted) {
+        // Sort messages by timestamp in ascending order (oldest to newest)
+        messages.sort((a, b) {
+          try {
+            final timeA = DateTime.parse(a['created_at'] ?? '');
+            final timeB = DateTime.parse(b['created_at'] ?? '');
+            return timeA.compareTo(timeB); // Ascending order
+          } catch (e) {
+            return 0;
+          }
+        });
+        
         setState(() {
           _messages = messages;
           _isLoading = false;
         });
         
         // Scroll to bottom after loading messages
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scrollController.hasClients) {
-            _scrollController.animateTo(
-              _scrollController.position.maxScrollExtent,
-              duration: Duration(milliseconds: 300),
-              curve: Curves.easeOut,
-            );
-          }
-        });
+        _scrollToBottom();
       }
     } catch (e) {
       if (mounted) {
@@ -92,11 +95,12 @@ class _ChatPageState extends State<ChatPage> {
       'receiver': widget.friendId,
       'content': content,
       'created_at': DateTime.now().toIso8601String(),
+      'is_temp': true,
     };
 
     setState(() {
       _isSending = true;
-      _messages.add(tempMessage);
+      _messages.add(tempMessage); // Add to end (bottom)
     });
 
     _messageController.clear();
@@ -108,13 +112,12 @@ class _ChatPageState extends State<ChatPage> {
       if (mounted) {
         // Reload messages to get the actual message with proper ID
         await _loadMessages();
-        ErrorHandlingService.showSuccess(context, 'Message sent');
       }
     } catch (e) {
       if (mounted) {
         // Remove the optimistic message on error
         setState(() {
-          _messages.removeWhere((msg) => msg['id'].toString().startsWith('temp_'));
+          _messages.removeWhere((msg) => msg['is_temp'] == true);
         });
         
         // Restore the message text to the input field
@@ -149,23 +152,45 @@ class _ChatPageState extends State<ChatPage> {
 
   String _formatMessageTime(String timestamp) {
     try {
-      final dateTime = DateTime.parse(timestamp);
+      // Parse the UTC timestamp from the database
+      final utcDateTime = DateTime.parse(timestamp);
+      
+      // Convert to local timezone
+      final localDateTime = utcDateTime.toLocal();
+      
       final now = DateTime.now();
-      final difference = now.difference(dateTime);
+      final difference = now.difference(localDateTime);
 
-      if (difference.inDays > 0) {
-        return DateFormat('MMM d, h:mm a').format(dateTime);
-      } else {
-        return DateFormat('h:mm a').format(dateTime);
+      // If message is from today, show time only
+      if (difference.inDays == 0 && localDateTime.day == now.day) {
+        return DateFormat('h:mm a').format(localDateTime);
+      }
+      // If message is from yesterday
+      else if (difference.inDays == 1 || 
+               (localDateTime.day == now.day - 1 && localDateTime.month == now.month)) {
+        return 'Yesterday ${DateFormat('h:mm a').format(localDateTime)}';
+      }
+      // If message is from this week (last 7 days)
+      else if (difference.inDays < 7) {
+        return DateFormat('EEE h:mm a').format(localDateTime); // "Mon 5:30 PM"
+      }
+      // If message is from this year
+      else if (localDateTime.year == now.year) {
+        return DateFormat('MMM d, h:mm a').format(localDateTime); // "Jan 15, 5:30 PM"
+      }
+      // Older messages include year
+      else {
+        return DateFormat('MMM d, y').format(localDateTime); // "Jan 15, 2024"
       }
     } catch (e) {
+      print('Error formatting time: $e');
       return '';
     }
   }
 
   Widget _buildMessageBubble(Map<String, dynamic> message) {
     final isMe = message['sender'] == AuthService.currentUserId;
-    final isTemp = message['id'].toString().startsWith('temp_');
+    final isTemp = message['is_temp'] == true;
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
