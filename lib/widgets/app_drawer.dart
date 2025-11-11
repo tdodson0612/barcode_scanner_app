@@ -151,6 +151,33 @@ class _AppDrawerState extends State<AppDrawer> {
               },
             ),
             
+            // ADD THIS TO YOUR AppDrawer widget (lib/widgets/app_drawer.dart)
+            // Add it right after the Home menu item:
+
+            ListTile(
+              leading: Icon(
+                Icons.explore,
+                color: widget.currentPage == 'feed' ? Colors.green : Colors.grey[700],
+              ),
+              title: Text(
+                'Discovery Feed',
+                style: TextStyle(
+                  color: widget.currentPage == 'feed' ? Colors.green : Colors.black,
+                  fontWeight: widget.currentPage == 'feed' ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+              selected: widget.currentPage == 'feed',
+              selectedTileColor: Colors.green.withOpacity(0.1),
+              onTap: () {
+                Navigator.pop(context);
+                if (widget.currentPage != 'feed') {
+                  Navigator.pushReplacementNamed(context, '/feed');
+                }
+              },
+            ),
+
+
+
             ListTile(
               leading: Icon(
                 Icons.person,

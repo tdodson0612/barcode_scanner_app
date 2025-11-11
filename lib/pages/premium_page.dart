@@ -1,4 +1,4 @@
-// lib/pages/premium_page.dart
+// lib/pages/premium_page.dart - FIXED: Complete file with close button and better error handling
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
@@ -30,6 +30,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   int _remainingScans = 0;
   String? _selectedPlan;
   List<ProductDetails> _products = <ProductDetails>[];
+  bool _hasLoadError = false;
   
   // Tester key functionality
   final TextEditingController _testerKeyController = TextEditingController();
@@ -71,7 +72,30 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       _animationController.forward();
     } catch (e) {
       if (mounted) {
-        await ErrorHandlingService.handleAuthError(context, e);
+        setState(() {
+          _isLoading = false;
+          _hasLoadError = true;
+        });
+        
+        // Show error but allow user to continue browsing features
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to load premium details. You can still browse features.'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: () {
+                setState(() {
+                  _isLoading = true;
+                  _hasLoadError = false;
+                });
+                _initializePremiumPage();
+              },
+            ),
+          ),
+        );
       }
     }
   }
@@ -109,7 +133,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       if (mounted) {
         setState(() {
           _isPremium = premiumStatus;
-          _isTester = localTester && !premiumStatus; // Tester only if not premium
+          _isTester = localTester && !premiumStatus;
           _dailyScans = dailyScans;
           _remainingScans = remainingScans;
           _isLoading = false;
@@ -117,13 +141,21 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _isLoading = false);
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.premiumError,
-          showSnackBar: true,
-          onRetry: _checkPremiumStatus,
+        setState(() {
+          _isLoading = false;
+          _hasLoadError = true;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to load account status'),
+            backgroundColor: Colors.orange,
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: _checkPremiumStatus,
+            ),
+          ),
         );
       }
     }
@@ -141,26 +173,30 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
 
       if (!isAvailable) {
         if (mounted) {
-          ErrorHandlingService.showSimpleError(
-            context, 
-            'In-app purchases are not available on this device'
+          setState(() => _hasLoadError = true);
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('In-app purchases are not available on this device'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 5),
+            ),
           );
         }
         return;
       }
 
-      // Listen to purchase updates
       final Stream<List<PurchaseDetails>> purchaseUpdated = _inAppPurchase.purchaseStream;
       _subscription = purchaseUpdated.listen(
         _onPurchaseUpdate,
         onDone: () => _subscription?.cancel(),
         onError: (Object error) {
           if (mounted) {
-            ErrorHandlingService.handleError(
-              context: context,
-              error: error,
-              category: ErrorHandlingService.premiumError,
-              showSnackBar: true,
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Purchase error occurred'),
+                backgroundColor: Colors.red,
+              ),
             );
           }
         },
@@ -169,11 +205,18 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       await _loadProducts();
     } catch (e) {
       if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.premiumError,
-          onRetry: _initializeInAppPurchase,
+        setState(() => _hasLoadError = true);
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to initialize purchases'),
+            backgroundColor: Colors.orange,
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: _initializeInAppPurchase,
+            ),
+          ),
         );
       }
     }
@@ -192,16 +235,23 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       if (mounted) {
         setState(() {
           _products = response.productDetails;
+          _hasLoadError = false;
         });
       }
     } catch (e) {
       if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.premiumError,
-          customMessage: 'Unable to load subscription plans. Please try again.',
-          onRetry: _loadProducts,
+        setState(() => _hasLoadError = true);
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to load subscription plans'),
+            backgroundColor: Colors.orange,
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: _loadProducts,
+            ),
+          ),
         );
       }
     }
@@ -222,17 +272,23 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
         case PurchaseStatus.error:
           if (mounted) {
             setState(() => _isPurchasing = false);
-            ErrorHandlingService.handleError(
-              context: context,
-              error: Exception('Purchase failed: ${purchaseDetails.error?.message}'),
-              category: ErrorHandlingService.premiumError,
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Purchase failed: ${purchaseDetails.error?.message ?? "Unknown error"}'),
+                backgroundColor: Colors.red,
+              ),
             );
           }
           break;
         case PurchaseStatus.canceled:
           if (mounted) {
             setState(() => _isPurchasing = false);
-            ErrorHandlingService.showSimpleError(context, 'Purchase was cancelled');
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Purchase was cancelled'),
+                backgroundColor: Colors.orange,
+              ),
+            );
           }
           break;
       }
@@ -255,10 +311,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       String planName;
 
       if (purchaseDetails.productID == premiumProductId) {
-        // Update using DatabaseService method
         await DatabaseService.setPremiumStatus(userId, true);
-        
-        // Update local cache
         await prefs.setBool('isPremiumUser', true);
         await prefs.setBool('isTesterUser', false);
         
@@ -270,7 +323,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
           });
         }
       } else if (purchaseDetails.productID == testerProductId) {
-        // Testers don't get database premium status, just local
         await prefs.setBool('isTesterUser', true);
         await prefs.setBool('isPremiumUser', false);
         
@@ -285,7 +337,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
         throw Exception('Unknown product ID: ${purchaseDetails.productID}');
       }
 
-      // Store detailed purchase information
       await prefs.setString('purchaseDate', DateTime.now().toIso8601String());
       final String computedPlan = _selectedPlan ?? (purchaseDetails.productID == premiumProductId
           ? 'premium'
@@ -294,7 +345,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       await prefs.setString('productId', purchaseDetails.productID);
       await prefs.setString('transactionId', purchaseDetails.transactionDate ?? DateTime.now().millisecondsSinceEpoch.toString());
 
-      // Refresh premium controller
       await PremiumGateController().refresh();
 
       if (mounted) {
@@ -303,9 +353,14 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
           _isPurchasing = false;
         });
 
-        ErrorHandlingService.showSuccess(context, 'Welcome to $planName! Purchase successful.');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Welcome to $planName! Purchase successful.'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
         
-        // Navigate back to previous screen instead of reloading entire app
         Future.delayed(const Duration(seconds: 2), () {
           if (mounted) {
             Navigator.of(context).pop();
@@ -316,11 +371,12 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       if (mounted) {
         setState(() => _isPurchasing = false);
         
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.premiumError,
-          customMessage: 'Purchase successful, but failed to update account. Please contact support.',
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Purchase successful, but failed to update account. Please contact support.'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 5),
+          ),
         );
       }
     }
@@ -346,26 +402,50 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
     });
 
     if (!_isValidTesterKey) {
-      ErrorHandlingService.showSimpleError(
-        context, 
-        'Invalid tester key. Please try again or choose Premium.'
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Invalid tester key. Please try again or choose Premium.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Valid tester key!'),
+          backgroundColor: Colors.green,
+        ),
       );
     }
   }
 
   Future<void> _purchasePlan() async {
     if (_selectedPlan == null) {
-      ErrorHandlingService.showSimpleError(context, 'Please select a plan first');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please select a plan first'),
+          backgroundColor: Colors.orange,
+        ),
+      );
       return;
     }
 
     if (_selectedPlan == 'tester' && !_isValidTesterKey) {
-      ErrorHandlingService.showSimpleError(context, 'Please enter a valid tester key');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Please enter a valid tester key'),
+          backgroundColor: Colors.orange,
+        ),
+      );
       return;
     }
 
     if (!_isAvailable) {
-      ErrorHandlingService.showSimpleError(context, 'In-app purchases are not available');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('In-app purchases are not available'),
+          backgroundColor: Colors.red,
+        ),
+      );
       return;
     }
 
@@ -389,11 +469,17 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
     } catch (e) {
       if (mounted) {
         setState(() => _isPurchasing = false);
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.premiumError,
-          onRetry: _purchasePlan,
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Purchase failed: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: _purchasePlan,
+            ),
+          ),
         );
       }
     }
@@ -406,17 +492,27 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
     try {
       await _inAppPurchase.restorePurchases();
       if (mounted) {
-        ErrorHandlingService.showSuccess(context, 'Purchases restored successfully');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Purchases restored successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isPurchasing = false);
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.premiumError,
-          customMessage: 'Failed to restore purchases. Please try again.',
-          onRetry: _restorePurchases,
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to restore purchases'),
+            backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: _restorePurchases,
+            ),
+          ),
         );
       }
     }
@@ -427,7 +523,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       final product = _products.firstWhere((p) => p.id == productId);
       return product.price;
     } catch (e) {
-      // Fallback prices if products aren't loaded
       return productId == premiumProductId ? '\$9.99' : '\$4.99';
     }
   }
@@ -618,6 +713,59 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   Widget _buildPlanSelection() {
     if (_isPremium || _isTester) return const SizedBox.shrink();
 
+    if (_hasLoadError) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Icon(Icons.error_outline, size: 64, color: Colors.orange),
+            SizedBox(height: 16),
+            Text(
+              'Unable to Load Plans',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'We couldn\'t load the subscription plans. Please check your internet connection and try again.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
+            SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: () {
+                setState(() {
+                  _isLoading = true;
+                  _hasLoadError = false;
+                });
+                _initializePremiumPage();
+              },
+              icon: Icon(Icons.refresh),
+              label: Text('Retry'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
@@ -645,7 +793,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
           ),
           const SizedBox(height: 20),
           
-          // Premium Plan Card
           Card(
             elevation: _selectedPlan == 'premium' ? 8 : 2,
             color: _selectedPlan == 'premium' ? Colors.amber.shade50 : null,
@@ -696,7 +843,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
           
           const SizedBox(height: 16),
           
-          // Tester Plan Card
           Card(
             elevation: _selectedPlan == 'tester' ? 8 : 2,
             color: _selectedPlan == 'tester' ? Colors.orange.shade50 : null,
@@ -745,7 +891,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
             ),
           ),
           
-          // Tester Key Input
           if (_showTesterKeyInput) ...[
             const SizedBox(height: 20),
             Card(
@@ -808,7 +953,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
           
           const SizedBox(height: 24),
           
-          // Purchase Button
           SizedBox(
             width: double.infinity,
             height: 56,
@@ -944,7 +1088,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       ),
       body: Stack(
         children: [
-          // Background
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -955,7 +1098,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
             ),
           ),
           
-          // Content
           FadeTransition(
             opacity: _fadeAnimation,
             child: SingleChildScrollView(
@@ -977,4 +1119,4 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       ),
     );
   }
-}// lib/pages/premium_page.dart
+}

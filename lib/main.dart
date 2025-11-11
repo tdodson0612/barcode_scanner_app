@@ -1,10 +1,12 @@
-// main.dart – Fixed for Supabase + App Links (compatible version)
+// main.dart – Unified version with Supabase, App Links, and MainNavigation bottom bar
+
 import 'package:flutter/material.dart';
 import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/app_config.dart';
-import 'home_screen.dart';
+
+// Screens and Pages
 import 'login.dart';
 import 'pages/premium_page.dart';
 import 'pages/grocery_list.dart';
@@ -15,6 +17,10 @@ import 'pages/profile_screen.dart';
 import 'pages/favorite_recipes_page.dart';
 import 'models/favorite_recipe.dart';
 import 'contact_screen.dart';
+import 'pages/discovery_feed_page.dart';
+import 'pages/create_post_page.dart';
+import 'home_screen.dart';
+import 'pages/main_navigation.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -103,7 +109,7 @@ class _MyAppState extends State<MyApp> {
 
     // Handle deep links when app is launched by link (cold start)
     try {
-      final initialUri = await _appLinks.getInitialLink(); // <-- FIXED HERE
+      final initialUri = await _appLinks.getInitialLink();
       if (initialUri != null && initialUri.toString().contains('reset-password')) {
         await _handleResetPasswordLink(initialUri);
       }
@@ -163,7 +169,7 @@ class _MyAppState extends State<MyApp> {
       initialRoute: _getInitialRoute(supabase),
       routes: {
         '/login': (context) => const LoginPage(),
-        '/home': (context) => HomePage(isPremium: _isPremium),
+        '/home': (context) => MainNavigation(isPremium: _isPremium), // ✅ Replaced with bottom nav
         '/profile': (context) => ProfileScreen(favoriteRecipes: const []),
         '/purchase': (context) => const PremiumPage(),
         '/grocery-list': (context) => const GroceryListPage(),
@@ -172,6 +178,8 @@ class _MyAppState extends State<MyApp> {
         '/search-users': (context) => const SearchUsersPage(),
         '/favorite-recipes': (context) => FavoriteRecipesPage(favoriteRecipes: const []),
         '/contact': (context) => const ContactScreen(),
+        '/create-post': (context) => const CreatePostPage(),
+        '/feed': (context) => const DiscoveryFeedPage(),
       },
       onUnknownRoute: (settings) {
         if (AppConfig.enableDebugPrints) {
