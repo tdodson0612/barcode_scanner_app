@@ -24,7 +24,7 @@ dependencies:
   change_app_package_name: ^1.2.0
   app_links: ^6.3.2
   share_plus: ^7.0.0  # For sharing recipes
-
+  
 
 
 dev_dependencies:
