@@ -680,8 +680,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
       return;
     }
 
-    // Thumbnail is now optional - will use first frame if not provided
-
     if (_selectedRecipe == null) {
       ErrorHandlingService.showSimpleError(
         context,
@@ -695,16 +693,33 @@ class _CreatePostPageState extends State<CreatePostPage> {
     });
 
     try {
-      await DatabaseService.createPost(
-        recipeId: _selectedRecipe!.id!,
-        imageFile: _imageFile,
-        videoFile: _videoFile,
-        thumbnailFile: _thumbnailFile,
-        caption: _captionController.text.trim(),
-      );
+      // Check if this is a video or photo post
+      if (_mediaType == 'video' && _videoFile != null) {
+        // Video post - requires thumbnail (use first frame if not set)
+        final thumbnailToUse = _thumbnailFile ?? _videoFile;
+        
+        await DatabaseService.createVideoPost(
+          recipeId: _selectedRecipe!.id!,
+          videoFile: _videoFile!,
+          thumbnailFile: thumbnailToUse,
+          caption: _captionController.text.trim(),
+        );
+      } else {
+        // Photo post
+        await DatabaseService.createPost(
+          recipeId: _selectedRecipe!.id!,
+          imageFile: _imageFile,
+          videoFile: _videoFile,
+          thumbnailFile: _thumbnailFile,
+          caption: _captionController.text.trim(),
+        );
+      }
 
       if (mounted) {
-        ErrorHandlingService.showSuccess(context, 'Post created successfully!');
+        ErrorHandlingService.showSuccess(
+          context, 
+          _mediaType == 'video' ? 'Video posted successfully!' : 'Post created successfully!'
+        );
         Navigator.pop(context, true);
       }
     } catch (e) {
@@ -713,13 +728,80 @@ class _CreatePostPageState extends State<CreatePostPage> {
           _isLoading = false;
         });
         
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.databaseError,
-          customMessage: 'Failed to create post',
-          onRetry: _submitPost,
-        );
+        // Check if error contains draft ID
+        final errorMsg = e.toString();
+        if (errorMsg.contains('DRAFT_SAVED:')) {
+          final parts = errorMsg.split(':');
+          if (parts.length > 1) {
+            final draftId = parts[1].trim();
+            
+            // Show dialog with option to retry from draft
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Upload Failed'),
+                content: const Text(
+                  'Your post has been saved as a draft. You can retry uploading it later from your drafts.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      // Optionally navigate to drafts page
+                      // Navigator.pushNamed(context, '/drafts');
+                    },
+                    child: const Text('View Drafts'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      // Retry upload from draft
+                      try {
+                        setState(() {
+                          _isLoading = true;
+                        });
+                        
+                        await DatabaseService.uploadFromDraft(draftId);
+                        
+                        if (mounted) {
+                          ErrorHandlingService.showSuccess(
+                            context, 
+                            'Posted successfully!'
+                          );
+                          Navigator.pop(context, true);
+                        }
+                      } catch (retryError) {
+                        if (mounted) {
+                          setState(() {
+                            _isLoading = false;
+                          });
+                          ErrorHandlingService.showSimpleError(
+                            context, 
+                            'Retry failed: ${retryError.toString()}'
+                          );
+                        }
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Retry Now'),
+                  ),
+                ],
+              ),
+            );
+          }
+        } else {
+          // Normal error handling
+          await ErrorHandlingService.handleError(
+            context: context,
+            error: e,
+            category: ErrorHandlingService.databaseError,
+            customMessage: 'Failed to create post',
+            onRetry: _submitPost,
+          );
+        }
       }
     }
   }
