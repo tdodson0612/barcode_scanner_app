@@ -175,7 +175,7 @@ class DatabaseService {
   }
 
   // ==================================================
-  // DISCOVERY FEED - POSTS
+  // DISCOVERY FEED - POSTS (WITH VIDEO SUPPORT)
   // ==================================================
 
   static Future<String> createPost({
@@ -184,17 +184,12 @@ class DatabaseService {
     File? videoFile,
     File? thumbnailFile,
     String? caption,
+    bool isDraftRetry = false,
   }) async {
     ensureUserAuthenticated();
     
-    // Must have either image or video
     if (imageFile == null && videoFile == null) {
       throw Exception('Must provide either an image or video');
-    }
-    
-    // If video is provided, thumbnail is required
-    if (videoFile != null && thumbnailFile == null) {
-      throw Exception('Video posts require a thumbnail image');
     }
     
     try {
@@ -203,10 +198,38 @@ class DatabaseService {
       
       String? imageUrl;
       String? videoUrl;
-      String? thumbnailUrl;
       
-      // Upload image or video
-      if (imageFile != null) {
+      // Handle video upload
+      if (videoFile != null) {
+        // Upload video
+        final videoExt = videoFile.path.split('.').last;
+        final videoFileName = 'video_${timestamp}.$videoExt';
+        final videoPath = '$userId/posts/$videoFileName';
+        
+        await _supabase.storage
+            .from('profile-pictures')
+            .upload(videoPath, videoFile);
+        
+        videoUrl = _supabase.storage
+            .from('profile-pictures')
+            .getPublicUrl(videoPath);
+        
+        // Upload thumbnail (use video file as fallback if no custom thumbnail)
+        final thumbFile = thumbnailFile ?? videoFile;
+        final thumbExt = thumbFile.path.split('.').last;
+        final thumbFileName = 'thumb_${timestamp}.$thumbExt';
+        final thumbPath = '$userId/posts/$thumbFileName';
+        
+        await _supabase.storage
+            .from('profile-pictures')
+            .upload(thumbPath, thumbFile);
+        
+        imageUrl = _supabase.storage
+            .from('profile-pictures')
+            .getPublicUrl(thumbPath);
+      } 
+      // Handle image upload
+      else if (imageFile != null) {
         final fileName = 'post_$timestamp.jpg';
         final filePath = '$userId/posts/$fileName';
         
@@ -217,32 +240,9 @@ class DatabaseService {
         imageUrl = _supabase.storage
             .from('profile-pictures')
             .getPublicUrl(filePath);
-      } else if (videoFile != null) {
-        // Upload video
-        final videoFileName = 'post_$timestamp.mp4';
-        final videoFilePath = '$userId/posts/$videoFileName';
-        
-        await _supabase.storage
-            .from('profile-pictures')
-            .upload(videoFilePath, videoFile);
-        
-        videoUrl = _supabase.storage
-            .from('profile-pictures')
-            .getPublicUrl(videoFilePath);
-        
-        // Upload thumbnail
-        final thumbFileName = 'thumb_$timestamp.jpg';
-        final thumbFilePath = '$userId/posts/$thumbFileName';
-        
-        await _supabase.storage
-            .from('profile-pictures')
-            .upload(thumbFilePath, thumbnailFile!);
-        
-        thumbnailUrl = _supabase.storage
-            .from('profile-pictures')
-            .getPublicUrl(thumbFilePath);
       }
       
+      // Create post
       final response = await _supabase
           .from('posts')
           .insert({
@@ -250,19 +250,165 @@ class DatabaseService {
             'recipe_id': recipeId,
             'image_url': imageUrl,
             'video_url': videoUrl,
-            'thumbnail_url': thumbnailUrl,
             'caption': caption,
             'created_at': DateTime.now().toIso8601String(),
           })
           .select()
           .single();
       
+      // Award first post badge
       await awardBadge('first_post');
-      await addXP(25, reason: 'Posted photo');
+      
+      // Add XP (more for videos)
+      await addXP(videoFile != null ? 50 : 25, 
+          reason: videoFile != null ? 'Posted video' : 'Posted photo');
       
       return response['id'];
     } catch (e) {
+      // Auto-save as draft on error (only if not already a retry from draft)
+      if (!isDraftRetry) {
+        try {
+          final draftId = await saveDraftPost(
+            recipeId: recipeId,
+            imageFile: imageFile,
+            videoFile: videoFile,
+            thumbnailFile: thumbnailFile,
+            caption: caption,
+          );
+          
+          // Throw custom error with draft ID
+          throw Exception('DRAFT_SAVED:$draftId:${e.toString()}');
+        } catch (draftError) {
+          // If draft save also fails, throw original error
+          throw Exception('Failed to create post: $e');
+        }
+      }
+      
       throw Exception('Failed to create post: $e');
+    }
+  }
+
+  // ==================================================
+  // DRAFT POSTS - AUTO-SAVE ON ERROR
+  // ==================================================
+
+  /// Save post as draft (auto-saves on upload error)
+  static Future<String> saveDraftPost({
+    required int recipeId,
+    File? imageFile,
+    File? videoFile,
+    File? thumbnailFile,
+    String? caption,
+  }) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final userId = currentUserId!;
+      
+      // Store file paths locally (don't upload yet)
+      final draftData = {
+        'user_id': userId,
+        'recipe_id': recipeId,
+        'image_path': imageFile?.path,
+        'video_path': videoFile?.path,
+        'thumbnail_path': thumbnailFile?.path,
+        'caption': caption,
+        'created_at': DateTime.now().toIso8601String(),
+        'is_video': videoFile != null,
+      };
+      
+      // Save draft to database
+      final response = await _supabase
+          .from('draft_posts')
+          .insert(draftData)
+          .select()
+          .single();
+      
+      return response['id'];
+    } catch (e) {
+      throw Exception('Failed to save draft: $e');
+    }
+  }
+
+  /// Get all draft posts for current user
+  static Future<List<Map<String, dynamic>>> getDraftPosts() async {
+    ensureUserAuthenticated();
+    
+    try {
+      final response = await _supabase
+          .from('draft_posts')
+          .select('''
+            *,
+            recipe:submitted_recipes!draft_posts_recipe_id_fkey(id, recipe_name)
+          ''')
+          .eq('user_id', currentUserId!)
+          .order('created_at', ascending: false);
+      
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      throw Exception('Failed to get drafts: $e');
+    }
+  }
+
+  /// Delete a draft post
+  static Future<void> deleteDraftPost(String draftId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('draft_posts')
+          .delete()
+          .eq('id', draftId)
+          .eq('user_id', currentUserId!);
+    } catch (e) {
+      throw Exception('Failed to delete draft: $e');
+    }
+  }
+
+  /// Resume uploading from draft (with automatic draft deletion on success)
+  static Future<String> uploadFromDraft(String draftId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      // Get draft data
+      final draft = await _supabase
+          .from('draft_posts')
+          .select()
+          .eq('id', draftId)
+          .single();
+      
+      // Recreate file objects from paths
+      final imageFile = draft['image_path'] != null ? File(draft['image_path']) : null;
+      final videoFile = draft['video_path'] != null ? File(draft['video_path']) : null;
+      final thumbnailFile = draft['thumbnail_path'] != null ? File(draft['thumbnail_path']) : null;
+      
+      // Verify files still exist
+      if (videoFile != null && !await videoFile.exists()) {
+        throw Exception('Video file no longer exists on device');
+      }
+      if (imageFile != null && !await imageFile.exists()) {
+        throw Exception('Image file no longer exists on device');
+      }
+      if (thumbnailFile != null && !await thumbnailFile.exists()) {
+        throw Exception('Thumbnail file no longer exists on device');
+      }
+      
+      // Upload the post (with isDraftRetry = true to prevent recursive draft saving)
+      final postId = await createPost(
+        recipeId: draft['recipe_id'],
+        imageFile: imageFile,
+        videoFile: videoFile,
+        thumbnailFile: thumbnailFile,
+        caption: draft['caption'],
+        isDraftRetry: true,
+      );
+      
+      // Delete draft on successful upload
+      await deleteDraftPost(draftId);
+      
+      return postId;
+    } catch (e) {
+      throw Exception('Failed to upload from draft: $e');
     }
   }
 
@@ -312,19 +458,30 @@ class DatabaseService {
     try {
       final post = await _supabase
           .from('posts')
-          .select('image_url')
+          .select('image_url, video_url')
           .eq('id', postId)
           .single();
       
-      final uri = Uri.parse(post['image_url']);
-      final pathSegments = uri.pathSegments;
-      final bucketIndex = pathSegments.indexOf('profile-pictures');
-      if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
-        final filePath = pathSegments.sublist(bucketIndex + 1).join('/');
-        
-        await _supabase.storage
-            .from('profile-pictures')
-            .remove([filePath]);
+      // Delete image/thumbnail
+      if (post['image_url'] != null) {
+        final uri = Uri.parse(post['image_url']);
+        final pathSegments = uri.pathSegments;
+        final bucketIndex = pathSegments.indexOf('profile-pictures');
+        if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
+          final filePath = pathSegments.sublist(bucketIndex + 1).join('/');
+          await _supabase.storage.from('profile-pictures').remove([filePath]);
+        }
+      }
+      
+      // Delete video if exists
+      if (post['video_url'] != null) {
+        final uri = Uri.parse(post['video_url']);
+        final pathSegments = uri.pathSegments;
+        final bucketIndex = pathSegments.indexOf('profile-pictures');
+        if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
+          final filePath = pathSegments.sublist(bucketIndex + 1).join('/');
+          await _supabase.storage.from('profile-pictures').remove([filePath]);
+        }
       }
       
       await _supabase
@@ -936,6 +1093,7 @@ class DatabaseService {
           .order('created_at', ascending: false);
 
       return (response as List)
+      // CONTINUATION FROM: return (response as List)
           .map((recipe) => FavoriteRecipe.fromJson(recipe))
           .toList();
     } catch (e) {
@@ -1212,7 +1370,6 @@ class DatabaseService {
   // RECIPE RATINGS & MANAGEMENT
   // ==================================================
 
-  /// Rate a recipe (1-5 stars)
   static Future<void> rateRecipe(int recipeId, int rating) async {
     ensureUserAuthenticated();
     
@@ -1221,7 +1378,6 @@ class DatabaseService {
     }
 
     try {
-      // Check if user is the recipe owner
       final recipe = await _supabase
           .from('submitted_recipes')
           .select('user_id')
@@ -1232,7 +1388,6 @@ class DatabaseService {
         throw Exception('You cannot rate your own recipe');
       }
 
-      // Upsert rating (insert or update if exists)
       await _supabase.from('recipe_ratings').upsert({
         'recipe_id': recipeId,
         'user_id': currentUserId!,
@@ -1244,7 +1399,6 @@ class DatabaseService {
     }
   }
 
-  /// Get all ratings for a recipe
   static Future<List<Map<String, dynamic>>> getRecipeRatings(int recipeId) async {
     try {
       final response = await _supabase
@@ -1259,7 +1413,6 @@ class DatabaseService {
     }
   }
 
-  /// Get average rating and count for a recipe
   static Future<Map<String, dynamic>> getRecipeAverageRating(int recipeId) async {
     try {
       final response = await _supabase
@@ -1284,7 +1437,6 @@ class DatabaseService {
     }
   }
 
-  /// Check if current user has rated a recipe
   static Future<bool> hasUserRatedRecipe(int recipeId) async {
     if (currentUserId == null) return false;
 
@@ -1302,7 +1454,6 @@ class DatabaseService {
     }
   }
 
-  /// Get user's rating for a recipe
   static Future<int?> getUserRecipeRating(int recipeId) async {
     if (currentUserId == null) return null;
 
@@ -1320,7 +1471,6 @@ class DatabaseService {
     }
   }
 
-  /// Update an existing recipe
   static Future<void> updateSubmittedRecipe({
     required int recipeId,
     required String recipeName,
@@ -1330,7 +1480,6 @@ class DatabaseService {
     ensureUserAuthenticated();
 
     try {
-      // Verify the recipe belongs to the current user
       final recipe = await _supabase
           .from('submitted_recipes')
           .select('user_id')
@@ -1351,7 +1500,6 @@ class DatabaseService {
     }
   }
 
-  /// Get a single recipe by ID
   static Future<Map<String, dynamic>?> getRecipeById(int recipeId) async {
     try {
       final response = await _supabase
@@ -1366,7 +1514,6 @@ class DatabaseService {
     }
   }
 
-  /// Generate shareable recipe text
   static String generateShareableRecipeText(Map<String, dynamic> recipe) {
     final name = recipe['recipe_name'] ?? 'Unnamed Recipe';
     final ingredients = recipe['ingredients'] ?? 'No ingredients listed';
@@ -1818,80 +1965,78 @@ Shared from Recipe Scanner App
   // ==================================================
 
   static Future<List<Map<String, dynamic>>> searchUsers(String query) async {
-    ensureUserAuthenticated();
-    
+  ensureUserAuthenticated();
+  
+  try {
+    final searchQuery = query.trim();
+    if (searchQuery.isEmpty) return [];
+
     try {
-      final searchQuery = query.trim();
-      if (searchQuery.isEmpty) return [];
+      final response = await _supabase.rpc('search_users_fuzzy', params: {
+        'search_query': searchQuery,
+        'current_user_id': currentUserId!,
+      });
 
-      try {
-        final response = await _supabase.rpc('search_users_fuzzy', params: {
-          'search_query': searchQuery,
-          'current_user_id': currentUserId!,
-        });
-
-        return List<Map<String, dynamic>>.from(response);
-      } catch (rpcError) {
-        print('RPC search failed, falling back to basic search: $rpcError');
-        
-        final response = await _supabase
-            .from('user_profiles')
-            .select('id, email, username, first_name, last_name, avatar_url')
-            .or('email.ilike.%$searchQuery%,username.ilike.%$searchQuery%,first_name.ilike.%$searchQuery%,last_name.ilike.%$searchQuery%')
-            .neq('id', currentUserId!)
-            .limit(50);
-
-        return List<Map<String, dynamic>>.from(response);
-      }
-    } catch (e) {
-      throw Exception('Failed to search users: $e');
-    }
-  }
-
-  static Future<void> debugTestUserSearch() async {
-    ensureUserAuthenticated();
-    
-    try {
-      print('🔍 DEBUG: Starting user search test...');
-      print('📝 Current user ID: $currentUserId');
+      return List<Map<String, dynamic>>.from(response);
+    } catch (rpcError) {
+      print('RPC search failed, falling back to basic search: $rpcError');
       
-      print('\n--- TEST 1: Fetching all users ---');
-      final allUsers = await _supabase
+      final response = await _supabase
           .from('user_profiles')
-          .select('id, email, username, first_name, last_name')
+          .select('id, email, username, first_name, last_name, avatar_url')
+          .or('email.ilike.%$searchQuery%,username.ilike.%$searchQuery%,first_name.ilike.%$searchQuery%,last_name.ilike.%$searchQuery%')
           .neq('id', currentUserId!)
-          .limit(10);
-      
-      print('✅ Found ${(allUsers as List).length} users in database');
-      for (var user in allUsers) {
-        print('  👤 ${user['username'] ?? user['email']} (${user['first_name']} ${user['last_name']})');
-      }
-      
-      print('\n--- TEST 2: Testing basic search ---');
-      final searchResult = await _supabase
-          .from('user_profiles')
-          .select('id, email, username, first_name, last_name')
-          .or('email.ilike.%test%,username.ilike.%test%,first_name.ilike.%test%,last_name.ilike.%test%')
-          .neq('id', currentUserId!)
-          .limit(10);
-      
-      print('✅ Basic search found ${(searchResult as List).length} results');
-      
-      print('\n--- TEST 3: Testing RPC function ---');
-      try {
-        final rpcResult = await _supabase.rpc('search_users_fuzzy', params: {
-          'search_query': 'test',
-          'current_user_id': currentUserId!,
-        });
-        print('✅ RPC function works! Found ${(rpcResult as List).length} results');
-      } catch (rpcError) {
-        print('⚠️  RPC function not available: $rpcError');
-      }
-      
-      print('\n✅ DEBUG TEST COMPLETED');
-    } catch (e) {
-      print('❌ DEBUG TEST FAILED: $e');
-      throw Exception('Debug test failed: $e');
+          .limit(50);
+
+      return List<Map<String, dynamic>>.from(response);
     }
+  } catch (e) {
+    throw Exception('Failed to search users: $e');
   }
 }
+static Future<void> debugTestUserSearch() async {
+  ensureUserAuthenticated();
+  
+  try {
+    print('🔍 DEBUG: Starting user search test...');
+    print('📝 Current user ID: $currentUserId');
+    
+    print('\n--- TEST 1: Fetching all users ---');
+    final allUsers = await _supabase
+        .from('user_profiles')
+        .select('id, email, username, first_name, last_name')
+        .neq('id', currentUserId!)
+        .limit(10);
+    
+    print('✅ Found ${(allUsers as List).length} users in database');
+    for (var user in allUsers) {
+      print('  👤 ${user['username'] ?? user['email']} (${user['first_name']} ${user['last_name']})');
+    }
+    
+    print('\n--- TEST 2: Testing basic search ---');
+    final searchResult = await _supabase
+        .from('user_profiles')
+        .select('id, email, username, first_name, last_name')
+        .or('email.ilike.%test%,username.ilike.%test%,first_name.ilike.%test%,last_name.ilike.%test%')
+        .neq('id', currentUserId!)
+        .limit(10);
+    
+    print('✅ Basic search found ${(searchResult as List).length} results');
+    
+    print('\n--- TEST 3: Testing RPC function ---');
+    try {
+      final rpcResult = await _supabase.rpc('search_users_fuzzy', params: {
+        'search_query': 'test',
+        'current_user_id': currentUserId!,
+      });
+      print('✅ RPC function works! Found ${(rpcResult as List).length} results');
+    } catch (rpcError) {
+      print('⚠️  RPC function not available: $rpcError');
+    }
+    
+    print('\n✅ DEBUG TEST COMPLETED');
+  } catch (e) {
+    print('❌ DEBUG TEST FAILED: $e');
+    throw Exception('Debug test failed: $e');
+  }
+}}
