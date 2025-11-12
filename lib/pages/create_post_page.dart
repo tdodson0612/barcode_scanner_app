@@ -693,27 +693,14 @@ class _CreatePostPageState extends State<CreatePostPage> {
     });
 
     try {
-      // Check if this is a video or photo post
-      if (_mediaType == 'video' && _videoFile != null) {
-        // Video post - requires thumbnail (use first frame if not set)
-        final thumbnailToUse = _thumbnailFile ?? _videoFile;
-        
-        await DatabaseService.createVideoPost(
-          recipeId: _selectedRecipe!.id!,
-          videoFile: _videoFile!,
-          thumbnailFile: thumbnailToUse,
-          caption: _captionController.text.trim(),
-        );
-      } else {
-        // Photo post
-        await DatabaseService.createPost(
-          recipeId: _selectedRecipe!.id!,
-          imageFile: _imageFile,
-          videoFile: _videoFile,
-          thumbnailFile: _thumbnailFile,
-          caption: _captionController.text.trim(),
-        );
-      }
+      // Use the existing createPost method - it handles both photos and videos
+      await DatabaseService.createPost(
+        recipeId: _selectedRecipe!.id!,
+        imageFile: _imageFile,
+        videoFile: _videoFile,
+        thumbnailFile: _thumbnailFile,
+        caption: _captionController.text.trim(),
+      );
 
       if (mounted) {
         ErrorHandlingService.showSuccess(
@@ -747,15 +734,12 @@ class _CreatePostPageState extends State<CreatePostPage> {
                   TextButton(
                     onPressed: () {
                       Navigator.pop(context);
-                      // Optionally navigate to drafts page
-                      // Navigator.pushNamed(context, '/drafts');
                     },
                     child: const Text('View Drafts'),
                   ),
                   ElevatedButton(
                     onPressed: () async {
                       Navigator.pop(context);
-                      // Retry upload from draft
                       try {
                         setState(() {
                           _isLoading = true;
