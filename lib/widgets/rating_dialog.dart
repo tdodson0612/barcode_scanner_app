@@ -1,4 +1,4 @@
-// lib/widgets/rating_dialog.dart - FIXED
+// lib/widgets/rating_dialog.dart - FIXED: Better error messages
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 import '../services/error_handling_service.dart';
@@ -58,12 +58,52 @@ class _RatingDialogState extends State<RatingDialog> {
           _isSubmitting = false;
         });
 
-        await ErrorHandlingService.handleError(
+        // Check for specific error messages
+        final errorMsg = e.toString();
+        String displayMessage;
+        
+        if (errorMsg.contains('cannot rate your own recipe')) {
+          displayMessage = 'You cannot rate your own recipe';
+        } else if (errorMsg.contains('Failed to rate recipe')) {
+          displayMessage = 'Unable to submit rating. Please try again.';
+        } else {
+          displayMessage = 'Unable to submit rating';
+        }
+
+        // Show error dialog with proper message
+        showDialog(
           context: context,
-          error: e,
-          category: ErrorHandlingService.databaseError,
-          customMessage: 'Unable to submit rating',
-          onRetry: _submitRating,
+          builder: (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.error_outline, color: Colors.red.shade700),
+                const SizedBox(width: 12),
+                const Text('Cannot Rate'),
+              ],
+            ),
+            content: Text(displayMessage),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context); // Close error dialog
+                  Navigator.pop(context); // Close rating dialog
+                },
+                child: const Text('OK'),
+              ),
+              if (!errorMsg.contains('cannot rate your own recipe'))
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context); // Close error dialog
+                    _submitRating(); // Retry
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Try Again'),
+                ),
+            ],
+          ),
         );
       }
     }

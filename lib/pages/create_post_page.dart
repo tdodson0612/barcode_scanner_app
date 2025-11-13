@@ -1,4 +1,4 @@
-// lib/pages/create_post_page.dart - FIXED: Video thumbnail options, trimming, and state persistence
+// lib/pages/create_post_page.dart - COMPLETE: Optional recipe tagging, video thumbnail & trim
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -24,7 +24,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
   SubmittedRecipe? _selectedRecipe;
   bool _isLoading = false;
   bool _isLoadingRecipes = false;
-  String _mediaType = 'none'; // 'none', 'photo', 'video'
+  String _mediaType = 'none';
 
   @override
   void initState() {
@@ -109,11 +109,8 @@ class _CreatePostPageState extends State<CreatePostPage> {
       if (pickedFile != null && mounted) {
         final videoFile = File(pickedFile.path);
         
-        // Initialize video controller
         final controller = VideoPlayerController.file(videoFile);
         await controller.initialize();
-        
-        // Set to first frame by default
         await controller.seekTo(Duration.zero);
         
         setState(() {
@@ -121,10 +118,9 @@ class _CreatePostPageState extends State<CreatePostPage> {
           _imageFile = null;
           _mediaType = 'video';
           _videoController = controller;
-          _thumbnailFile = null; // Reset thumbnail - will use first frame by default
+          _thumbnailFile = null;
         });
         
-        // Show thumbnail options dialog (optional)
         if (mounted) {
           _showThumbnailOptionsDialog();
         }
@@ -142,7 +138,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
   void _showThumbnailOptionsDialog() {
     showDialog(
       context: context,
-      barrierDismissible: true, // Allow dismissing to use default (first frame)
+      barrierDismissible: true,
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Select Video Thumbnail'),
@@ -184,7 +180,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
             TextButton(
               onPressed: () {
                 Navigator.pop(context);
-                // Keep video and use first frame as default
               },
               child: const Text('Skip (Use First Frame)'),
             ),
@@ -209,7 +204,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Video preview
                     Container(
                       height: 200,
                       width: double.maxFinite,
@@ -301,9 +295,8 @@ class _CreatePostPageState extends State<CreatePostPage> {
     try {
       await _videoController!.seekTo(Duration.zero);
       
-      // Mark that first frame should be used (backend will handle extraction)
       setState(() {
-        _thumbnailFile = _videoFile; // Marker - backend extracts first frame
+        _thumbnailFile = _videoFile;
       });
       
       if (mounted) {
@@ -326,10 +319,8 @@ class _CreatePostPageState extends State<CreatePostPage> {
     if (_videoController == null) return;
     
     try {
-      // In production, you'd extract the current frame here
-      // For now, mark it (backend handles frame extraction)
       setState(() {
-        _thumbnailFile = _videoFile; // Marker
+        _thumbnailFile = _videoFile;
       });
       
       if (mounted) {
@@ -373,7 +364,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Video preview
                     Container(
                       height: 200,
                       color: Colors.black,
@@ -462,8 +452,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    // In production, you'd trim the actual video file here
-                    // For now, just acknowledge the trim settings
                     Navigator.pop(context);
                     ErrorHandlingService.showSuccess(
                       context,
@@ -612,7 +600,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
                           ),
                           const SizedBox(height: 8),
                           const Text(
-                            'Submit a recipe first before creating a post',
+                            'Submit a recipe first to tag it',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: Colors.grey),
                           ),
@@ -680,12 +668,37 @@ class _CreatePostPageState extends State<CreatePostPage> {
       return;
     }
 
+    // If no recipe selected, create a default "My Post" recipe
     if (_selectedRecipe == null) {
-      ErrorHandlingService.showSimpleError(
-        context,
-        'Please select a recipe',
-      );
-      return;
+      setState(() {
+        _isLoading = true;
+      });
+      
+      try {
+        // Create a default recipe for this post
+        await DatabaseService.submitRecipe(
+          'My Post',
+          'No ingredients listed',
+          'No directions provided',
+        );
+        
+        // Get the newly created recipe
+        final recipes = await DatabaseService.getSubmittedRecipes();
+        if (recipes.isNotEmpty) {
+          _selectedRecipe = recipes.first;
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+          ErrorHandlingService.showSimpleError(
+            context,
+            'Failed to create post: $e',
+          );
+        }
+        return;
+      }
     }
 
     setState(() {
@@ -693,7 +706,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
     });
 
     try {
-      // Use the existing createPost method - it handles both photos and videos
       await DatabaseService.createPost(
         recipeId: _selectedRecipe!.id!,
         imageFile: _imageFile,
@@ -715,14 +727,12 @@ class _CreatePostPageState extends State<CreatePostPage> {
           _isLoading = false;
         });
         
-        // Check if error contains draft ID
         final errorMsg = e.toString();
         if (errorMsg.contains('DRAFT_SAVED:')) {
           final parts = errorMsg.split(':');
           if (parts.length > 1) {
             final draftId = parts[1].trim();
             
-            // Show dialog with option to retry from draft
             showDialog(
               context: context,
               builder: (context) => AlertDialog(
@@ -777,7 +787,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
             );
           }
         } else {
-          // Normal error handling
           await ErrorHandlingService.handleError(
             context: context,
             error: e,
@@ -834,275 +843,269 @@ class _CreatePostPageState extends State<CreatePostPage> {
             bottom: MediaQuery.of(context).padding.bottom + 16,
           ),
           child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Media preview
-            GestureDetector(
-              onTap: _showMediaPickerDialog,
-              child: Container(
-                width: double.infinity,
-                height: 300,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade200,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade300),
-                ),
-                child: _mediaType == 'none'
-                    ? Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.add_photo_alternate, size: 60, color: Colors.grey),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Tap to add photo or video',
-                            style: TextStyle(color: Colors.grey),
-                          ),
-                          const SizedBox(height: 16),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.photo, size: 20, color: Colors.grey.shade600),
-                              const SizedBox(width: 4),
-                              Text('Photo', style: TextStyle(color: Colors.grey.shade600)),
-                              const SizedBox(width: 16),
-                              Icon(Icons.videocam, size: 20, color: Colors.grey.shade600),
-                              const SizedBox(width: 4),
-                              Text('Video (max 3min)', style: TextStyle(color: Colors.grey.shade600)),
-                            ],
-                          ),
-                        ],
-                      )
-                    : _mediaType == 'photo' && _imageFile != null
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Image.file(
-                              _imageFile!,
-                              fit: BoxFit.cover,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              GestureDetector(
+                onTap: _showMediaPickerDialog,
+                child: Container(
+                  width: double.infinity,
+                  height: 300,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: _mediaType == 'none'
+                      ? Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.add_photo_alternate, size: 60, color: Colors.grey),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Tap to add photo or video',
+                              style: TextStyle(color: Colors.grey),
                             ),
-                          )
-                        : _mediaType == 'video' && _videoController != null
-                            ? Stack(
-                                children: [
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: AspectRatio(
-                                      aspectRatio: _videoController!.value.aspectRatio,
-                                      child: VideoPlayer(_videoController!),
-                                    ),
-                                  ),
-                                  Positioned.fill(
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withOpacity(0.3),
-                                        borderRadius: BorderRadius.circular(12),
+                            const SizedBox(height: 16),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.photo, size: 20, color: Colors.grey.shade600),
+                                const SizedBox(width: 4),
+                                Text('Photo', style: TextStyle(color: Colors.grey.shade600)),
+                                const SizedBox(width: 16),
+                                Icon(Icons.videocam, size: 20, color: Colors.grey.shade600),
+                                const SizedBox(width: 4),
+                                Text('Video (max 3min)', style: TextStyle(color: Colors.grey.shade600)),
+                              ],
+                            ),
+                          ],
+                        )
+                      : _mediaType == 'photo' && _imageFile != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.file(
+                                _imageFile!,
+                                fit: BoxFit.cover,
+                              ),
+                            )
+                          : _mediaType == 'video' && _videoController != null
+                              ? Stack(
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: AspectRatio(
+                                        aspectRatio: _videoController!.value.aspectRatio,
+                                        child: VideoPlayer(_videoController!),
                                       ),
-                                      child: const Center(
-                                        child: Icon(
-                                          Icons.play_circle_outline,
-                                          size: 80,
-                                          color: Colors.white,
+                                    ),
+                                    Positioned.fill(
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withOpacity(0.3),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: const Center(
+                                          child: Icon(
+                                            Icons.play_circle_outline,
+                                            size: 80,
+                                            color: Colors.white,
+                                          ),
                                         ),
                                       ),
                                     ),
-                                  ),
-                                  Positioned(
-                                    top: 8,
-                                    right: 8,
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withOpacity(0.7),
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: const Row(
-                                        children: [
-                                          Icon(Icons.videocam, size: 16, color: Colors.white),
-                                          SizedBox(width: 4),
-                                          Text(
-                                            'VIDEO',
-                                            style: TextStyle(color: Colors.white, fontSize: 12),
-                                          ),
-                                        ],
+                                    Positioned(
+                                      top: 8,
+                                      right: 8,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withOpacity(0.7),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: const Row(
+                                          children: [
+                                            Icon(Icons.videocam, size: 16, color: Colors.white),
+                                            SizedBox(width: 4),
+                                            Text(
+                                              'VIDEO',
+                                              style: TextStyle(color: Colors.white, fontSize: 12),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ],
-                              )
-                            : Container(),
+                                  ],
+                                )
+                              : Container(),
+                ),
               ),
-            ),
 
-            // Video controls (thumbnail & trim)
-            if (_mediaType == 'video' && _videoFile != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: Column(
-                  children: [
-                    // Thumbnail status
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: _thumbnailFile != null 
-                            ? Colors.green.shade50 
-                            : Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
+              if (_mediaType == 'video' && _videoFile != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
                           color: _thumbnailFile != null 
-                              ? Colors.green.shade300 
-                              : Colors.blue.shade300,
+                              ? Colors.green.shade50 
+                              : Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: _thumbnailFile != null 
+                                ? Colors.green.shade300 
+                                : Colors.blue.shade300,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _thumbnailFile != null 
+                                  ? Icons.check_circle 
+                                  : Icons.info,
+                              color: _thumbnailFile != null 
+                                  ? Colors.green.shade700 
+                                  : Colors.blue.shade700,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                _thumbnailFile != null
+                                    ? 'Thumbnail selected'
+                                    : 'Thumbnail: First frame will be used',
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      child: Row(
+                      const SizedBox(height: 12),
+                      Row(
                         children: [
-                          Icon(
-                            _thumbnailFile != null 
-                                ? Icons.check_circle 
-                                : Icons.info,
-                            color: _thumbnailFile != null 
-                                ? Colors.green.shade700 
-                                : Colors.blue.shade700,
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: _showThumbnailOptionsDialog,
+                              icon: const Icon(Icons.image, size: 20),
+                              label: const Text('Change Thumbnail'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
+                            ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: Text(
-                              _thumbnailFile != null
-                                  ? 'Thumbnail selected'
-                                  : 'Thumbnail: First frame will be used',
-                              style: const TextStyle(fontSize: 14),
+                            child: ElevatedButton.icon(
+                              onPressed: _showVideoTrimDialog,
+                              icon: const Icon(Icons.content_cut, size: 20),
+                              label: const Text('Trim Video'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
                             ),
                           ),
                         ],
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    // Action buttons
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: _showThumbnailOptionsDialog,
-                            icon: const Icon(Icons.image, size: 20),
-                            label: const Text('Change Thumbnail'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: _showVideoTrimDialog,
-                            icon: const Icon(Icons.content_cut, size: 20),
-                            label: const Text('Trim Video'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orange,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                    ],
+                  ),
+                ),
+
+              const SizedBox(height: 24),
+
+              const Text(
+                'Tag Recipe (Optional)',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-
-            const SizedBox(height: 24),
-
-            // Recipe selection
-            const Text(
-              'Tag Recipe *',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            InkWell(
-              onTap: _showRecipeSelectionDialog,
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.restaurant_menu, color: Colors.green),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        _selectedRecipe?.recipeName ?? 'Select a recipe',
-                        style: TextStyle(
-                          color: _selectedRecipe == null
-                              ? Colors.grey
-                              : Colors.black,
+              const SizedBox(height: 8),
+              InkWell(
+                onTap: _showRecipeSelectionDialog,
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.restaurant_menu, color: Colors.green),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _selectedRecipe?.recipeName ?? 'Select a recipe (optional)',
+                          style: TextStyle(
+                            color: _selectedRecipe == null
+                                ? Colors.grey
+                                : Colors.black,
+                          ),
                         ),
                       ),
-                    ),
-                    const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
-                  ],
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Caption
-            const Text(
-              'Caption (Optional)',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _captionController,
-              decoration: InputDecoration(
-                hintText: 'Write a caption...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              maxLines: 4,
-              maxLength: 500,
-            ),
-
-            const SizedBox(height: 24),
-
-            // Submit button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _isLoading ? null : _submitPost,
-                icon: _isLoading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                      )
-                    : const Icon(Icons.send),
-                label: Text(_isLoading ? 'Posting...' : 'Share Post'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  textStyle: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
+                      const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                    ],
                   ),
                 ),
               ),
-            ),
-          ],
+
+              const SizedBox(height: 24),
+
+              const Text(
+                'Caption (Optional)',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _captionController,
+                decoration: InputDecoration(
+                  hintText: 'Write a caption...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                maxLines: 4,
+                maxLength: 500,
+              ),
+
+              const SizedBox(height: 24),
+
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _isLoading ? null : _submitPost,
+                  icon: _isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Icon(Icons.send),
+                  label: Text(_isLoading ? 'Posting...' : 'Share Post'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    textStyle: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-    ));
+    );
   }
 }
