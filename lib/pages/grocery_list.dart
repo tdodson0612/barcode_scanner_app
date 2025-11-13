@@ -1,17 +1,21 @@
-// lib/pages/grocery_list_page.dart - FIXED: Better error handling
+// lib/pages/grocery_list_page.dart - ENHANCED: Added quantity field for each item
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/database_service.dart';
 import '../models/grocery_item.dart';
 
 class GroceryListPage extends StatefulWidget {
-  const GroceryListPage({super.key});
+  final String? initialItem;
+  
+  const GroceryListPage({super.key, this.initialItem});
 
   @override
   State<GroceryListPage> createState() => _GroceryListPageState();
 }
 
 class _GroceryListPageState extends State<GroceryListPage> {
-  List<TextEditingController> controllers = [];
+  // Changed to store both item name and quantity
+  List<Map<String, TextEditingController>> itemControllers = [];
   bool isLoading = true;
   bool isSaving = false;
 
@@ -29,6 +33,10 @@ class _GroceryListPageState extends State<GroceryListPage> {
     try {
       DatabaseService.ensureUserAuthenticated();
       await _loadGroceryList();
+      
+      if (widget.initialItem != null && widget.initialItem!.isNotEmpty) {
+        _addScannedItem(widget.initialItem!);
+      }
     } catch (e) {
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/login');
@@ -42,22 +50,89 @@ class _GroceryListPageState extends State<GroceryListPage> {
     }
   }
 
+  void _addScannedItem(String item) {
+    if (mounted) {
+      setState(() {
+        // Remove the last empty controller pair if it exists
+        if (itemControllers.isNotEmpty && 
+            itemControllers.last['name']!.text.isEmpty) {
+          itemControllers.last['name']!.dispose();
+          itemControllers.last['quantity']!.dispose();
+          itemControllers.removeLast();
+        }
+        
+        // Add the scanned item with quantity 1
+        itemControllers.add({
+          'name': TextEditingController(text: item),
+          'quantity': TextEditingController(text: '1'),
+        });
+        
+        // Add new empty controller pair at the end
+        itemControllers.add({
+          'name': TextEditingController(),
+          'quantity': TextEditingController(),
+        });
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Added "$item" to grocery list'),
+          backgroundColor: Colors.green,
+          action: SnackBarAction(
+            label: 'Save',
+            textColor: Colors.white,
+            onPressed: _saveGroceryList,
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _loadGroceryList() async {
     try {
       final List<GroceryItem> groceryItems = await DatabaseService.getGroceryList();
       if (mounted) {
         setState(() {
-          controllers = groceryItems
-              .map((item) => TextEditingController(text: item.item))
-              .toList();
-          if (controllers.isEmpty) controllers.add(TextEditingController());
-          controllers.add(TextEditingController());
+          itemControllers = groceryItems.map((item) {
+            // Parse quantity from item text (format: "quantity x item" or just "item")
+            final parts = item.item.split(' x ');
+            String itemName;
+            String quantity;
+            
+            if (parts.length == 2) {
+              quantity = parts[0];
+              itemName = parts[1];
+            } else {
+              quantity = '';
+              itemName = item.item;
+            }
+            
+            return {
+              'name': TextEditingController(text: itemName),
+              'quantity': TextEditingController(text: quantity),
+            };
+          }).toList();
+          
+          if (itemControllers.isEmpty) {
+            itemControllers.add({
+              'name': TextEditingController(),
+              'quantity': TextEditingController(),
+            });
+          }
+          
+          itemControllers.add({
+            'name': TextEditingController(),
+            'quantity': TextEditingController(),
+          });
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          controllers = [TextEditingController()];
+          itemControllers = [{
+            'name': TextEditingController(),
+            'quantity': TextEditingController(),
+          }];
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -71,23 +146,28 @@ class _GroceryListPageState extends State<GroceryListPage> {
 
   @override
   void dispose() {
-    for (var controller in controllers) {
-      controller.dispose();
+    for (var controllers in itemControllers) {
+      controllers['name']!.dispose();
+      controllers['quantity']!.dispose();
     }
     super.dispose();
   }
 
   void _addNewItem() {
     setState(() {
-      controllers.add(TextEditingController());
+      itemControllers.add({
+        'name': TextEditingController(),
+        'quantity': TextEditingController(),
+      });
     });
   }
 
   void _removeItem(int index) {
-    if (controllers.length > 1) {
+    if (itemControllers.length > 1) {
       setState(() {
-        controllers[index].dispose();
-        controllers.removeAt(index);
+        itemControllers[index]['name']!.dispose();
+        itemControllers[index]['quantity']!.dispose();
+        itemControllers.removeAt(index);
       });
     }
   }
@@ -97,10 +177,21 @@ class _GroceryListPageState extends State<GroceryListPage> {
       isSaving = true;
     });
     try {
-      List<String> items = controllers
-          .map((controller) => controller.text.trim())
-          .where((text) => text.isNotEmpty)
+      List<String> items = itemControllers
+          .where((controllers) => controllers['name']!.text.trim().isNotEmpty)
+          .map((controllers) {
+            final name = controllers['name']!.text.trim();
+            final quantity = controllers['quantity']!.text.trim();
+            
+            // Format: "quantity x item" or just "item" if no quantity
+            if (quantity.isNotEmpty) {
+              return '$quantity x $name';
+            } else {
+              return name;
+            }
+          })
           .toList();
+          
       await DatabaseService.saveGroceryList(items);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -146,10 +237,14 @@ class _GroceryListPageState extends State<GroceryListPage> {
                 await DatabaseService.clearGroceryList();
                 if (mounted) {
                   setState(() {
-                    for (var controller in controllers) {
-                      controller.dispose();
+                    for (var controllers in itemControllers) {
+                      controllers['name']!.dispose();
+                      controllers['quantity']!.dispose();
                     }
-                    controllers = [TextEditingController()];
+                    itemControllers = [{
+                      'name': TextEditingController(),
+                      'quantity': TextEditingController(),
+                    }];
                   });
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -242,12 +337,13 @@ class _GroceryListPageState extends State<GroceryListPage> {
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: ListView.builder(
-                            itemCount: controllers.length,
+                            itemCount: itemControllers.length,
                             itemBuilder: (context, index) {
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 12),
                                 child: Row(
                                   children: [
+                                    // Item number
                                     Container(
                                       width: 35,
                                       height: 35,
@@ -271,9 +367,44 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                       ),
                                     ),
                                     const SizedBox(width: 12),
+                                    
+                                    // Quantity field (small)
+                                    SizedBox(
+                                      width: 60,
+                                      child: TextField(
+                                        controller: itemControllers[index]['quantity'],
+                                        decoration: InputDecoration(
+                                          hintText: 'Qty',
+                                          hintStyle: TextStyle(fontSize: 12),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                            borderSide: BorderSide(color: Colors.grey.shade300),
+                                          ),
+                                          focusedBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                            borderSide: BorderSide(color: Colors.blue, width: 2),
+                                          ),
+                                          contentPadding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 8,
+                                          ),
+                                          filled: true,
+                                          fillColor: Colors.grey.shade50,
+                                        ),
+                                        keyboardType: TextInputType.number,
+                                        inputFormatters: [
+                                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                                        ],
+                                        style: TextStyle(fontSize: 14),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    
+                                    // Item name field (expanded)
                                     Expanded(
                                       child: TextField(
-                                        controller: controllers[index],
+                                        controller: itemControllers[index]['name'],
                                         decoration: InputDecoration(
                                           hintText: 'Enter grocery item...',
                                           border: OutlineInputBorder(
@@ -284,18 +415,23 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                             borderRadius: BorderRadius.circular(8),
                                             borderSide: BorderSide(color: Colors.blue, width: 2),
                                           ),
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                          contentPadding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 8,
+                                          ),
                                           filled: true,
                                           fillColor: Colors.grey.shade50,
                                         ),
                                         onChanged: (text) {
-                                          if (index == controllers.length - 1 && text.isNotEmpty) {
+                                          if (index == itemControllers.length - 1 && text.isNotEmpty) {
                                             _addNewItem();
                                           }
                                         },
                                       ),
                                     ),
-                                    if (controllers.length > 1)
+                                    
+                                    // Remove button
+                                    if (itemControllers.length > 1)
                                       Padding(
                                         padding: const EdgeInsets.only(left: 8),
                                         child: IconButton(

@@ -1146,7 +1146,7 @@ class DatabaseService {
   }
 
   // ==================================================
-  // GROCERY LIST
+  // GROCERY LIST - ENHANCED WITH QUANTITY SUPPORT
   // ==================================================
   
   static Future<List<GroceryItem>> getGroceryList() async {
@@ -1179,7 +1179,7 @@ class DatabaseService {
       if (items.isNotEmpty) {
         final groceryItems = items.asMap().entries.map((entry) => {
               'user_id': currentUserId!,
-              'item': entry.value,
+              'item': entry.value, // Stores "2 x Milk" format or just "Milk"
               'order_index': entry.key,
               'created_at': DateTime.now().toIso8601String(),
             }).toList();
@@ -1204,16 +1204,49 @@ class DatabaseService {
     }
   }
 
-  static Future<void> addToGroceryList(String item) async {
+  // NEW: Parse grocery item with quantity
+  static Map<String, String> parseGroceryItem(String itemText) {
+    // Parse "quantity x item" format
+    final parts = itemText.split(' x ');
+    
+    if (parts.length == 2) {
+      return {
+        'quantity': parts[0].trim(),
+        'name': parts[1].trim(),
+      };
+    } else {
+      return {
+        'quantity': '',
+        'name': itemText.trim(),
+      };
+    }
+  }
+
+  // NEW: Format grocery item with quantity
+  static String formatGroceryItem(String name, String quantity) {
+    if (quantity.isNotEmpty) {
+      return '$quantity x $name';
+    } else {
+      return name;
+    }
+  }
+
+  // ENHANCED: Add to grocery list with optional quantity
+  static Future<void> addToGroceryList(String item, {String? quantity}) async {
     ensureUserAuthenticated();
 
     try {
       final currentItems = await getGroceryList();
       final newOrderIndex = currentItems.length;
+      
+      // Format with quantity if provided
+      final formattedItem = quantity != null && quantity.isNotEmpty 
+          ? '$quantity x $item' 
+          : item;
 
       await _supabase.from('grocery_items').insert({
         'user_id': currentUserId!,
-        'item': item,
+        'item': formattedItem,
         'order_index': newOrderIndex,
         'created_at': DateTime.now().toIso8601String(),
       });
@@ -1248,6 +1281,7 @@ class DatabaseService {
     return false;
   }
 
+  // ENHANCED: Add recipe to shopping list with better quantity handling
   static Future<Map<String, dynamic>> addRecipeToShoppingList(
     String recipeName,
     String ingredients,
@@ -1256,7 +1290,12 @@ class DatabaseService {
 
     try {
       final currentItems = await getGroceryList();
-      final currentItemNames = currentItems.map((item) => item.item).toList();
+      final currentItemNames = currentItems.map((item) {
+        // Parse out quantity to compare just the item names
+        final parsed = parseGroceryItem(item.item);
+        return parsed['name']!.toLowerCase();
+      }).toList();
+      
       final newIngredients = _parseIngredients(ingredients);
       
       final itemsToAdd = <String>[];
@@ -1265,8 +1304,8 @@ class DatabaseService {
       for (final newItem in newIngredients) {
         bool isDuplicate = false;
         
-        for (final existingItem in currentItemNames) {
-          if (_areItemsSimilar(newItem, existingItem)) {
+        for (final existingItemName in currentItemNames) {
+          if (_areItemsSimilar(newItem.toLowerCase(), existingItemName)) {
             isDuplicate = true;
             skippedItems.add(newItem);
             break;
@@ -1276,7 +1315,7 @@ class DatabaseService {
         if (!isDuplicate) {
           bool isDuplicateInNewItems = false;
           for (final addedItem in itemsToAdd) {
-            if (_areItemsSimilar(newItem, addedItem)) {
+            if (_areItemsSimilar(newItem.toLowerCase(), addedItem.toLowerCase())) {
               isDuplicateInNewItems = true;
               break;
             }
@@ -1290,7 +1329,10 @@ class DatabaseService {
         }
       }
 
-      final updatedList = [...currentItemNames, ...itemsToAdd];
+      final updatedList = [
+        ...currentItems.map((item) => item.item),
+        ...itemsToAdd,
+      ];
       await saveGroceryList(updatedList);
 
       return {
