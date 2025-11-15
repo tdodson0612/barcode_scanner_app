@@ -1,6 +1,8 @@
-// lib/pages/chat_page.dart - FIXED: Proper message ordering and timezone display
+// lib/pages/chat_page.dart - WITH LOCAL CACHING
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import '../services/database_service.dart';
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
@@ -28,6 +30,9 @@ class _ChatPageState extends State<ChatPage> {
   bool _isLoading = true;
   bool _isSending = false;
 
+  // Cache key for this conversation
+  String get _cacheKey => 'messages_${AuthService.currentUserId}_${widget.friendId}';
+
   @override
   void initState() {
     super.initState();
@@ -43,44 +48,102 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
+  // Load messages from cache first, then fetch updates from server
   Future<void> _loadMessages() async {
     try {
       setState(() => _isLoading = true);
-      final messages = await DatabaseService.getMessages(widget.friendId);
+      
+      // STEP 1: Load from cache immediately for instant display
+      final cachedMessages = await _loadMessagesFromCache();
+      if (cachedMessages.isNotEmpty && mounted) {
+        setState(() {
+          _messages = cachedMessages;
+          _isLoading = false;
+        });
+        _scrollToBottom();
+      }
+      
+      // STEP 2: Fetch from server to get any new messages
+      final serverMessages = await DatabaseService.getMessages(widget.friendId);
       
       if (mounted) {
         // Sort messages by timestamp in ascending order (oldest to newest)
-        messages.sort((a, b) {
+        serverMessages.sort((a, b) {
           try {
             final timeA = DateTime.parse(a['created_at'] ?? '');
             final timeB = DateTime.parse(b['created_at'] ?? '');
-            return timeA.compareTo(timeB); // Ascending order
+            return timeA.compareTo(timeB);
           } catch (e) {
             return 0;
           }
         });
         
+        // STEP 3: Cache the fresh data
+        await _saveMessagesToCache(serverMessages);
+        
         setState(() {
-          _messages = messages;
+          _messages = serverMessages;
           _isLoading = false;
         });
         
-        // Scroll to bottom after loading messages
         _scrollToBottom();
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
         
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.databaseError,
-          showSnackBar: true,
-          customMessage: 'Unable to load messages',
-          onRetry: _loadMessages,
-        );
+        // If we have cached messages, show them even if server fetch fails
+        if (_messages.isEmpty) {
+          await ErrorHandlingService.handleError(
+            context: context,
+            error: e,
+            category: ErrorHandlingService.databaseError,
+            showSnackBar: true,
+            customMessage: 'Unable to load messages',
+            onRetry: _loadMessages,
+          );
+        } else {
+          // Silent failure - we already have cached data
+          print('Failed to refresh messages from server, using cache: $e');
+        }
       }
+    }
+  }
+
+  // Load messages from local cache
+  Future<List<Map<String, dynamic>>> _loadMessagesFromCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cachedJson = prefs.getString(_cacheKey);
+      
+      if (cachedJson != null) {
+        final List<dynamic> decoded = json.decode(cachedJson);
+        return decoded.map((item) => Map<String, dynamic>.from(item)).toList();
+      }
+    } catch (e) {
+      print('Error loading messages from cache: $e');
+    }
+    return [];
+  }
+
+  // Save messages to local cache
+  Future<void> _saveMessagesToCache(List<Map<String, dynamic>> messages) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonString = json.encode(messages);
+      await prefs.setString(_cacheKey, jsonString);
+    } catch (e) {
+      print('Error saving messages to cache: $e');
+    }
+  }
+
+  // Clear cache for this conversation (useful if needed)
+  Future<void> _clearCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_cacheKey);
+    } catch (e) {
+      print('Error clearing cache: $e');
     }
   }
 
@@ -100,11 +163,14 @@ class _ChatPageState extends State<ChatPage> {
 
     setState(() {
       _isSending = true;
-      _messages.add(tempMessage); // Add to end (bottom)
+      _messages.add(tempMessage);
     });
 
     _messageController.clear();
     _scrollToBottom();
+
+    // Optimistically cache the message
+    await _saveMessagesToCache(_messages);
 
     try {
       await DatabaseService.sendMessage(widget.friendId, content);
@@ -119,6 +185,9 @@ class _ChatPageState extends State<ChatPage> {
         setState(() {
           _messages.removeWhere((msg) => msg['is_temp'] == true);
         });
+        
+        // Update cache to remove failed message
+        await _saveMessagesToCache(_messages);
         
         // Restore the message text to the input field
         _messageController.text = content;
@@ -152,35 +221,26 @@ class _ChatPageState extends State<ChatPage> {
 
   String _formatMessageTime(String timestamp) {
     try {
-      // Parse the UTC timestamp from the database
       final utcDateTime = DateTime.parse(timestamp);
-      
-      // Convert to local timezone
       final localDateTime = utcDateTime.toLocal();
-      
       final now = DateTime.now();
       final difference = now.difference(localDateTime);
 
-      // If message is from today, show time only
       if (difference.inDays == 0 && localDateTime.day == now.day) {
         return DateFormat('h:mm a').format(localDateTime);
       }
-      // If message is from yesterday
       else if (difference.inDays == 1 || 
                (localDateTime.day == now.day - 1 && localDateTime.month == now.month)) {
         return 'Yesterday ${DateFormat('h:mm a').format(localDateTime)}';
       }
-      // If message is from this week (last 7 days)
       else if (difference.inDays < 7) {
-        return DateFormat('EEE h:mm a').format(localDateTime); // "Mon 5:30 PM"
+        return DateFormat('EEE h:mm a').format(localDateTime);
       }
-      // If message is from this year
       else if (localDateTime.year == now.year) {
-        return DateFormat('MMM d, h:mm a').format(localDateTime); // "Jan 15, 5:30 PM"
+        return DateFormat('MMM d, h:mm a').format(localDateTime);
       }
-      // Older messages include year
       else {
-        return DateFormat('MMM d, y').format(localDateTime); // "Jan 15, 2024"
+        return DateFormat('MMM d, y').format(localDateTime);
       }
     } catch (e) {
       print('Error formatting time: $e');
