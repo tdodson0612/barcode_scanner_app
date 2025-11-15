@@ -1,8 +1,17 @@
+// lib/pages/submit_recipe.dart - ENHANCED: Can accept pre-filled ingredients from scanner
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 
 class SubmitRecipePage extends StatefulWidget {
-  const SubmitRecipePage({super.key});
+  // NEW: Optional parameters to pre-fill form from scanner
+  final String? initialIngredients;
+  final String? productName;
+  
+  const SubmitRecipePage({
+    super.key,
+    this.initialIngredients,
+    this.productName,
+  });
 
   @override
   _SubmitRecipePageState createState() => _SubmitRecipePageState();
@@ -14,12 +23,20 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
   final TextEditingController _ingredientsController = TextEditingController();
   final TextEditingController _directionsController = TextEditingController();
   bool isSubmitting = false;
-  bool isLoading = true; // for initial authentication/loading check
+  bool isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _initializeUser(); // ✅ ensure authenticated before loading UI
+    _initializeUser();
+    
+    // NEW: Pre-fill form if data was passed from scanner
+    if (widget.initialIngredients != null) {
+      _ingredientsController.text = widget.initialIngredients!;
+    }
+    if (widget.productName != null) {
+      _nameController.text = '${widget.productName} Recipe';
+    }
   }
 
   @override
@@ -30,30 +47,23 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     super.dispose();
   }
 
-  // ==================================================
-  // USER AUTHENTICATION
-  // ==================================================
   Future<void> _initializeUser() async {
     try {
       DatabaseService.ensureUserAuthenticated();
-      setState(() => isLoading = false); // user is authenticated, allow form
+      setState(() => isLoading = false);
     } catch (e) {
       Navigator.pushReplacementNamed(context, '/login');
     }
   }
 
-  // ==================================================
-  // SUBMIT RECIPE
-  // ==================================================
   Future<void> _submitRecipe() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => isSubmitting = true);
 
     try {
-      // Ensure user is authenticated before submitting
       DatabaseService.ensureUserAuthenticated();
-
+      
       await DatabaseService.submitRecipe(
         _nameController.text.trim(),
         _ingredientsController.text.trim(),
@@ -67,11 +77,9 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
         ),
       );
 
-      // Clear form
       _nameController.clear();
       _ingredientsController.clear();
       _directionsController.clear();
-
       Navigator.pop(context, true);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -82,9 +90,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     }
   }
 
-  // ==================================================
-  // BUILD TEXT FIELD WIDGET
-  // ==================================================
   Widget _buildTextField({
     required TextEditingController controller,
     required String label,
@@ -158,9 +163,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     }
   }
 
-  // ==================================================
-  // BUILD METHOD
-  // ==================================================
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
@@ -196,7 +198,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                       color: Colors.white.withAlpha((0.9 * 255).toInt()),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Column(
+                    child: Column(
                       children: [
                         Icon(Icons.add_circle_outline, size: 48, color: Colors.green),
                         SizedBox(height: 12),
@@ -210,7 +212,9 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                         ),
                         SizedBox(height: 8),
                         Text(
-                          'Fill out the form below to share your favorite recipe with others!',
+                          widget.initialIngredients != null
+                              ? 'Complete your recipe with the scanned ingredient!'
+                              : 'Fill out the form below to share your favorite recipe with others!',
                           style: TextStyle(
                             fontSize: 14,
                             color: Colors.grey,
@@ -221,6 +225,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                     ),
                   ),
                   const SizedBox(height: 20),
+
                   _buildTextField(
                     controller: _nameController,
                     label: 'Recipe Name',
@@ -236,11 +241,11 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                     },
                   ),
                   const SizedBox(height: 20),
+
                   _buildTextField(
                     controller: _ingredientsController,
                     label: 'Ingredients',
-                    hint:
-                        'List all ingredients needed for this recipe\n\nExample:\n• 2 cups flour\n• 1 tsp salt\n• 3 eggs',
+                    hint: 'List all ingredients needed for this recipe\n\nExample:\n• 2 cups flour\n• 1 tsp salt\n• 3 eggs',
                     maxLines: 8,
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
@@ -253,11 +258,11 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                     },
                   ),
                   const SizedBox(height: 20),
+
                   _buildTextField(
                     controller: _directionsController,
                     label: 'Directions',
-                    hint:
-                        'Provide step-by-step instructions\n\nExample:\n1. Preheat oven to 350°F\n2. Mix dry ingredients...\n3. Add wet ingredients...',
+                    hint: 'Provide step-by-step instructions\n\nExample:\n1. Preheat oven to 350°F\n2. Mix dry ingredients...\n3. Add wet ingredients...',
                     maxLines: 10,
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
@@ -270,7 +275,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                     },
                   ),
                   const SizedBox(height: 30),
-                  // Submit & Cancel Buttons
+
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(

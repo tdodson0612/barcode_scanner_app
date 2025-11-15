@@ -1,4 +1,4 @@
-// lib/pages/user_profile_page.dart - FIXED: Enhanced with ErrorHandlingService integration
+// lib/pages/user_profile_page.dart - ENHANCED: Added unfriend functionality
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 import '../services/error_handling_service.dart';
@@ -29,7 +29,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
     try {
       setState(() => isLoading = true);
       
-      // Get user profile and friendship status concurrently
       final results = await Future.wait([
         DatabaseService.getUserProfile(widget.userId),
         DatabaseService.checkFriendshipStatus(widget.userId),
@@ -66,7 +65,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
       
       await DatabaseService.sendFriendRequest(widget.userId);
       
-      // Refresh friendship status
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
       
       if (mounted) {
@@ -100,7 +98,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
       
       await DatabaseService.cancelFriendRequest(widget.userId);
       
-      // Refresh friendship status
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
       
       if (mounted) {
@@ -134,7 +131,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
       
       await DatabaseService.acceptFriendRequest(friendshipStatus!['requestId']);
       
-      // Refresh friendship status
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
       
       if (mounted) {
@@ -163,7 +159,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
   Future<void> _declineFriendRequest() async {
     if (isActionLoading || friendshipStatus?['requestId'] == null) return;
     
-    // Show confirmation dialog
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -190,7 +185,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
       
       await DatabaseService.declineFriendRequest(friendshipStatus!['requestId']);
       
-      // Refresh friendship status
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
       
       if (mounted) {
@@ -211,6 +205,66 @@ class _UserProfilePageState extends State<UserProfilePage> {
           category: ErrorHandlingService.databaseError,
           customMessage: 'Unable to decline friend request',
           onRetry: _declineFriendRequest,
+        );
+      }
+    }
+  }
+
+  // NEW: Unfriend functionality
+  Future<void> _unfriend() async {
+    if (isActionLoading) return;
+    
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove Friend'),
+        content: Text(
+          'Are you sure you want to unfriend ${_getDisplayName()}? You can always send them a friend request again later.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: Text('Unfriend', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    
+    try {
+      setState(() => isActionLoading = true);
+      
+      await DatabaseService.removeFriend(widget.userId);
+      
+      final status = await DatabaseService.checkFriendshipStatus(widget.userId);
+      
+      if (mounted) {
+        setState(() {
+          friendshipStatus = status;
+          isActionLoading = false;
+        });
+        
+        ErrorHandlingService.showSuccess(
+          context,
+          'You are no longer friends with ${_getDisplayName()}',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => isActionLoading = false);
+        
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Unable to remove friend',
+          onRetry: _unfriend,
         );
       }
     }
@@ -283,6 +337,21 @@ class _UserProfilePageState extends State<UserProfilePage> {
               ),
             ),
             SizedBox(height: 8),
+            // NEW: Unfriend button
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _unfriend,
+                icon: const Icon(Icons.person_remove, size: 18),
+                label: const Text('Unfriend'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red,
+                  side: BorderSide(color: Colors.red),
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+            SizedBox(height: 8),
             Container(
               padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
@@ -311,7 +380,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
       case 'pending':
         if (isOutgoing) {
-          // User sent the request
           return Column(
             children: [
               SizedBox(
@@ -337,7 +405,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
             ],
           );
         } else {
-          // User received the request
           return Column(
             children: [
               Row(
@@ -523,7 +590,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
                     padding: const EdgeInsets.all(20),
                     child: Column(
                       children: [
-                        // Profile Header Card
                         Container(
                           width: double.infinity,
                           padding: const EdgeInsets.all(24),
@@ -540,7 +606,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
                           ),
                           child: Column(
                             children: [
-                              // Avatar
                               CircleAvatar(
                                 radius: 50,
                                 backgroundColor: Colors.grey.shade200,
@@ -560,7 +625,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
                               ),
                               const SizedBox(height: 16),
                               
-                              // Display Name
                               Text(
                                 _getDisplayName(),
                                 style: const TextStyle(
@@ -585,7 +649,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
                               
                               const SizedBox(height: 24),
                               
-                              // Action Button
                               _buildActionButton(),
                             ],
                           ),
@@ -593,7 +656,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
                         
                         const SizedBox(height: 24),
                         
-                        // Connection Status Card
                         if (friendshipStatus != null)
                           Container(
                             width: double.infinity,

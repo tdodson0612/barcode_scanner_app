@@ -1,8 +1,12 @@
-// lib/pages/recipe_detail_page.dart - Recipe Details with Comments
+// lib/pages/recipe_detail_page.dart - ENHANCED: Added favorites and grocery list buttons
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import '../services/database_service.dart';
 import '../services/error_handling_service.dart';
+import '../services/auth_service.dart';
 import '../pages/user_profile_page.dart';
+import '../models/favorite_recipe.dart';
 
 class RecipeDetailPage extends StatefulWidget {
   final String recipeName;
@@ -31,12 +35,17 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
   bool _isSubmittingComment = false;
   String? _replyingToCommentId;
   String? _replyingToUsername;
+  
+  // NEW: Favorite status
+  bool _isFavorite = false;
+  bool _isLoadingFavorite = true;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadComments();
+    _checkIfFavorite();
   }
 
   @override
@@ -44,6 +53,160 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
     _tabController.dispose();
     _commentController.dispose();
     super.dispose();
+  }
+
+  // NEW: Check if recipe is favorited
+  Future<void> _checkIfFavorite() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
+      
+      final favorites = favoriteRecipesJson
+          .map((jsonString) {
+            try {
+              return FavoriteRecipe.fromJson(json.decode(jsonString));
+            } catch (e) {
+              return null;
+            }
+          })
+          .where((recipe) => recipe != null)
+          .cast<FavoriteRecipe>()
+          .toList();
+      
+      if (mounted) {
+        setState(() {
+          _isFavorite = favorites.any((fav) => fav.recipeName == widget.recipeName);
+          _isLoadingFavorite = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingFavorite = false;
+        });
+      }
+    }
+  }
+
+  // NEW: Toggle favorite status
+  Future<void> _toggleFavorite() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final currentUserId = AuthService.currentUserId;
+      
+      if (currentUserId == null) {
+        if (mounted) {
+          ErrorHandlingService.showSimpleError(
+            context,
+            'Please log in to save recipes',
+          );
+        }
+        return;
+      }
+
+      final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
+      
+      final favorites = favoriteRecipesJson
+          .map((jsonString) {
+            try {
+              return FavoriteRecipe.fromJson(json.decode(jsonString));
+            } catch (e) {
+              return null;
+            }
+          })
+          .where((recipe) => recipe != null)
+          .cast<FavoriteRecipe>()
+          .toList();
+      
+      final existingIndex = favorites.indexWhere((fav) => fav.recipeName == widget.recipeName);
+      
+      if (existingIndex >= 0) {
+        // Remove from favorites
+        favorites.removeAt(existingIndex);
+        
+        if (mounted) {
+          setState(() {
+            _isFavorite = false;
+          });
+          
+          ErrorHandlingService.showSuccess(
+            context,
+            'Removed "${widget.recipeName}" from favorites',
+          );
+        }
+      } else {
+        // Add to favorites
+        final favoriteRecipe = FavoriteRecipe(
+          userId: currentUserId,
+          recipeName: widget.recipeName,
+          ingredients: widget.ingredients,
+          directions: widget.directions,
+          createdAt: DateTime.now(),
+        );
+        
+        favorites.add(favoriteRecipe);
+        
+        if (mounted) {
+          setState(() {
+            _isFavorite = true;
+          });
+          
+          ErrorHandlingService.showSuccess(
+            context,
+            'Added "${widget.recipeName}" to favorites!',
+          );
+        }
+      }
+      
+      // Save to SharedPreferences
+      final updatedJson = favorites
+          .map((recipe) => json.encode(recipe.toJson()))
+          .toList();
+      await prefs.setStringList('favorite_recipes_detailed', updatedJson);
+      
+    } catch (e) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'Error saving recipe',
+        );
+      }
+    }
+  }
+
+  // NEW: Add recipe to grocery list
+  Future<void> _addToGroceryList() async {
+    try {
+      final result = await DatabaseService.addRecipeToShoppingList(
+        widget.recipeName,
+        widget.ingredients,
+      );
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Added ${result['added']} items to grocery list${result['skipped'] > 0 ? ' (${result['skipped']} duplicates skipped)' : ''}',
+            ),
+            backgroundColor: Colors.green,
+            action: SnackBarAction(
+              label: 'View List',
+              textColor: Colors.white,
+              onPressed: () {
+                Navigator.pushNamed(context, '/grocerylist');
+              },
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'Error adding to grocery list',
+        );
+      }
+    }
   }
 
   Future<void> _loadComments() async {
@@ -122,7 +285,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
 
   Future<void> _toggleLikeComment(String commentId) async {
     try {
-      final isLiked = await DatabaseService.hasUserLikedPost(commentId); // Will need hasUserLikedComment
+      final isLiked = await DatabaseService.hasUserLikedPost(commentId);
       
       if (isLiked) {
         await DatabaseService.unlikeComment(commentId);
@@ -427,6 +590,18 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
         title: Text(widget.recipeName),
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
+        actions: [
+          // NEW: Favorite button in app bar
+          if (!_isLoadingFavorite)
+            IconButton(
+              icon: Icon(
+                _isFavorite ? Icons.favorite : Icons.favorite_border,
+                color: _isFavorite ? Colors.red : Colors.white,
+              ),
+              onPressed: _toggleFavorite,
+              tooltip: _isFavorite ? 'Remove from favorites' : 'Add to favorites',
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -453,6 +628,54 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // NEW: Action buttons section
+                      Container(
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: _toggleFavorite,
+                                    icon: Icon(
+                                      _isFavorite ? Icons.favorite : Icons.favorite_border,
+                                    ),
+                                    label: Text(
+                                      _isFavorite ? 'Favorited' : 'Favorite',
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: _isFavorite ? Colors.red : Colors.grey.shade700,
+                                      foregroundColor: Colors.white,
+                                      padding: EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(width: 12),
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: _addToGroceryList,
+                                    icon: Icon(Icons.add_shopping_cart),
+                                    label: Text('Grocery List'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.green,
+                                      foregroundColor: Colors.white,
+                                      padding: EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                      SizedBox(height: 24),
+                      
                       Text(
                         'Ingredients',
                         style: TextStyle(
