@@ -1,5 +1,6 @@
-// lib/widgets/app_drawer.dart - FIXED: SafeArea to prevent Android nav bar overlap
+// lib/widgets/app_drawer.dart - OPTIMIZED: Reuses cached unread count
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../controllers/premium_gate_controller.dart';
 import '../services/auth_service.dart';
 import '../services/database_service.dart';
@@ -19,6 +20,11 @@ class AppDrawer extends StatefulWidget {
 class _AppDrawerState extends State<AppDrawer> {
   late final PremiumGateController _controller;
   int _unreadCount = 0;
+
+  // Same cache keys as MenuIconWithBadge to share cache
+  static const String _cacheKey = 'cached_unread_count';
+  static const String _cacheTimeKey = 'cached_unread_count_time';
+  static const Duration _cacheDuration = Duration(seconds: 30);
 
   @override
   void initState() {
@@ -42,13 +48,54 @@ class _AppDrawerState extends State<AppDrawer> {
 
   Future<void> _loadUnreadCount() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Try to load from cache first
+      final cachedCount = prefs.getInt(_cacheKey);
+      final cachedTime = prefs.getInt(_cacheTimeKey);
+      
+      if (cachedCount != null && cachedTime != null) {
+        final cacheAge = DateTime.now().millisecondsSinceEpoch - cachedTime;
+        final isCacheValid = cacheAge < _cacheDuration.inMilliseconds;
+        
+        if (isCacheValid) {
+          // Use cached value
+          if (mounted) {
+            setState(() => _unreadCount = cachedCount);
+          }
+          return;
+        }
+      }
+      
+      // Cache is stale or doesn't exist, fetch from database
       final count = await DatabaseService.getUnreadMessageCount();
+      
+      // Save to cache
+      await prefs.setInt(_cacheKey, count);
+      await prefs.setInt(_cacheTimeKey, DateTime.now().millisecondsSinceEpoch);
+      
       if (mounted) {
         setState(() => _unreadCount = count);
       }
     } catch (e) {
       print('Error loading unread count: $e');
+      
+      // On error, try to use cached value even if stale
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final cachedCount = prefs.getInt(_cacheKey);
+        if (cachedCount != null && mounted) {
+          setState(() => _unreadCount = cachedCount);
+        }
+      } catch (_) {}
     }
+  }
+
+  /// Call this when user opens messages to invalidate cache
+  static Future<void> invalidateUnreadCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_cacheKey);
+    await prefs.remove(_cacheTimeKey);
   }
 
   @override
@@ -56,10 +103,8 @@ class _AppDrawerState extends State<AppDrawer> {
     final userEmail = AuthService.currentUser?.email;
 
     return Drawer(
-      // FIXED: Wrap entire drawer in SafeArea to prevent Android nav bar overlap
       child: SafeArea(
-        // Only apply SafeArea to bottom (where nav bar appears)
-        top: false, // Let drawer use full height at top
+        top: false,
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
@@ -75,7 +120,7 @@ class _AppDrawerState extends State<AppDrawer> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Liver Food Scanner', // UPDATED from Group A
+                    'Liver Food Scanner',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 20,
@@ -151,9 +196,6 @@ class _AppDrawerState extends State<AppDrawer> {
               },
             ),
             
-            // ADD THIS TO YOUR AppDrawer widget (lib/widgets/app_drawer.dart)
-            // Add it right after the Home menu item:
-
             ListTile(
               leading: Icon(
                 Icons.explore,
@@ -176,8 +218,6 @@ class _AppDrawerState extends State<AppDrawer> {
               },
             ),
 
-
-
             ListTile(
               leading: Icon(
                 Icons.person,
@@ -199,7 +239,7 @@ class _AppDrawerState extends State<AppDrawer> {
               },
             ),
             
-            // Messages with badge
+            // Messages with badge - using cached count
             ListTile(
               leading: Stack(
                 clipBehavior: Clip.none,
@@ -260,8 +300,10 @@ class _AppDrawerState extends State<AppDrawer> {
                     )
                   : null,
               selected: widget.currentPage == 'messages',
-              onTap: () {
+              onTap: () async {
                 Navigator.pop(context);
+                // Invalidate cache when user opens messages
+                await invalidateUnreadCache();
                 if (widget.currentPage != 'messages') {
                   Navigator.pushNamed(context, '/messages');
                 }
@@ -425,7 +467,7 @@ class _AppDrawerState extends State<AppDrawer> {
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 10,
-                          fontWeight: FontWeight.bold,
+                          fontWeight: bold,
                         ),
                       ),
                     ),
@@ -484,7 +526,6 @@ class _AppDrawerState extends State<AppDrawer> {
             
             Divider(),
             
-            // FIXED: Sign Out button now has proper padding from bottom nav bar
             ListTile(
               leading: Icon(Icons.logout, color: Colors.red),
               title: Text(
@@ -494,7 +535,6 @@ class _AppDrawerState extends State<AppDrawer> {
               onTap: () => _showSignOutDialog(context),
             ),
             
-            // OPTIONAL: Add extra padding at bottom for visual spacing
             SizedBox(height: 8),
           ],
         ),

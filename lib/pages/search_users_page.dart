@@ -1,12 +1,14 @@
-// lib/pages/search_users_page.dart - UPDATED: Enhanced search with debug logging
+// lib/pages/search_users_page.dart - OPTIMIZED: Cache search results and friendship statuses
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import '../services/database_service.dart';
 import 'user_profile_page.dart';
 import '../widgets/app_drawer.dart';
 
 class SearchUsersPage extends StatefulWidget {
-  final String? initialQuery; // optional
+  final String? initialQuery;
 
   const SearchUsersPage({super.key, this.initialQuery});
 
@@ -18,27 +20,108 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
   late TextEditingController _searchController;
   final Logger _logger = Logger();
 
-  @override
-  void initState() {
-    super.initState();
-    _searchController = TextEditingController(text: widget.initialQuery ?? '');
-
-    // automatically run search if initialQuery exists
-    if (widget.initialQuery != null && widget.initialQuery!.isNotEmpty) {
-      _searchUsers();
-    }
-  }
-
   List<Map<String, dynamic>> _searchResults = [];
   Map<String, Map<String, dynamic>> _friendshipStatuses = {};
   bool _isLoading = false;
   bool _hasSearched = false;
   String? _errorMessage;
 
+  // Cache configuration
+  static const Duration _searchCacheDuration = Duration(minutes: 5);
+  static const Duration _friendshipCacheDuration = Duration(seconds: 30);
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController(text: widget.initialQuery ?? '');
+
+    if (widget.initialQuery != null && widget.initialQuery!.isNotEmpty) {
+      _searchUsers();
+    }
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  String _getSearchCacheKey(String query) => 'search_results_${query.toLowerCase().trim()}';
+  String _getFriendshipCacheKey(String userId) => 'friendship_status_$userId';
+
+  Future<List<Map<String, dynamic>>?> _getCachedSearchResults(String query) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(_getSearchCacheKey(query));
+      
+      if (cached == null) return null;
+      
+      final data = json.decode(cached);
+      final timestamp = data['_cached_at'] as int?;
+      
+      if (timestamp == null) return null;
+      
+      final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+      if (age > _searchCacheDuration.inMilliseconds) return null;
+      
+      final results = (data['results'] as List)
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      
+      _logger.d('📦 Using cached search results for "$query" (${results.length} users)');
+      return results;
+    } catch (e) {
+      _logger.e('Error loading cached search: $e');
+      return null;
+    }
+  }
+
+  Future<void> _cacheSearchResults(String query, List<Map<String, dynamic>> results) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cacheData = {
+        'results': results,
+        '_cached_at': DateTime.now().millisecondsSinceEpoch,
+      };
+      await prefs.setString(_getSearchCacheKey(query), json.encode(cacheData));
+      _logger.d('💾 Cached search results for "$query"');
+    } catch (e) {
+      _logger.e('Error caching search results: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>?> _getCachedFriendshipStatus(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(_getFriendshipCacheKey(userId));
+      
+      if (cached == null) return null;
+      
+      final data = json.decode(cached);
+      final timestamp = data['_cached_at'] as int?;
+      
+      if (timestamp == null) return null;
+      
+      final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+      if (age > _friendshipCacheDuration.inMilliseconds) return null;
+      
+      return Map<String, dynamic>.from(data['data']);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<void> _cacheFriendshipStatus(String userId, Map<String, dynamic> status) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cacheData = {
+        'data': status,
+        '_cached_at': DateTime.now().millisecondsSinceEpoch,
+      };
+      await prefs.setString(_getFriendshipCacheKey(userId), json.encode(cacheData));
+    } catch (e) {
+      _logger.e('Error caching friendship status: $e');
+    }
   }
 
   Future<void> _runDebugTest() async {
@@ -88,15 +171,50 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
 
     try {
       _logger.d('🔎 Starting user search from UI...');
-      final results = await DatabaseService.searchUsers(query);
-      _logger.i('📱 UI received ${results.length} results');
       
-      // Get friendship status for each user
-      final statusMap = <String, Map<String, dynamic>>{};
-      for (final user in results) {
-        final status = await DatabaseService.checkFriendshipStatus(user['id']);
-        statusMap[user['id']] = status;
+      // Try to load from cache first
+      final cachedResults = await _getCachedSearchResults(query);
+      
+      List<Map<String, dynamic>> results;
+      
+      if (cachedResults != null) {
+        results = cachedResults;
+        _logger.i('📱 UI using cached results: ${results.length} users');
+      } else {
+        // Cache miss, fetch from database
+        results = await DatabaseService.searchUsers(query);
+        _logger.i('📱 UI fetched fresh results: ${results.length} users');
+        
+        // Cache the search results
+        await _cacheSearchResults(query, results);
       }
+      
+      // Get friendship status for each user (with caching)
+      final statusMap = <String, Map<String, dynamic>>{};
+      int cachedStatuses = 0;
+      int freshStatuses = 0;
+      
+      for (final user in results) {
+        final userId = user['id'];
+        
+        // Try cache first
+        var status = await _getCachedFriendshipStatus(userId);
+        
+        if (status != null) {
+          cachedStatuses++;
+        } else {
+          // Cache miss, fetch fresh
+          status = await DatabaseService.checkFriendshipStatus(userId);
+          freshStatuses++;
+          
+          // Cache it
+          await _cacheFriendshipStatus(userId, status);
+        }
+        
+        statusMap[userId] = status;
+      }
+      
+      _logger.i('👥 Friendship statuses: $cachedStatuses cached, $freshStatuses fresh');
 
       setState(() {
         _searchResults = results;
@@ -128,13 +246,17 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
     try {
       await DatabaseService.sendFriendRequest(userId);
       
-      // Update the local status
+      // Update cache immediately
+      final newStatus = {
+        'status': 'pending',
+        'isOutgoing': true,
+        'canSendRequest': false,
+      };
+      
+      await _cacheFriendshipStatus(userId, newStatus);
+      
       setState(() {
-        _friendshipStatuses[userId] = {
-          'status': 'pending',
-          'isOutgoing': true,
-          'canSendRequest': false,
-        };
+        _friendshipStatuses[userId] = newStatus;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -154,12 +276,16 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
     try {
       await DatabaseService.cancelFriendRequest(userId);
       
-      // Update the local status
+      // Update cache immediately
+      final newStatus = {
+        'status': 'none',
+        'canSendRequest': true,
+      };
+      
+      await _cacheFriendshipStatus(userId, newStatus);
+      
       setState(() {
-        _friendshipStatuses[userId] = {
-          'status': 'none',
-          'canSendRequest': true,
-        };
+        _friendshipStatuses[userId] = newStatus;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -261,7 +387,6 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
     final lastName = user['last_name'];
     final username = user['username'];
     
-    // Build full name if available
     if (firstName != null && lastName != null) {
       return '$firstName $lastName';
     } else if (firstName != null) {
@@ -281,7 +406,6 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
     final firstName = user['first_name'];
     final lastName = user['last_name'];
     
-    // Show username if name is being used as title
     if ((firstName != null || lastName != null) && username != null) {
       return '@$username';
     } else if (email != null) {
@@ -315,13 +439,27 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
           style: TextStyle(color: Colors.grey.shade600),
         ),
         trailing: _buildFriendshipButton(user),
-        onTap: () {
-          Navigator.push(
+        onTap: () async {
+          // Navigate to profile
+          await Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) => UserProfilePage(userId: user['id']),
             ),
           );
+          
+          // Refresh friendship status when returning (user might have changed it)
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove(_getFriendshipCacheKey(user['id']));
+          
+          final freshStatus = await DatabaseService.checkFriendshipStatus(user['id']);
+          await _cacheFriendshipStatus(user['id'], freshStatus);
+          
+          if (mounted) {
+            setState(() {
+              _friendshipStatuses[user['id']] = freshStatus;
+            });
+          }
         },
       ),
     );
@@ -342,7 +480,6 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
           ),
         ),
         actions: [
-          // Debug button
           IconButton(
             icon: Icon(Icons.bug_report),
             tooltip: 'Run Debug Test',
@@ -406,7 +543,7 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
             ),
           ),
 
-          // Error message banner (if exists)
+          // Error message banner
           if (_errorMessage != null)
             Container(
               width: double.infinity,
@@ -488,7 +625,6 @@ class _SearchUsersPageState extends State<SearchUsersPage> {
                               ),
                             ),
                             SizedBox(height: 24),
-                            // Debug hint
                             ElevatedButton.icon(
                               onPressed: _runDebugTest,
                               icon: Icon(Icons.bug_report),

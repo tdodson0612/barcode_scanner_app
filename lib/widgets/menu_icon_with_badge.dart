@@ -1,5 +1,6 @@
-// lib/widgets/menu_icon_with_badge.dart - Reusable hamburger menu icon with notification badge
+// lib/widgets/menu_icon_with_badge.dart - OPTIMIZED: Local caching to reduce database egress
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/database_service.dart';
 
 class MenuIconWithBadge extends StatefulWidget {
@@ -11,6 +12,9 @@ class MenuIconWithBadge extends StatefulWidget {
 
 class _MenuIconWithBadgeState extends State<MenuIconWithBadge> {
   int _unreadCount = 0;
+  static const String _cacheKey = 'cached_unread_count';
+  static const String _cacheTimeKey = 'cached_unread_count_time';
+  static const Duration _cacheDuration = Duration(seconds: 30);
 
   @override
   void initState() {
@@ -20,13 +24,58 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> {
 
   Future<void> _loadUnreadCount() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Try to load from cache first
+      final cachedCount = prefs.getInt(_cacheKey);
+      final cachedTime = prefs.getInt(_cacheTimeKey);
+      
+      if (cachedCount != null && cachedTime != null) {
+        final cacheAge = DateTime.now().millisecondsSinceEpoch - cachedTime;
+        final isCacheValid = cacheAge < _cacheDuration.inMilliseconds;
+        
+        if (isCacheValid) {
+          // Use cached value
+          if (mounted) {
+            setState(() => _unreadCount = cachedCount);
+          }
+          return;
+        }
+      }
+      
+      // Cache is stale or doesn't exist, fetch from database
       final count = await DatabaseService.getUnreadMessageCount();
+      
+      // Save to cache
+      await prefs.setInt(_cacheKey, count);
+      await prefs.setInt(_cacheTimeKey, DateTime.now().millisecondsSinceEpoch);
+      
       if (mounted) {
         setState(() => _unreadCount = count);
       }
     } catch (e) {
       print('Error loading unread count: $e');
+      
+      // On error, try to use cached value even if stale
+      final prefs = await SharedPreferences.getInstance();
+      final cachedCount = prefs.getInt(_cacheKey);
+      if (cachedCount != null && mounted) {
+        setState(() => _unreadCount = cachedCount);
+      }
     }
+  }
+
+  /// Call this method when user opens messages or when you know count has changed
+  static Future<void> invalidateCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_cacheKey);
+    await prefs.remove(_cacheTimeKey);
+  }
+
+  /// Manual refresh method - can be called from parent widgets
+  Future<void> refresh() async {
+    await invalidateCache();
+    await _loadUnreadCount();
   }
 
   @override

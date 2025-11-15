@@ -1,7 +1,9 @@
-// lib/pages/messages_page.dart - FIXED: Proper timezone handling
+// lib/pages/messages_page.dart - OPTIMIZED: Aggressive caching for chats and friend requests
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import '../services/database_service.dart';
 import '../widgets/app_drawer.dart';
 import 'chat_page.dart';
@@ -22,6 +24,10 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
   bool _isLoadingChats = true;
   bool _isLoadingRequests = true;
 
+  // Cache configuration
+  static const Duration _chatsCacheDuration = Duration(minutes: 1); // Chats change frequently
+  static const Duration _requestsCacheDuration = Duration(minutes: 2); // Requests change less often
+
   @override
   void initState() {
     super.initState();
@@ -35,17 +41,141 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     super.dispose();
   }
 
-  Future<void> _loadData() async {
+  // ========== CACHING HELPERS ==========
+
+  Future<List<Map<String, dynamic>>?> _getCachedChats() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString('user_chats');
+      
+      if (cached == null) return null;
+      
+      final data = json.decode(cached);
+      final timestamp = data['_cached_at'] as int?;
+      
+      if (timestamp == null) return null;
+      
+      final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+      if (age > _chatsCacheDuration.inMilliseconds) return null;
+      
+      final chats = (data['chats'] as List)
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      
+      _logger.d('📦 Using cached chats (${chats.length} found)');
+      return chats;
+    } catch (e) {
+      _logger.e('Error loading cached chats: $e');
+      return null;
+    }
+  }
+
+  Future<void> _cacheChats(List<Map<String, dynamic>> chats) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cacheData = {
+        'chats': chats,
+        '_cached_at': DateTime.now().millisecondsSinceEpoch,
+      };
+      await prefs.setString('user_chats', json.encode(cacheData));
+      _logger.d('💾 Cached ${chats.length} chats');
+    } catch (e) {
+      _logger.e('Error caching chats: $e');
+    }
+  }
+
+  Future<void> _invalidateChatsCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('user_chats');
+      _logger.d('🗑️ Invalidated chats cache');
+    } catch (e) {
+      _logger.e('Error invalidating chats cache: $e');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>?> _getCachedFriendRequests() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString('friend_requests');
+      
+      if (cached == null) return null;
+      
+      final data = json.decode(cached);
+      final timestamp = data['_cached_at'] as int?;
+      
+      if (timestamp == null) return null;
+      
+      final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+      if (age > _requestsCacheDuration.inMilliseconds) return null;
+      
+      final requests = (data['requests'] as List)
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      
+      _logger.d('📦 Using cached friend requests (${requests.length} found)');
+      return requests;
+    } catch (e) {
+      _logger.e('Error loading cached requests: $e');
+      return null;
+    }
+  }
+
+  Future<void> _cacheFriendRequests(List<Map<String, dynamic>> requests) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cacheData = {
+        'requests': requests,
+        '_cached_at': DateTime.now().millisecondsSinceEpoch,
+      };
+      await prefs.setString('friend_requests', json.encode(cacheData));
+      _logger.d('💾 Cached ${requests.length} friend requests');
+    } catch (e) {
+      _logger.e('Error caching friend requests: $e');
+    }
+  }
+
+  Future<void> _invalidateRequestsCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('friend_requests');
+      _logger.d('🗑️ Invalidated friend requests cache');
+    } catch (e) {
+      _logger.e('Error invalidating requests cache: $e');
+    }
+  }
+
+  // ========== LOAD FUNCTIONS WITH CACHING ==========
+
+  Future<void> _loadData({bool forceRefresh = false}) async {
     await Future.wait([
-      _loadChats(),
-      _loadFriendRequests(),
+      _loadChats(forceRefresh: forceRefresh),
+      _loadFriendRequests(forceRefresh: forceRefresh),
     ]);
   }
 
-  Future<void> _loadChats() async {
+  Future<void> _loadChats({bool forceRefresh = false}) async {
     setState(() => _isLoadingChats = true);
+    
     try {
       _logger.d('📨 Loading chat list...');
+      
+      // Try cache first unless force refresh
+      if (!forceRefresh) {
+        final cachedChats = await _getCachedChats();
+        
+        if (cachedChats != null) {
+          if (mounted) {
+            setState(() {
+              _chats = cachedChats;
+              _isLoadingChats = false;
+            });
+          }
+          return;
+        }
+      }
+
+      // Cache miss or force refresh, fetch from database
       final chats = await DatabaseService.getChatList();
       
       // Sort chats by last message timestamp (newest first)
@@ -55,16 +185,19 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
           final timeB = b['lastMessage']?['created_at'];
           
           if (timeA == null && timeB == null) return 0;
-          if (timeA == null) return 1; // No message goes to bottom
+          if (timeA == null) return 1;
           if (timeB == null) return -1;
           
           final dateA = DateTime.parse(timeA);
           final dateB = DateTime.parse(timeB);
-          return dateB.compareTo(dateA); // Descending order (newest first)
+          return dateB.compareTo(dateA);
         } catch (e) {
           return 0;
         }
       });
+      
+      // Cache the results
+      await _cacheChats(chats);
       
       _logger.i('✅ Loaded ${chats.length} chats');
       
@@ -74,6 +207,19 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
       });
     } catch (e) {
       _logger.e('❌ Error loading chats: $e');
+      
+      // Try to use stale cache on error
+      if (!forceRefresh) {
+        final staleChats = await _getCachedChats();
+        if (staleChats != null && mounted) {
+          setState(() {
+            _chats = staleChats;
+            _isLoadingChats = false;
+          });
+          return;
+        }
+      }
+      
       setState(() => _isLoadingChats = false);
       
       if (mounted) {
@@ -84,7 +230,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
             action: SnackBarAction(
               label: 'Retry',
               textColor: Colors.white,
-              onPressed: _loadChats,
+              onPressed: () => _loadChats(forceRefresh: true),
             ),
           ),
         );
@@ -92,11 +238,33 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     }
   }
 
-  Future<void> _loadFriendRequests() async {
+  Future<void> _loadFriendRequests({bool forceRefresh = false}) async {
     setState(() => _isLoadingRequests = true);
+    
     try {
       _logger.d('👥 Loading friend requests...');
+      
+      // Try cache first unless force refresh
+      if (!forceRefresh) {
+        final cachedRequests = await _getCachedFriendRequests();
+        
+        if (cachedRequests != null) {
+          if (mounted) {
+            setState(() {
+              _friendRequests = cachedRequests;
+              _isLoadingRequests = false;
+            });
+          }
+          return;
+        }
+      }
+
+      // Cache miss or force refresh, fetch from database
       final requests = await DatabaseService.getFriendRequests();
+      
+      // Cache the results
+      await _cacheFriendRequests(requests);
+      
       _logger.i('✅ Loaded ${requests.length} friend requests');
       
       setState(() {
@@ -105,6 +273,19 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
       });
     } catch (e) {
       _logger.e('❌ Error loading friend requests: $e');
+      
+      // Try to use stale cache on error
+      if (!forceRefresh) {
+        final staleRequests = await _getCachedFriendRequests();
+        if (staleRequests != null && mounted) {
+          setState(() {
+            _friendRequests = staleRequests;
+            _isLoadingRequests = false;
+          });
+          return;
+        }
+      }
+      
       setState(() => _isLoadingRequests = false);
       
       if (mounted) {
@@ -115,7 +296,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
             action: SnackBarAction(
               label: 'Retry',
               textColor: Colors.white,
-              onPressed: _loadFriendRequests,
+              onPressed: () => _loadFriendRequests(forceRefresh: true),
             ),
           ),
         );
@@ -128,13 +309,19 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
       _logger.d('✅ Accepting friend request: $requestId');
       await DatabaseService.acceptFriendRequest(requestId);
       
+      // Invalidate both caches (new friend = new chat possibility)
+      await _invalidateRequestsCache();
+      await _invalidateChatsCache();
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Friend request accepted!'),
           backgroundColor: Colors.green,
         ),
       );
-      _loadData(); // Refresh both tabs
+      
+      // Refresh both tabs with force refresh
+      _loadData(forceRefresh: true);
     } catch (e) {
       _logger.e('❌ Error accepting request: $e');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -151,13 +338,18 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
       _logger.d('❌ Declining friend request: $requestId');
       await DatabaseService.declineFriendRequest(requestId);
       
+      // Invalidate requests cache
+      await _invalidateRequestsCache();
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Friend request declined'),
           backgroundColor: Colors.orange,
         ),
       );
-      _loadFriendRequests(); // Refresh requests tab
+      
+      // Refresh requests tab with force refresh
+      _loadFriendRequests(forceRefresh: true);
     } catch (e) {
       _logger.e('❌ Error declining request: $e');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -166,6 +358,16 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
           backgroundColor: Colors.red,
         ),
       );
+    }
+  }
+
+  /// Invalidate chats cache when returning from chat (new message sent)
+  static Future<void> invalidateChatsCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('user_chats');
+    } catch (e) {
+      print('Error invalidating chats cache: $e');
     }
   }
 
@@ -230,14 +432,16 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                 MaterialPageRoute(builder: (_) => SearchUsersPage()),
               );
               if (result == true) {
-                _loadFriendRequests(); // Refresh if friend request was sent
+                // Friend request sent, invalidate requests cache
+                await _invalidateRequestsCache();
+                _loadFriendRequests(forceRefresh: true);
               }
             },
             tooltip: 'Find Friends',
           ),
           IconButton(
             icon: Icon(Icons.refresh),
-            onPressed: _loadData,
+            onPressed: () => _loadData(forceRefresh: true),
             tooltip: 'Refresh',
           ),
         ],
@@ -263,7 +467,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     }
 
     return RefreshIndicator(
-      onRefresh: _loadChats,
+      onRefresh: () => _loadChats(forceRefresh: true),
       child: ListView.builder(
         itemCount: _chats.length,
         itemBuilder: (context, index) {
@@ -324,7 +528,9 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                   ),
                 );
                 if (result == true) {
-                  _loadChats(); // Refresh chats if message was sent
+                  // Message sent, invalidate cache and reload
+                  await _invalidateChatsCache();
+                  _loadChats(forceRefresh: true);
                 }
               },
             ),
@@ -344,7 +550,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     }
 
     return RefreshIndicator(
-      onRefresh: _loadFriendRequests,
+      onRefresh: () => _loadFriendRequests(forceRefresh: true),
       child: ListView.builder(
         itemCount: _friendRequests.length,
         itemBuilder: (context, index) {
@@ -434,7 +640,8 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                       MaterialPageRoute(builder: (_) => SearchUsersPage()),
                     );
                     if (result == true) {
-                      _loadData();
+                      await _invalidateRequestsCache();
+                      _loadData(forceRefresh: true);
                     }
                   },
                   icon: Icon(Icons.person_search),
@@ -508,7 +715,8 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                   MaterialPageRoute(builder: (_) => SearchUsersPage()),
                 );
                 if (result == true) {
-                  _loadFriendRequests();
+                  await _invalidateRequestsCache();
+                  _loadFriendRequests(forceRefresh: true);
                 }
               },
               icon: Icon(Icons.person_search),
@@ -529,33 +737,27 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     if (timestamp == null) return '';
     
     try {
-      // Parse UTC timestamp and convert to local time
       final utcDateTime = DateTime.parse(timestamp);
       final localDateTime = utcDateTime.toLocal();
       
       final now = DateTime.now();
       final difference = now.difference(localDateTime);
       
-      // If today, show time
       if (difference.inDays == 0 && localDateTime.day == now.day) {
         return DateFormat('h:mm a').format(localDateTime);
       }
-      // If yesterday
       else if (difference.inDays == 1 || 
                (localDateTime.day == now.day - 1 && localDateTime.month == now.month)) {
         return 'Yesterday';
       }
-      // If this week
       else if (difference.inDays < 7) {
-        return DateFormat('EEE').format(localDateTime); // "Mon", "Tue", etc.
+        return DateFormat('EEE').format(localDateTime);
       }
-      // If this year
       else if (localDateTime.year == now.year) {
-        return DateFormat('MMM d').format(localDateTime); // "Jan 15"
+        return DateFormat('MMM d').format(localDateTime);
       }
-      // Older
       else {
-        return DateFormat('MMM d, y').format(localDateTime); // "Jan 15, 2024"
+        return DateFormat('MMM d, y').format(localDateTime);
       }
     } catch (e) {
       return '';

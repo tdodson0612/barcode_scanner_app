@@ -1,4 +1,4 @@
-// lib/pages/recipe_detail_page.dart - ENHANCED: Added favorites and grocery list buttons
+// lib/pages/recipe_detail_page.dart - OPTIMIZED: Cache comments, likes, and favorite status
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -36,9 +36,12 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
   String? _replyingToCommentId;
   String? _replyingToUsername;
   
-  // NEW: Favorite status
   bool _isFavorite = false;
   bool _isLoadingFavorite = true;
+
+  // Cache configuration
+  static const Duration _commentsCacheDuration = Duration(minutes: 2);
+  static const Duration _favoriteCacheDuration = Duration(minutes: 5);
 
   @override
   void initState() {
@@ -55,9 +58,110 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
     super.dispose();
   }
 
-  // NEW: Check if recipe is favorited
+  String _getCommentsCacheKey() => 'recipe_comments_${widget.recipeId}';
+  String _getFavoriteCacheKey() => 'recipe_favorite_${widget.recipeName}';
+
+  Future<List<Map<String, dynamic>>?> _getCachedComments() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(_getCommentsCacheKey());
+      
+      if (cached == null) return null;
+      
+      final data = json.decode(cached);
+      final timestamp = data['_cached_at'] as int?;
+      
+      if (timestamp == null) return null;
+      
+      final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+      if (age > _commentsCacheDuration.inMilliseconds) return null;
+      
+      final comments = (data['comments'] as List)
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      
+      print('📦 Using cached comments (${comments.length} found)');
+      return comments;
+    } catch (e) {
+      print('Error loading cached comments: $e');
+      return null;
+    }
+  }
+
+  Future<void> _cacheComments(List<Map<String, dynamic>> comments) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cacheData = {
+        'comments': comments,
+        '_cached_at': DateTime.now().millisecondsSinceEpoch,
+      };
+      await prefs.setString(_getCommentsCacheKey(), json.encode(cacheData));
+      print('💾 Cached ${comments.length} comments');
+    } catch (e) {
+      print('Error caching comments: $e');
+    }
+  }
+
+  Future<void> _invalidateCommentsCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_getCommentsCacheKey());
+    } catch (e) {
+      print('Error invalidating comments cache: $e');
+    }
+  }
+
+  Future<bool?> _getCachedFavoriteStatus() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(_getFavoriteCacheKey());
+      
+      if (cached == null) return null;
+      
+      final data = json.decode(cached);
+      final timestamp = data['_cached_at'] as int?;
+      final isFavorite = data['is_favorite'] as bool?;
+      
+      if (timestamp == null || isFavorite == null) return null;
+      
+      final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+      if (age > _favoriteCacheDuration.inMilliseconds) return null;
+      
+      return isFavorite;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<void> _cacheFavoriteStatus(bool isFavorite) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cacheData = {
+        'is_favorite': isFavorite,
+        '_cached_at': DateTime.now().millisecondsSinceEpoch,
+      };
+      await prefs.setString(_getFavoriteCacheKey(), json.encode(cacheData));
+    } catch (e) {
+      print('Error caching favorite status: $e');
+    }
+  }
+
   Future<void> _checkIfFavorite() async {
     try {
+      // Try cache first
+      final cached = await _getCachedFavoriteStatus();
+      
+      if (cached != null) {
+        if (mounted) {
+          setState(() {
+            _isFavorite = cached;
+            _isLoadingFavorite = false;
+          });
+        }
+        return;
+      }
+
+      // Cache miss, check SharedPreferences (legacy storage)
       final prefs = await SharedPreferences.getInstance();
       final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
       
@@ -73,9 +177,14 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
           .cast<FavoriteRecipe>()
           .toList();
       
+      final isFavorite = favorites.any((fav) => fav.recipeName == widget.recipeName);
+      
+      // Cache the result
+      await _cacheFavoriteStatus(isFavorite);
+      
       if (mounted) {
         setState(() {
-          _isFavorite = favorites.any((fav) => fav.recipeName == widget.recipeName);
+          _isFavorite = isFavorite;
           _isLoadingFavorite = false;
         });
       }
@@ -88,7 +197,6 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
     }
   }
 
-  // NEW: Toggle favorite status
   Future<void> _toggleFavorite() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -124,6 +232,9 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
         // Remove from favorites
         favorites.removeAt(existingIndex);
         
+        // Update cache
+        await _cacheFavoriteStatus(false);
+        
         if (mounted) {
           setState(() {
             _isFavorite = false;
@@ -145,6 +256,9 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
         );
         
         favorites.add(favoriteRecipe);
+        
+        // Update cache
+        await _cacheFavoriteStatus(true);
         
         if (mounted) {
           setState(() {
@@ -174,7 +288,6 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
     }
   }
 
-  // NEW: Add recipe to grocery list
   Future<void> _addToGroceryList() async {
     try {
       final result = await DatabaseService.addRecipeToShoppingList(
@@ -193,7 +306,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
               label: 'View List',
               textColor: Colors.white,
               onPressed: () {
-                Navigator.pushNamed(context, '/grocerylist');
+                Navigator.pushNamed(context, '/grocery-list');
               },
             ),
           ),
@@ -209,13 +322,32 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
     }
   }
 
-  Future<void> _loadComments() async {
+  Future<void> _loadComments({bool forceRefresh = false}) async {
     setState(() {
       _isLoadingComments = true;
     });
 
     try {
+      // Try cache first unless force refresh
+      if (!forceRefresh) {
+        final cachedComments = await _getCachedComments();
+        
+        if (cachedComments != null) {
+          if (mounted) {
+            setState(() {
+              _comments = cachedComments;
+              _isLoadingComments = false;
+            });
+          }
+          return;
+        }
+      }
+
+      // Cache miss or force refresh, fetch from database
       final comments = await DatabaseService.getRecipeComments(widget.recipeId);
+      
+      // Cache the results
+      await _cacheComments(comments);
       
       if (mounted) {
         setState(() {
@@ -228,6 +360,14 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
         setState(() {
           _isLoadingComments = false;
         });
+        
+        // Try to use cached data even if stale
+        final staleComments = await _getCachedComments();
+        if (staleComments != null && mounted) {
+          setState(() {
+            _comments = staleComments;
+          });
+        }
         
         ErrorHandlingService.showSimpleError(
           context,
@@ -259,7 +399,9 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
         _replyingToUsername = null;
       });
 
-      await _loadComments();
+      // Invalidate cache and reload
+      await _invalidateCommentsCache();
+      await _loadComments(forceRefresh: true);
 
       if (mounted) {
         ErrorHandlingService.showSuccess(context, 'Comment posted!');
@@ -293,7 +435,9 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
         await DatabaseService.likeComment(commentId);
       }
 
-      await _loadComments();
+      // Invalidate cache and reload
+      await _invalidateCommentsCache();
+      await _loadComments(forceRefresh: true);
     } catch (e) {
       if (mounted) {
         ErrorHandlingService.showSimpleError(
@@ -342,7 +486,10 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
     if (confirm == true) {
       try {
         await DatabaseService.deleteComment(commentId);
-        await _loadComments();
+        
+        // Invalidate cache and reload
+        await _invalidateCommentsCache();
+        await _loadComments(forceRefresh: true);
         
         if (mounted) {
           ErrorHandlingService.showSuccess(context, 'Comment deleted');
@@ -591,7 +738,6 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
         actions: [
-          // NEW: Favorite button in app bar
           if (!_isLoadingFavorite)
             IconButton(
               icon: Icon(
@@ -605,7 +751,6 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
       ),
       body: Column(
         children: [
-          // Tab bar
           TabBar(
             controller: _tabController,
             labelColor: Colors.green,
@@ -617,7 +762,6 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
             ],
           ),
 
-          // Tab views
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -628,7 +772,6 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // NEW: Action buttons section
                       Container(
                         padding: EdgeInsets.all(16),
                         decoration: BoxDecoration(
@@ -730,15 +873,17 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
                                     ],
                                   ),
                                 )
-                              : ListView.builder(
-                                  itemCount: _comments.length,
-                                  itemBuilder: (context, index) {
-                                    return _buildCommentItem(_comments[index]);
-                                  },
+                              : RefreshIndicator(
+                                  onRefresh: () => _loadComments(forceRefresh: true),
+                                  child: ListView.builder(
+                                    itemCount: _comments.length,
+                                    itemBuilder: (context, index) {
+                                      return _buildCommentItem(_comments[index]);
+                                    },
+                                  ),
                                 ),
                     ),
 
-                    // Comment input
                     Container(
                       decoration: BoxDecoration(
                         color: Colors.white,

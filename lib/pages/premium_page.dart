@@ -1,9 +1,10 @@
-// lib/pages/premium_page.dart - FIXED: Complete file with close button and better error handling
+// lib/pages/premium_page.dart - OPTIMIZED: Local caching to reduce Supabase egress
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'dart:async';
 import 'dart:io';
+import 'dart:convert';
 import '../services/database_service.dart';
 import '../services/error_handling_service.dart';
 import '../controllers/premium_gate_controller.dart';
@@ -31,6 +32,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   String? _selectedPlan;
   List<ProductDetails> _products = <ProductDetails>[];
   bool _hasLoadError = false;
+  bool _isRefreshing = false;
   
   // Tester key functionality
   final TextEditingController _testerKeyController = TextEditingController();
@@ -42,6 +44,15 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   static const String premiumProductId = 'premium_upgrade';
   static const String testerProductId = 'tester_upgrade';
   static const Set<String> _productIds = {premiumProductId, testerProductId};
+
+  // Cache keys and expiration times
+  static const String _premiumStatusCacheKey = 'cached_premium_status';
+  static const String _premiumStatusTimestampKey = 'cached_premium_timestamp';
+  static const String _scanCountCacheKey = 'cached_scan_count';
+  static const String _scanCountTimestampKey = 'cached_scan_timestamp';
+  static const String _scanCountDateKey = 'cached_scan_date';
+  static const Duration _premiumStatusCacheExpiry = Duration(hours: 1);
+  static const Duration _scanCountCacheExpiry = Duration(minutes: 5);
 
   @override
   void initState() {
@@ -67,7 +78,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   Future<void> _initializePremiumPage() async {
     try {
       DatabaseService.ensureUserAuthenticated();
-      await _checkPremiumStatus();
+      await _checkPremiumStatus(forceRefresh: false);
       await _initializeInAppPurchase();
       _animationController.forward();
     } catch (e) {
@@ -77,7 +88,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
           _hasLoadError = true;
         });
         
-        // Show error but allow user to continue browsing features
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Unable to load premium details. You can still browse features.'),
@@ -100,7 +110,36 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
     }
   }
 
-  Future<void> _checkPremiumStatus() async {
+  /// Check if cached data is still valid
+  bool _isCacheValid(String timestampKey, Duration expiry) {
+    try {
+      final prefs = SharedPreferences.getInstance();
+      return prefs.then((p) {
+        final timestampStr = p.getString(timestampKey);
+        if (timestampStr == null) return false;
+        
+        final timestamp = DateTime.parse(timestampStr);
+        final age = DateTime.now().difference(timestamp);
+        return age < expiry;
+      });
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Check if it's a new day (for daily scan count reset)
+  Future<bool> _isNewDay() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cachedDate = prefs.getString(_scanCountDateKey);
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      return cachedDate != today;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  Future<void> _checkPremiumStatus({bool forceRefresh = false}) async {
     try {
       setState(() => _isLoading = true);
       
@@ -109,23 +148,91 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
         throw Exception('User not authenticated');
       }
 
-      // Check local cache first for quick UI update
       final prefs = await SharedPreferences.getInstance();
-      final localPremium = prefs.getBool('isPremiumUser') ?? false;
-      final localTester = prefs.getBool('isTesterUser') ?? false;
+      
+      // Try to load from cache first
+      bool useCache = !forceRefresh;
+      bool premiumFromCache = false;
+      bool testerFromCache = false;
+      int scansFromCache = 0;
+      
+      if (useCache) {
+        // Check premium status cache
+        final premiumTimestampStr = prefs.getString(_premiumStatusTimestampKey);
+        if (premiumTimestampStr != null) {
+          final premiumTimestamp = DateTime.parse(premiumTimestampStr);
+          final premiumAge = DateTime.now().difference(premiumTimestamp);
+          
+          if (premiumAge < _premiumStatusCacheExpiry) {
+            final cachedStatusJson = prefs.getString(_premiumStatusCacheKey);
+            if (cachedStatusJson != null) {
+              final cachedStatus = json.decode(cachedStatusJson);
+              premiumFromCache = cachedStatus['isPremium'] ?? false;
+              testerFromCache = cachedStatus['isTester'] ?? false;
+              
+              if (mounted) {
+                setState(() {
+                  _isPremium = premiumFromCache;
+                  _isTester = testerFromCache;
+                });
+              }
+            }
+          } else {
+            useCache = false;
+          }
+        } else {
+          useCache = false;
+        }
 
-      if (mounted) {
-        setState(() {
-          _isPremium = localPremium;
-          _isTester = localTester;
-        });
+        // Check scan count cache
+        if (useCache) {
+          final scanTimestampStr = prefs.getString(_scanCountTimestampKey);
+          final isNewDay = await _isNewDay();
+          
+          if (!isNewDay && scanTimestampStr != null) {
+            final scanTimestamp = DateTime.parse(scanTimestampStr);
+            final scanAge = DateTime.now().difference(scanTimestamp);
+            
+            if (scanAge < _scanCountCacheExpiry) {
+              scansFromCache = prefs.getInt(_scanCountCacheKey) ?? 0;
+              
+              final remainingScans = (premiumFromCache || testerFromCache) ? -1 : (3 - scansFromCache);
+              
+              if (mounted) {
+                setState(() {
+                  _dailyScans = scansFromCache;
+                  _remainingScans = remainingScans;
+                  _isLoading = false;
+                });
+              }
+              
+              // If we used cache successfully, we're done
+              return;
+            }
+          }
+        }
       }
 
-      // Fetch from database for accurate status
+      // If we reach here, we need to fetch from database
       final premiumStatus = await DatabaseService.isPremiumUser();
       final dailyScans = await DatabaseService.getDailyScanCount();
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      final localTester = prefs.getBool('isTesterUser') ?? false;
       
-      // Update local cache
+      // Cache the premium status
+      final statusToCache = {
+        'isPremium': premiumStatus,
+        'isTester': localTester && !premiumStatus,
+      };
+      await prefs.setString(_premiumStatusCacheKey, json.encode(statusToCache));
+      await prefs.setString(_premiumStatusTimestampKey, DateTime.now().toIso8601String());
+      
+      // Cache the scan count
+      await prefs.setInt(_scanCountCacheKey, dailyScans);
+      await prefs.setString(_scanCountTimestampKey, DateTime.now().toIso8601String());
+      await prefs.setString(_scanCountDateKey, today);
+      
+      // Also update the legacy cache
       await prefs.setBool('isPremiumUser', premiumStatus);
 
       final remainingScans = (premiumStatus || localTester) ? -1 : (3 - dailyScans);
@@ -137,6 +244,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
           _dailyScans = dailyScans;
           _remainingScans = remainingScans;
           _isLoading = false;
+          _isRefreshing = false;
         });
       }
     } catch (e) {
@@ -144,6 +252,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
         setState(() {
           _isLoading = false;
           _hasLoadError = true;
+          _isRefreshing = false;
         });
         
         ScaffoldMessenger.of(context).showSnackBar(
@@ -153,11 +262,39 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
             action: SnackBarAction(
               label: 'Retry',
               textColor: Colors.white,
-              onPressed: _checkPremiumStatus,
+              onPressed: () => _checkPremiumStatus(forceRefresh: true),
             ),
           ),
         );
       }
+    }
+  }
+
+  /// Manually refresh premium status (bypasses cache)
+  Future<void> _refreshPremiumStatus() async {
+    setState(() => _isRefreshing = true);
+    await _checkPremiumStatus(forceRefresh: true);
+  }
+
+  /// Invalidate cache when user performs a scan
+  static Future<void> invalidateScanCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_scanCountCacheKey);
+      await prefs.remove(_scanCountTimestampKey);
+    } catch (e) {
+      // Silent fail - cache will refresh naturally
+    }
+  }
+
+  /// Invalidate cache when user purchases premium
+  static Future<void> invalidatePremiumCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_premiumStatusCacheKey);
+      await prefs.remove(_premiumStatusTimestampKey);
+    } catch (e) {
+      // Silent fail - cache will refresh naturally
     }
   }
 
@@ -315,6 +452,9 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
         await prefs.setBool('isPremiumUser', true);
         await prefs.setBool('isTesterUser', false);
         
+        // Invalidate premium cache after successful purchase
+        await invalidatePremiumCache();
+        
         planName = 'Premium';
         if (mounted) {
           setState(() {
@@ -325,6 +465,9 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       } else if (purchaseDetails.productID == testerProductId) {
         await prefs.setBool('isTesterUser', true);
         await prefs.setBool('isPremiumUser', false);
+        
+        // Invalidate premium cache after successful purchase
+        await invalidatePremiumCache();
         
         planName = 'Tester';
         if (mounted) {
@@ -346,6 +489,9 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       await prefs.setString('transactionId', purchaseDetails.transactionDate ?? DateTime.now().millisecondsSinceEpoch.toString());
 
       await PremiumGateController().refresh();
+      
+      // Force refresh to update UI with latest data
+      await _checkPremiumStatus(forceRefresh: true);
 
       if (mounted) {
         setState(() {
@@ -491,6 +637,11 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
     setState(() => _isPurchasing = true);
     try {
       await _inAppPurchase.restorePurchases();
+      
+      // Invalidate cache after restore
+      await invalidatePremiumCache();
+      await _checkPremiumStatus(forceRefresh: true);
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1084,6 +1235,20 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
                 style: TextStyle(color: Colors.white),
               ),
             ),
+          IconButton(
+            icon: _isRefreshing 
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.refresh),
+            onPressed: _isRefreshing ? null : _refreshPremiumStatus,
+            tooltip: 'Refresh Status',
+          ),
         ],
       ),
       body: Stack(

@@ -1,6 +1,8 @@
-// lib/pages/suggested_recipes_page.dart - FIXED: Navigation and state management
+// lib/pages/suggested_recipes_page.dart - OPTIMIZED: Cache recipes, favorite status, and premium checks
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import '../services/database_service.dart';
 import '../widgets/premium_gate.dart';
 import '../controllers/premium_gate_controller.dart';
@@ -64,6 +66,13 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
   bool _ingredientsExist = false;
   final ScrollController _scrollController = ScrollController();
 
+  // Cache for favorite status
+  Map<String, bool> _favoriteStatusCache = {};
+  
+  // Cache durations
+  static const Duration _recipeCacheDuration = Duration(hours: 1); // Recipes rarely change
+  static const Duration _favoriteCacheDuration = Duration(minutes: 2);
+
   @override
   void initState() {
     super.initState();
@@ -83,6 +92,100 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
     }
   }
 
+  String _getRecipeCacheKey() {
+    // Create cache key based on ingredients (sorted for consistency)
+    final sortedIngredients = List<String>.from(widget.productIngredients)..sort();
+    return 'recipes_${sortedIngredients.join('_')}';
+  }
+
+  Future<List<Recipe>?> _getCachedRecipes() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(_getRecipeCacheKey());
+      
+      if (cached == null) return null;
+      
+      final data = json.decode(cached);
+      final timestamp = data['_cached_at'] as int?;
+      
+      if (timestamp == null) return null;
+      
+      final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+      if (age > _recipeCacheDuration.inMilliseconds) return null;
+      
+      final recipes = (data['recipes'] as List)
+          .map((e) => Recipe.fromJson(e))
+          .toList();
+      
+      print('📦 Using cached recipes (${recipes.length} found)');
+      return recipes;
+    } catch (e) {
+      print('Error loading cached recipes: $e');
+      return null;
+    }
+  }
+
+  Future<void> _cacheRecipes(List<Recipe> recipes) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cacheData = {
+        'recipes': recipes.map((r) => r.toJson()).toList(),
+        '_cached_at': DateTime.now().millisecondsSinceEpoch,
+        'ingredients': widget.productIngredients,
+      };
+      await prefs.setString(_getRecipeCacheKey(), json.encode(cacheData));
+      print('💾 Cached ${recipes.length} recipes');
+    } catch (e) {
+      print('Error caching recipes: $e');
+    }
+  }
+
+  Future<bool> _getCachedFavoriteStatus(String recipeName) async {
+    // Check in-memory cache first
+    if (_favoriteStatusCache.containsKey(recipeName)) {
+      return _favoriteStatusCache[recipeName]!;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString('favorite_status_$recipeName');
+      
+      if (cached == null) return false;
+      
+      final data = json.decode(cached);
+      final timestamp = data['_cached_at'] as int?;
+      final isFavorite = data['is_favorite'] as bool? ?? false;
+      
+      if (timestamp == null) return false;
+      
+      final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+      if (age > _favoriteCacheDuration.inMilliseconds) return false;
+      
+      // Update in-memory cache
+      _favoriteStatusCache[recipeName] = isFavorite;
+      return isFavorite;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<void> _cacheFavoriteStatus(String recipeName, bool isFavorite) async {
+    try {
+      // Update in-memory cache immediately
+      _favoriteStatusCache[recipeName] = isFavorite;
+      
+      // Persist to disk
+      final prefs = await SharedPreferences.getInstance();
+      final cacheData = {
+        'is_favorite': isFavorite,
+        '_cached_at': DateTime.now().millisecondsSinceEpoch,
+      };
+      await prefs.setString('favorite_status_$recipeName', json.encode(cacheData));
+    } catch (e) {
+      print('Error caching favorite status: $e');
+    }
+  }
+
   Future<void> _loadRecipes() async {
     if (_isLoading) return;
     
@@ -91,6 +194,23 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
     });
 
     try {
+      // Try to load from cache first
+      final cachedRecipes = await _getCachedRecipes();
+      
+      if (cachedRecipes != null && cachedRecipes.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _allRecipes = cachedRecipes;
+            _currentRecipes = cachedRecipes;
+            _hasMore = false; // Cached data includes all recipes
+            _isLoading = false;
+            _ingredientsExist = true;
+          });
+        }
+        return;
+      }
+
+      // Cache miss, check if ingredients exist
       bool hasMatchingIngredients = await _checkIngredientsExist();
       
       if (!hasMatchingIngredients) {
@@ -106,6 +226,7 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
         return;
       }
 
+      // Fetch recipes from database
       final response = await Supabase.instance.client
           .from('recipes')
           .select('*')
@@ -123,6 +244,11 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           healthScore: recipeData['health_score'],
         );
       }).toList();
+
+      // Cache the results
+      if (newRecipes.isNotEmpty) {
+        await _cacheRecipes(newRecipes);
+      }
 
       if (mounted) {
         setState(() {
@@ -208,6 +334,9 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           _hasMore = newRecipes.length == 2;
           _isLoading = false;
         });
+        
+        // Update cache with all recipes
+        await _cacheRecipes(_allRecipes);
       }
 
     } catch (e) {
@@ -240,6 +369,9 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
         _isLoading = false;
         _ingredientsExist = true;
       });
+      
+      // Cache fallback recipes too
+      _cacheRecipes(fallbackRecipes);
     }
   }
 
@@ -333,7 +465,8 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
 
   Future<void> _toggleFavorite(Recipe recipe) async {
     try {
-      final isFavorited = await DatabaseService.isRecipeFavorited(recipe.title);
+      // Check cache first
+      bool isFavorited = await _getCachedFavoriteStatus(recipe.title);
       
       if (isFavorited) {
         final favorites = await DatabaseService.getFavoriteRecipes();
@@ -344,20 +477,15 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
         if (favoriteRecipe.id != null) {
           await DatabaseService.removeFavoriteRecipe(favoriteRecipe.id!);
           
+          // Update cache
+          await _cacheFavoriteStatus(recipe.title, false);
+          
           if (mounted) {
+            setState(() {}); // Trigger rebuild
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Recipe removed from favorites'),
                 backgroundColor: Colors.orange,
-              ),
-            );
-          }
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Error: Recipe ID not found'),
-                backgroundColor: Colors.red,
               ),
             );
           }
@@ -369,7 +497,11 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           recipe.instructions,
         );
         
+        // Update cache
+        await _cacheFavoriteStatus(recipe.title, true);
+        
         if (mounted) {
+          setState(() {}); // Trigger rebuild
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Recipe added to favorites!'),
@@ -378,8 +510,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           );
         }
       }
-      
-      setState(() {});
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -501,6 +631,9 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
 
     return RefreshIndicator(
       onRefresh: () async {
+        // Clear cache and reload
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove(_getRecipeCacheKey());
         _currentPage = 0;
         await _loadRecipes();
       },
@@ -593,7 +726,7 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   FutureBuilder<bool>(
-                    future: DatabaseService.isRecipeFavorited(recipe.title),
+                    future: _getCachedFavoriteStatus(recipe.title),
                     builder: (context, snapshot) {
                       final isFavorited = snapshot.data ?? false;
                       return IconButton(

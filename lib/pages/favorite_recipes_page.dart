@@ -1,4 +1,4 @@
-// lib/pages/favorite_recipes_page.dart - FIXED: Enhanced with ErrorHandlingService
+// lib/pages/favorite_recipes_page.dart - OPTIMIZED: Better caching with timestamp validation
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/favorite_recipe.dart';
@@ -22,6 +22,9 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
   List<FavoriteRecipe> _favoriteRecipes = [];
   bool _isLoading = false;
 
+  // Cache configuration - favorites rarely change once loaded
+  static const Duration _cacheDuration = Duration(minutes: 10);
+
   @override
   void initState() {
     super.initState();
@@ -29,26 +32,156 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     _loadFavoriteRecipes();
   }
 
-  Future<void> _loadFavoriteRecipes() async {
+  // ========== CACHING HELPERS ==========
+
+  Future<List<FavoriteRecipe>?> _getCachedFavorites() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Check if we have a cached version with timestamp
+      final cachedData = prefs.getString('favorite_recipes_cached');
+      if (cachedData != null) {
+        final data = json.decode(cachedData);
+        final timestamp = data['_cached_at'] as int?;
+        
+        if (timestamp != null) {
+          final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+          
+          if (age < _cacheDuration.inMilliseconds) {
+            // Cache is still valid
+            final recipes = (data['recipes'] as List)
+                .map((jsonString) {
+                  try {
+                    return FavoriteRecipe.fromJson(json.decode(jsonString));
+                  } catch (e) {
+                    return null;
+                  }
+                })
+                .where((recipe) => recipe != null)
+                .cast<FavoriteRecipe>()
+                .toList();
+            
+            print('📦 Using cached favorites (${recipes.length} recipes)');
+            return recipes;
+          }
+        }
+      }
+      
+      // Fall back to old format if new format doesn't exist or is stale
+      final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
+      
+      if (favoriteRecipesJson.isEmpty) return null;
+      
+      final recipes = favoriteRecipesJson
+          .map((jsonString) {
+            try {
+              return FavoriteRecipe.fromJson(json.decode(jsonString));
+            } catch (e) {
+              return null;
+            }
+          })
+          .where((recipe) => recipe != null)
+          .cast<FavoriteRecipe>()
+          .toList();
+      
+      // Migrate to new format with timestamp
+      await _cacheFavorites(recipes);
+      
+      print('📦 Loaded from old cache format and migrated (${recipes.length} recipes)');
+      return recipes;
+      
+    } catch (e) {
+      print('Error loading cached favorites: $e');
+      return null;
+    }
+  }
+
+  Future<void> _cacheFavorites(List<FavoriteRecipe> recipes) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Save with timestamp for validation
+      final cacheData = {
+        'recipes': recipes.map((recipe) => json.encode(recipe.toJson())).toList(),
+        '_cached_at': DateTime.now().millisecondsSinceEpoch,
+      };
+      await prefs.setString('favorite_recipes_cached', json.encode(cacheData));
+      
+      // Also maintain old format for backwards compatibility
+      final favoriteRecipesJson = recipes
+          .map((recipe) => json.encode(recipe.toJson()))
+          .toList();
+      await prefs.setStringList('favorite_recipes_detailed', favoriteRecipesJson);
+      
+      print('💾 Cached ${recipes.length} favorite recipes');
+    } catch (e) {
+      print('Error caching favorites: $e');
+    }
+  }
+
+  Future<void> _invalidateFavoritesCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('favorite_recipes_cached');
+      print('🗑️ Invalidated favorites cache');
+    } catch (e) {
+      print('Error invalidating favorites cache: $e');
+    }
+  }
+
+  /// Static method to invalidate cache from other pages
+  static Future<void> invalidateCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('favorite_recipes_cached');
+    } catch (e) {
+      print('Error invalidating favorites cache: $e');
+    }
+  }
+
+  // ========== LOAD FUNCTION WITH CACHING ==========
+
+  Future<void> _loadFavoriteRecipes({bool forceRefresh = false}) async {
     try {
       setState(() => _isLoading = true);
       
+      // Try cache first unless force refresh
+      if (!forceRefresh) {
+        final cachedRecipes = await _getCachedFavorites();
+        
+        if (cachedRecipes != null) {
+          if (mounted) {
+            setState(() {
+              _favoriteRecipes = cachedRecipes;
+              _isLoading = false;
+            });
+          }
+          return;
+        }
+      }
+
+      // Cache miss or force refresh - load from SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
       
+      final recipes = favoriteRecipesJson
+          .map((jsonString) {
+            try {
+              return FavoriteRecipe.fromJson(json.decode(jsonString));
+            } catch (e) {
+              return null;
+            }
+          })
+          .where((recipe) => recipe != null)
+          .cast<FavoriteRecipe>()
+          .toList();
+      
+      // Cache the loaded recipes
+      await _cacheFavorites(recipes);
+      
       if (mounted) {
         setState(() {
-          _favoriteRecipes = favoriteRecipesJson
-              .map((jsonString) {
-                try {
-                  return FavoriteRecipe.fromJson(json.decode(jsonString));
-                } catch (e) {
-                  return null;
-                }
-              })
-              .where((recipe) => recipe != null)
-              .cast<FavoriteRecipe>()
-              .toList();
+          _favoriteRecipes = recipes;
           _isLoading = false;
         });
       }
@@ -62,7 +195,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
           category: ErrorHandlingService.databaseError,
           showSnackBar: true,
           customMessage: 'Unable to load favorite recipes',
-          onRetry: _loadFavoriteRecipes,
+          onRetry: () => _loadFavoriteRecipes(forceRefresh: true),
         );
       }
     }
@@ -70,8 +203,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
 
   Future<void> _removeFavoriteRecipe(FavoriteRecipe recipe) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      
       // Store removed recipe for undo functionality
       final removedRecipe = recipe;
       final removedIndex = _favoriteRecipes.indexOf(recipe);
@@ -80,11 +211,9 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         _favoriteRecipes.remove(recipe);
       });
       
-      // Save updated list
-      final favoriteRecipesJson = _favoriteRecipes
-          .map((recipe) => json.encode(recipe.toJson()))
-          .toList();
-      await prefs.setStringList('favorite_recipes_detailed', favoriteRecipesJson);
+      // Invalidate cache and save updated list
+      await _invalidateFavoritesCache();
+      await _cacheFavorites(_favoriteRecipes);
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -114,17 +243,13 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
 
   Future<void> _undoRemoveFavorite(FavoriteRecipe recipe, int index) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      
       setState(() {
         _favoriteRecipes.insert(index, recipe);
       });
       
-      // Save updated list
-      final favoriteRecipesJson = _favoriteRecipes
-          .map((recipe) => json.encode(recipe.toJson()))
-          .toList();
-      await prefs.setStringList('favorite_recipes_detailed', favoriteRecipesJson);
+      // Invalidate cache and save updated list
+      await _invalidateFavoritesCache();
+      await _cacheFavorites(_favoriteRecipes);
       
       if (mounted) {
         ErrorHandlingService.showSuccess(context, 'Recipe restored to favorites');
@@ -260,7 +385,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
             icon: Icon(Icons.refresh),
             onPressed: () async {
               try {
-                await _loadFavoriteRecipes();
+                await _loadFavoriteRecipes(forceRefresh: true);
                 if (mounted) {
                   ErrorHandlingService.showSuccess(context, 'Recipes refreshed');
                 }
@@ -298,7 +423,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
           : _favoriteRecipes.isEmpty
               ? _buildEmptyState()
               : RefreshIndicator(
-                  onRefresh: _loadFavoriteRecipes,
+                  onRefresh: () => _loadFavoriteRecipes(forceRefresh: true),
                   child: ListView.builder(
                     padding: EdgeInsets.all(16),
                     itemCount: _favoriteRecipes.length,

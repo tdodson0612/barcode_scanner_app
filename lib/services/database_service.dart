@@ -1,7 +1,8 @@
-// lib/services/database_service.dart - COMPLETE WITH ALL FEATURES
+// lib/services/database_service.dart - OPTIMIZED WITH SMART CACHING
 import 'dart:convert';
 import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/favorite_recipe.dart';
 import '../models/grocery_item.dart';
 import '../models/submitted_recipe.dart';
@@ -9,6 +10,57 @@ import 'auth_service.dart';
 
 class DatabaseService {
   static final SupabaseClient _supabase = Supabase.instance.client;
+  
+  // Cache keys
+  static const String _CACHE_BADGES = 'cache_badges';
+  static const String _CACHE_USER_BADGES = 'cache_user_badges_';
+  static const String _CACHE_USER_PROFILE = 'cache_user_profile_';
+  static const String _CACHE_PROFILE_TIMESTAMP = 'cache_profile_timestamp_';
+  static const String _CACHE_FRIENDS = 'cache_friends_';
+  static const String _CACHE_MESSAGES = 'cache_messages_';
+  static const String _CACHE_LAST_MESSAGE_TIME = 'cache_last_message_time_';
+  static const String _CACHE_POSTS = 'cache_posts';
+  static const String _CACHE_LAST_POST_TIME = 'cache_last_post_time';
+  static const String _CACHE_USER_POSTS = 'cache_user_posts_';
+  static const String _CACHE_SUBMITTED_RECIPES = 'cache_submitted_recipes';
+  static const String _CACHE_FAVORITE_RECIPES = 'cache_favorite_recipes';
+
+  // ==================================================
+  // CACHE HELPER METHODS
+  // ==================================================
+  
+  static Future<SharedPreferences> _getPrefs() async {
+    return await SharedPreferences.getInstance();
+  }
+
+  static Future<void> _cacheData(String key, String data) async {
+    final prefs = await _getPrefs();
+    await prefs.setString(key, data);
+  }
+
+  static Future<String?> _getCachedData(String key) async {
+    final prefs = await _getPrefs();
+    return prefs.getString(key);
+  }
+
+  static Future<void> _clearCache(String key) async {
+    final prefs = await _getPrefs();
+    await prefs.remove(key);
+  }
+
+  static Future<void> clearAllUserCache() async {
+    if (currentUserId == null) return;
+    final prefs = await _getPrefs();
+    final keys = prefs.getKeys().where((key) => 
+      key.contains(currentUserId!) || 
+      key == _CACHE_BADGES ||
+      key == _CACHE_POSTS ||
+      key == _CACHE_LAST_POST_TIME
+    ).toList();
+    for (final key in keys) {
+      await prefs.remove(key);
+    }
+  }
 
   // ==================================================
   // CURRENT USER ID & AUTH CHECK
@@ -47,6 +99,10 @@ class DatabaseService {
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', currentUserId!);
+      
+      // Invalidate profile cache since XP changed
+      await _clearCache('$_CACHE_USER_PROFILE$currentUserId');
+      await _clearCache('$_CACHE_PROFILE_TIMESTAMP$currentUserId');
       
       return {
         'xp_gained': xpAmount,
@@ -90,17 +146,30 @@ class DatabaseService {
   }
 
   // ==================================================
-  // ACHIEVEMENTS & BADGES
+  // ACHIEVEMENTS & BADGES (CACHED - Static data)
   // ==================================================
 
   static Future<List<Map<String, dynamic>>> getAllBadges() async {
     try {
+      // Check cache first - badges never change
+      final cached = await _getCachedData(_CACHE_BADGES);
+      if (cached != null) {
+        final List<dynamic> decoded = jsonDecode(cached);
+        return List<Map<String, dynamic>>.from(decoded);
+      }
+      
+      // Fetch from server if not cached
       final response = await _supabase
           .from('badges')
           .select()
           .order('xp_reward');
       
-      return List<Map<String, dynamic>>.from(response);
+      final badges = List<Map<String, dynamic>>.from(response);
+      
+      // Cache for future use
+      await _cacheData(_CACHE_BADGES, jsonEncode(badges));
+      
+      return badges;
     } catch (e) {
       throw Exception('Failed to get badges: $e');
     }
@@ -108,13 +177,27 @@ class DatabaseService {
 
   static Future<List<Map<String, dynamic>>> getUserBadges(String userId) async {
     try {
+      // Check cache first
+      final cacheKey = '$_CACHE_USER_BADGES$userId';
+      final cached = await _getCachedData(cacheKey);
+      if (cached != null) {
+        final List<dynamic> decoded = jsonDecode(cached);
+        return List<Map<String, dynamic>>.from(decoded);
+      }
+      
+      // Fetch from server
       final response = await _supabase
           .from('user_achievements')
           .select('*, badge:badges(*)')
           .eq('user_id', userId)
           .order('earned_at', ascending: false);
       
-      return List<Map<String, dynamic>>.from(response);
+      final badges = List<Map<String, dynamic>>.from(response);
+      
+      // Cache the result
+      await _cacheData(cacheKey, jsonEncode(badges));
+      
+      return badges;
     } catch (e) {
       throw Exception('Failed to get user badges: $e');
     }
@@ -140,6 +223,9 @@ class DatabaseService {
         'badge_id': badgeId,
         'earned_at': DateTime.now().toIso8601String(),
       });
+      
+      // Invalidate user badges cache
+      await _clearCache('$_CACHE_USER_BADGES$currentUserId');
       
       final badge = await _supabase
           .from('badges')
@@ -175,7 +261,7 @@ class DatabaseService {
   }
 
   // ==================================================
-  // DISCOVERY FEED - POSTS (WITH VIDEO SUPPORT)
+  // DISCOVERY FEED - POSTS (WITH CACHING & VIDEO SUPPORT)
   // ==================================================
 
   static Future<String> createPost({
@@ -201,7 +287,6 @@ class DatabaseService {
       
       // Handle video upload
       if (videoFile != null) {
-        // Upload video
         final videoExt = videoFile.path.split('.').last;
         final videoFileName = 'video_${timestamp}.$videoExt';
         final videoPath = '$userId/posts/$videoFileName';
@@ -214,7 +299,6 @@ class DatabaseService {
             .from('profile-pictures')
             .getPublicUrl(videoPath);
         
-        // Upload thumbnail (use video file as fallback if no custom thumbnail)
         final thumbFile = thumbnailFile ?? videoFile;
         final thumbExt = thumbFile.path.split('.').last;
         final thumbFileName = 'thumb_${timestamp}.$thumbExt';
@@ -228,7 +312,6 @@ class DatabaseService {
             .from('profile-pictures')
             .getPublicUrl(thumbPath);
       } 
-      // Handle image upload
       else if (imageFile != null) {
         final fileName = 'post_$timestamp.jpg';
         final filePath = '$userId/posts/$fileName';
@@ -242,7 +325,6 @@ class DatabaseService {
             .getPublicUrl(filePath);
       }
       
-      // Create post
       final response = await _supabase
           .from('posts')
           .insert({
@@ -256,16 +338,17 @@ class DatabaseService {
           .select()
           .single();
       
-      // Award first post badge
-      await awardBadge('first_post');
+      // Invalidate posts cache
+      await _clearCache(_CACHE_POSTS);
+      await _clearCache(_CACHE_LAST_POST_TIME);
+      await _clearCache('$_CACHE_USER_POSTS$userId');
       
-      // Add XP (more for videos)
+      await awardBadge('first_post');
       await addXP(videoFile != null ? 50 : 25, 
           reason: videoFile != null ? 'Posted video' : 'Posted photo');
       
       return response['id'];
     } catch (e) {
-      // Auto-save as draft on error (only if not already a retry from draft)
       if (!isDraftRetry) {
         try {
           final draftId = await saveDraftPost(
@@ -275,15 +358,11 @@ class DatabaseService {
             thumbnailFile: thumbnailFile,
             caption: caption,
           );
-          
-          // Throw custom error with draft ID
           throw Exception('DRAFT_SAVED:$draftId:${e.toString()}');
         } catch (draftError) {
-          // If draft save also fails, throw original error
           throw Exception('Failed to create post: $e');
         }
       }
-      
       throw Exception('Failed to create post: $e');
     }
   }
@@ -292,7 +371,6 @@ class DatabaseService {
   // DRAFT POSTS - AUTO-SAVE ON ERROR
   // ==================================================
 
-  /// Save post as draft (auto-saves on upload error)
   static Future<String> saveDraftPost({
     required int recipeId,
     File? imageFile,
@@ -305,7 +383,6 @@ class DatabaseService {
     try {
       final userId = currentUserId!;
       
-      // Store file paths locally (don't upload yet)
       final draftData = {
         'user_id': userId,
         'recipe_id': recipeId,
@@ -317,7 +394,6 @@ class DatabaseService {
         'is_video': videoFile != null,
       };
       
-      // Save draft to database
       final response = await _supabase
           .from('draft_posts')
           .insert(draftData)
@@ -330,7 +406,6 @@ class DatabaseService {
     }
   }
 
-  /// Get all draft posts for current user
   static Future<List<Map<String, dynamic>>> getDraftPosts() async {
     ensureUserAuthenticated();
     
@@ -350,7 +425,6 @@ class DatabaseService {
     }
   }
 
-  /// Delete a draft post
   static Future<void> deleteDraftPost(String draftId) async {
     ensureUserAuthenticated();
     
@@ -365,24 +439,20 @@ class DatabaseService {
     }
   }
 
-  /// Resume uploading from draft (with automatic draft deletion on success)
   static Future<String> uploadFromDraft(String draftId) async {
     ensureUserAuthenticated();
     
     try {
-      // Get draft data
       final draft = await _supabase
           .from('draft_posts')
           .select()
           .eq('id', draftId)
           .single();
       
-      // Recreate file objects from paths
       final imageFile = draft['image_path'] != null ? File(draft['image_path']) : null;
       final videoFile = draft['video_path'] != null ? File(draft['video_path']) : null;
       final thumbnailFile = draft['thumbnail_path'] != null ? File(draft['thumbnail_path']) : null;
       
-      // Verify files still exist
       if (videoFile != null && !await videoFile.exists()) {
         throw Exception('Video file no longer exists on device');
       }
@@ -393,7 +463,6 @@ class DatabaseService {
         throw Exception('Thumbnail file no longer exists on device');
       }
       
-      // Upload the post (with isDraftRetry = true to prevent recursive draft saving)
       final postId = await createPost(
         recipeId: draft['recipe_id'],
         imageFile: imageFile,
@@ -403,7 +472,6 @@ class DatabaseService {
         isDraftRetry: true,
       );
       
-      // Delete draft on successful upload
       await deleteDraftPost(draftId);
       
       return postId;
@@ -416,8 +484,52 @@ class DatabaseService {
     int limit = 20,
     int offset = 0,
     String sortBy = 'recent',
+    bool forceRefresh = false,
   }) async {
     try {
+      // If not force refresh and offset is 0, try to use cached posts and fetch only new ones
+      if (!forceRefresh && offset == 0) {
+        final cachedPosts = await _getCachedData(_CACHE_POSTS);
+        final lastFetchTime = await _getCachedData(_CACHE_LAST_POST_TIME);
+        
+        if (cachedPosts != null && lastFetchTime != null) {
+          // Get cached posts
+          final List<dynamic> cached = jsonDecode(cachedPosts);
+          final cachedList = List<Map<String, dynamic>>.from(cached);
+          
+          // Fetch only NEW posts since last fetch
+          final newPosts = await _supabase
+              .from('posts')
+              .select('''
+                *,
+                user:user_profiles!posts_user_id_fkey(id, username, first_name, last_name, avatar_url, level, xp),
+                recipe:submitted_recipes!posts_recipe_id_fkey(id, recipe_name, ingredients, directions)
+              ''')
+              .gt('created_at', lastFetchTime)
+              .order('created_at', ascending: sortBy != 'recent')
+              .limit(limit);
+          
+          final newPostsList = List<Map<String, dynamic>>.from(newPosts);
+          
+          if (newPostsList.isNotEmpty) {
+            // Combine new posts with cached ones
+            final combined = [...newPostsList, ...cachedList];
+            // Keep only the most recent 'limit' posts
+            final trimmed = combined.take(limit).toList();
+            
+            // Update cache
+            await _cacheData(_CACHE_POSTS, jsonEncode(trimmed));
+            await _cacheData(_CACHE_LAST_POST_TIME, DateTime.now().toIso8601String());
+            
+            return trimmed;
+          }
+          
+          // No new posts, return cached
+          return cachedList;
+        }
+      }
+      
+      // Full fetch (first time or force refresh)
       final response = await _supabase
           .from('posts')
           .select('''
@@ -428,7 +540,15 @@ class DatabaseService {
           .order('created_at', ascending: sortBy != 'recent')
           .range(offset, offset + limit - 1);
       
-      return List<Map<String, dynamic>>.from(response);
+      final posts = List<Map<String, dynamic>>.from(response);
+      
+      // Cache the results (only if offset is 0)
+      if (offset == 0 && posts.isNotEmpty) {
+        await _cacheData(_CACHE_POSTS, jsonEncode(posts));
+        await _cacheData(_CACHE_LAST_POST_TIME, DateTime.now().toIso8601String());
+      }
+      
+      return posts;
     } catch (e) {
       throw Exception('Failed to get feed posts: $e');
     }
@@ -436,6 +556,16 @@ class DatabaseService {
 
   static Future<List<Map<String, dynamic>>> getUserPosts(String userId) async {
     try {
+      // Check cache
+      final cacheKey = '$_CACHE_USER_POSTS$userId';
+      final cached = await _getCachedData(cacheKey);
+      
+      if (cached != null) {
+        final List<dynamic> decoded = jsonDecode(cached);
+        return List<Map<String, dynamic>>.from(decoded);
+      }
+      
+      // Fetch from server
       final response = await _supabase
           .from('posts')
           .select('''
@@ -446,7 +576,12 @@ class DatabaseService {
           .eq('user_id', userId)
           .order('created_at', ascending: false);
       
-      return List<Map<String, dynamic>>.from(response);
+      final posts = List<Map<String, dynamic>>.from(response);
+      
+      // Cache the result
+      await _cacheData(cacheKey, jsonEncode(posts));
+      
+      return posts;
     } catch (e) {
       throw Exception('Failed to get user posts: $e');
     }
@@ -458,11 +593,10 @@ class DatabaseService {
     try {
       final post = await _supabase
           .from('posts')
-          .select('image_url, video_url')
+          .select('image_url, video_url, user_id')
           .eq('id', postId)
           .single();
       
-      // Delete image/thumbnail
       if (post['image_url'] != null) {
         final uri = Uri.parse(post['image_url']);
         final pathSegments = uri.pathSegments;
@@ -473,7 +607,6 @@ class DatabaseService {
         }
       }
       
-      // Delete video if exists
       if (post['video_url'] != null) {
         final uri = Uri.parse(post['video_url']);
         final pathSegments = uri.pathSegments;
@@ -488,11 +621,16 @@ class DatabaseService {
           .from('posts')
           .delete()
           .eq('id', postId);
+      
+      // Invalidate caches
+      await _clearCache(_CACHE_POSTS);
+      await _clearCache('$_CACHE_USER_POSTS${post['user_id']}');
     } catch (e) {
       throw Exception('Failed to delete post: $e');
     }
   }
 
+  // Like/Unlike always fetch fresh (user needs to see current state)
   static Future<void> likePost(String postId) async {
     ensureUserAuthenticated();
     
@@ -554,7 +692,7 @@ class DatabaseService {
   }
 
   // ==================================================
-  // COMMENTS & REVIEWS
+  // COMMENTS & REVIEWS (Always fetch fresh)
   // ==================================================
 
   static Future<List<Map<String, dynamic>>> getRecipeComments(int recipeId) async {
@@ -701,7 +839,7 @@ class DatabaseService {
   }
 
   // ==================================================
-  // USER PROFILE MANAGEMENT
+  // USER PROFILE MANAGEMENT (WITH TIMESTAMP CACHING)
   // ==================================================
   
   static Future<void> createUserProfile(
@@ -731,14 +869,647 @@ class DatabaseService {
 
   static Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     try {
+      // Check cache and timestamp
+      final cacheKey = '$_CACHE_USER_PROFILE$userId';
+      final timestampKey = '$_CACHE_PROFILE_TIMESTAMP$userId';
+      
+      final cached = await _getCachedData(cacheKey);
+      final cachedTimestamp = await _getCachedData(timestampKey);
+      
+      if (cached != null && cachedTimestamp != null) {
+        // Fetch only the timestamp from server to check if profile was updated
+        final serverProfile = await _supabase
+            .from('user_profiles')
+            .select('updated_at')
+            .eq('id', userId)
+            .single();
+        
+        final serverTimestamp = serverProfile['updated_at'] ?? '';
+        
+        // If timestamps match, return cached data
+        if (serverTimestamp == cachedTimestamp) {
+          return jsonDecode(cached);
+        }
+      }
+      
+      // Fetch full profile from server
       final response = await _supabase
           .from('user_profiles')
           .select()
           .eq('id', userId)
           .single();
+      
+      // Cache the profile and timestamp
+      await _cacheData(cacheKey, jsonEncode(response));
+      await _cacheData(timestampKey, response['updated_at'] ?? DateTime.now().toIso8601String());
+      
       return response;
     } catch (e) {
-      throw Exception('Failed to get user profile: $e');
+      throw Exception('Failed to get recipe: $e');
+    }
+  }
+
+  static String generateShareableRecipeText(Map<String, dynamic> recipe) {
+    final name = recipe['recipe_name'] ?? 'Unnamed Recipe';
+    final ingredients = recipe['ingredients'] ?? 'No ingredients listed';
+    final directions = recipe['directions'] ?? 'No directions provided';
+
+    return '''
+🍽️ Recipe: $name
+
+📋 Ingredients:
+$ingredients
+
+👨‍🍳 Directions:
+$directions
+
+---
+Shared from Recipe Scanner App
+''';
+  }
+
+  // ==================================================
+  // CONTACT MESSAGES
+  // ==================================================
+  
+  static Future<void> submitContactMessage({
+    required String name,
+    required String email,
+    required String message,
+  }) async {
+    try {
+      await _supabase.from('contact_messages').insert({
+        'name': name,
+        'email': email,
+        'message': message,
+        'user_id': currentUserId,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      throw Exception('Failed to submit contact message: $e');
+    }
+  }
+
+  // ==================================================
+  // SOCIAL FEATURES - FRIENDS (CACHED)
+  // ==================================================
+
+  static Future<List<Map<String, dynamic>>> getFriends() async {
+    ensureUserAuthenticated();
+    
+    try {
+      // Check cache first
+      final cacheKey = '$_CACHE_FRIENDS$currentUserId';
+      final cached = await _getCachedData(cacheKey);
+      
+      if (cached != null) {
+        final List<dynamic> decoded = jsonDecode(cached);
+        return List<Map<String, dynamic>>.from(decoded);
+      }
+      
+      // Fetch from server
+      final response = await _supabase
+          .from('friend_requests')
+          .select('sender:user_profiles!friend_requests_sender_fkey(id, email, username, first_name, last_name, avatar_url), receiver:user_profiles!friend_requests_receiver_fkey(id, email, username, first_name, last_name, avatar_url)')
+          .or('sender.eq.$currentUserId,receiver.eq.$currentUserId')
+          .eq('status', 'accepted');
+
+      final friends = <Map<String, dynamic>>[];
+      for (var row in response) {
+        final friend = row['sender']['id'] == currentUserId 
+            ? row['receiver'] 
+            : row['sender'];
+        friends.add(friend);
+      }
+      
+      // Cache the result
+      await _cacheData(cacheKey, jsonEncode(friends));
+      
+      return friends;
+    } catch (e) {
+      throw Exception('Failed to load friends: $e');
+    }
+  }
+
+  // Friend requests always fetch fresh (user needs to see pending requests)
+  static Future<List<Map<String, dynamic>>> getFriendRequests() async {
+    ensureUserAuthenticated();
+    
+    try {
+      final response = await _supabase
+          .from('friend_requests')
+          .select('id, created_at, sender:user_profiles!friend_requests_sender_fkey(id, email, username, first_name, last_name, avatar_url)')
+          .eq('receiver', currentUserId!)
+          .eq('status', 'pending')
+          .order('created_at', ascending: false);
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      throw Exception('Failed to load friend requests: $e');
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getSentFriendRequests() async {
+    ensureUserAuthenticated();
+    
+    try {
+      final response = await _supabase
+          .from('friend_requests')
+          .select('id, created_at, receiver:user_profiles!friend_requests_receiver_fkey(id, email, username, first_name, last_name, avatar_url)')
+          .eq('sender', currentUserId!)
+          .eq('status', 'pending')
+          .order('created_at', ascending: false);
+
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      throw Exception('Failed to load sent friend requests: $e');
+    }
+  }
+
+  static Future<String?> sendFriendRequest(String receiverId) async {
+    ensureUserAuthenticated();
+    
+    if (receiverId == currentUserId) {
+      throw Exception('Cannot send friend request to yourself');
+    }
+    
+    try {
+      final existing = await _supabase
+          .from('friend_requests')
+          .select('id, status, sender, receiver')
+          .or('and(sender.eq.$currentUserId,receiver.eq.$receiverId),and(sender.eq.$receiverId,receiver.eq.$currentUserId)')
+          .maybeSingle();
+
+      if (existing != null) {
+        if (existing['status'] == 'accepted') {
+          throw Exception('You are already friends with this user');
+        } else if (existing['status'] == 'pending') {
+          if (existing['sender'] == receiverId) {
+            throw Exception('This user has already sent you a friend request. Check your pending requests!');
+          }
+          throw Exception('Friend request already sent');
+        }
+      }
+
+      final response = await _supabase
+          .from('friend_requests')
+          .insert({
+            'sender': currentUserId!,
+            'receiver': receiverId,
+            'status': 'pending',
+            'created_at': DateTime.now().toIso8601String(),
+          })
+          .select()
+          .single();
+
+      return response['id'];
+    } on PostgrestException catch (e) {
+      if (e.code == '23505') {
+        throw Exception('Friend request already exists');
+      }
+      throw Exception('Failed to send friend request: ${e.message}');
+    } catch (e) {
+      throw Exception('Failed to send friend request: $e');
+    }
+  }
+
+  static Future<void> acceptFriendRequest(String requestId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final request = await _supabase
+          .from('friend_requests')
+          .select('receiver, status')
+          .eq('id', requestId)
+          .single();
+      
+      if (request['receiver'] != currentUserId) {
+        throw Exception('You cannot accept this friend request');
+      }
+      
+      if (request['status'] != 'pending') {
+        throw Exception('This friend request has already been ${request['status']}');
+      }
+
+      await _supabase
+          .from('friend_requests')
+          .update({
+            'status': 'accepted',
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', requestId);
+      
+      // Invalidate friends cache
+      await _clearCache('$_CACHE_FRIENDS$currentUserId');
+    } catch (e) {
+      throw Exception('Failed to accept friend request: $e');
+    }
+  }
+
+  static Future<void> declineFriendRequest(String requestId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('friend_requests')
+          .delete()
+          .eq('id', requestId);
+    } catch (e) {
+      throw Exception('Failed to decline friend request: $e');
+    }
+  }
+
+  static Future<void> cancelFriendRequestById(String requestId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final request = await _supabase
+          .from('friend_requests')
+          .select('sender')
+          .eq('id', requestId)
+          .single();
+      
+      if (request['sender'] != currentUserId) {
+        throw Exception('You cannot cancel this friend request');
+      }
+
+      await _supabase
+          .from('friend_requests')
+          .delete()
+          .eq('id', requestId);
+    } catch (e) {
+      throw Exception('Failed to cancel friend request: $e');
+    }
+  }
+
+  static Future<void> cancelFriendRequest(String receiverId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('friend_requests')
+          .delete()
+          .eq('sender', currentUserId!)
+          .eq('receiver', receiverId);
+    } catch (e) {
+      throw Exception('Failed to cancel friend request: $e');
+    }
+  }
+
+  static Future<void> removeFriend(String friendId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('friend_requests')
+          .delete()
+          .or('and(sender.eq.$currentUserId,receiver.eq.$friendId),and(sender.eq.$friendId,receiver.eq.$currentUserId)')
+          .eq('status', 'accepted');
+      
+      // Invalidate friends cache
+      await _clearCache('$_CACHE_FRIENDS$currentUserId');
+    } catch (e) {
+      throw Exception('Failed to remove friend: $e');
+    }
+  }
+
+  static Future<Map<String, dynamic>> checkFriendshipStatus(String userId) async {
+    ensureUserAuthenticated();
+    
+    if (userId == currentUserId) {
+      return {
+        'status': 'self',
+        'requestId': null,
+        'canSendRequest': false,
+        'isOutgoing': false,
+        'message': 'This is you!',
+      };
+    }
+    
+    try {
+      final response = await _supabase
+          .from('friend_requests')
+          .select('id, status, sender, receiver, created_at')
+          .or('and(sender.eq.$currentUserId,receiver.eq.$userId),and(sender.eq.$userId,receiver.eq.$currentUserId)')
+          .maybeSingle();
+
+      if (response == null) {
+        return {
+          'status': 'none',
+          'requestId': null,
+          'canSendRequest': true,
+          'isOutgoing': false,
+          'message': 'Not friends',
+        };
+      }
+
+      final isOutgoing = response['sender'] == currentUserId;
+      final status = response['status'];
+
+      if (status == 'accepted') {
+        return {
+          'status': 'accepted',
+          'requestId': response['id'],
+          'canSendRequest': false,
+          'isOutgoing': isOutgoing,
+          'message': 'Friends',
+        };
+      } else if (status == 'pending') {
+        if (isOutgoing) {
+          return {
+            'status': 'pending_sent',
+            'requestId': response['id'],
+            'canSendRequest': false,
+            'isOutgoing': true,
+            'message': 'Friend request sent',
+          };
+        } else {
+          return {
+            'status': 'pending_received',
+            'requestId': response['id'],
+            'canSendRequest': false,
+            'isOutgoing': false,
+            'message': 'Friend request received',
+          };
+        }
+      }
+
+      return {
+        'status': 'unknown',
+        'requestId': null,
+        'canSendRequest': false,
+        'isOutgoing': false,
+        'message': 'Unknown status',
+      };
+    } catch (e) {
+      return {
+        'status': 'error',
+        'requestId': null,
+        'canSendRequest': false,
+        'isOutgoing': false,
+        'message': 'Error checking status',
+      };
+    }
+  }
+
+  // ==================================================
+  // MESSAGING (SMART CACHING - OLD MESSAGES CACHED)
+  // ==================================================
+
+  static Future<List<Map<String, dynamic>>> getMessages(String friendId, {bool forceRefresh = false}) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final cacheKey = '$_CACHE_MESSAGES${currentUserId}_$friendId';
+      final lastTimeKey = '$_CACHE_LAST_MESSAGE_TIME${currentUserId}_$friendId';
+      
+      // If not force refresh, try to use cache + fetch only new messages
+      if (!forceRefresh) {
+        final cached = await _getCachedData(cacheKey);
+        final lastFetchTime = await _getCachedData(lastTimeKey);
+        
+        if (cached != null && lastFetchTime != null) {
+          // Get cached messages
+          final List<dynamic> cachedList = jsonDecode(cached);
+          final cachedMessages = List<Map<String, dynamic>>.from(cachedList);
+          
+          // Fetch only NEW messages since last fetch
+          final newMessages = await _supabase
+              .from('messages')
+              .select('*')
+              .or('and(sender.eq.$currentUserId,receiver.eq.$friendId),and(sender.eq.$friendId,receiver.eq.$currentUserId)')
+              .gt('created_at', lastFetchTime)
+              .order('created_at');
+          
+          final newMessagesList = List<Map<String, dynamic>>.from(newMessages);
+          
+          if (newMessagesList.isNotEmpty) {
+            // Combine cached + new messages
+            final combined = [...cachedMessages, ...newMessagesList];
+            
+            // Update cache
+            await _cacheData(cacheKey, jsonEncode(combined));
+            await _cacheData(lastTimeKey, DateTime.now().toIso8601String());
+            
+            return combined;
+          }
+          
+          // No new messages, return cached
+          return cachedMessages;
+        }
+      }
+      
+      // Full fetch (first time or force refresh)
+      final response = await _supabase
+          .from('messages')
+          .select('*')
+          .or('and(sender.eq.$currentUserId,receiver.eq.$friendId),and(sender.eq.$friendId,receiver.eq.$currentUserId)')
+          .order('created_at');
+
+      final messages = List<Map<String, dynamic>>.from(response);
+      
+      // Cache the results
+      await _cacheData(cacheKey, jsonEncode(messages));
+      await _cacheData(lastTimeKey, DateTime.now().toIso8601String());
+      
+      return messages;
+    } catch (e) {
+      throw Exception('Failed to load messages: $e');
+    }
+  }
+
+  static Future<void> sendMessage(String receiverId, String content) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase.from('messages').insert({
+        'sender': currentUserId!,
+        'receiver': receiverId,
+        'content': content,
+        'is_read': false,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      
+      // Invalidate message cache for this conversation
+      await _clearCache('$_CACHE_MESSAGES${currentUserId}_$receiverId');
+      await _clearCache('$_CACHE_LAST_MESSAGE_TIME${currentUserId}_$receiverId');
+    } catch (e) {
+      throw Exception('Failed to send message: $e');
+    }
+  }
+
+  // Unread count always fetches fresh (must be accurate)
+  static Future<int> getUnreadMessageCount() async {
+    ensureUserAuthenticated();
+    
+    try {
+      final response = await _supabase
+          .from('messages')
+          .select('id')
+          .eq('receiver', currentUserId!)
+          .eq('is_read', false);
+
+      return (response as List).length;
+    } catch (e) {
+      print('Error getting unread count: $e');
+      return 0;
+    }
+  }
+
+  static Future<void> markMessageAsRead(String messageId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('messages')
+          .update({'is_read': true})
+          .eq('id', messageId);
+    } catch (e) {
+      print('Error marking message as read: $e');
+    }
+  }
+
+  static Future<void> markMessagesAsReadFrom(String senderId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _supabase
+          .from('messages')
+          .update({'is_read': true})
+          .eq('receiver', currentUserId!)
+          .eq('sender', senderId)
+          .eq('is_read', false);
+    } catch (e) {
+      print('Error marking messages as read: $e');
+    }
+  }
+
+  // Chat list always fetches fresh (user needs latest message preview)
+  static Future<List<Map<String, dynamic>>> getChatList() async {
+    ensureUserAuthenticated();
+    
+    try {
+      final friends = await getFriends();
+      final chats = <Map<String, dynamic>>[];
+
+      for (final friend in friends) {
+        final messages = await _supabase
+            .from('messages')
+            .select('*')
+            .or('and(sender.eq.$currentUserId,receiver.eq.${friend['id']}),and(sender.eq.${friend['id']},receiver.eq.$currentUserId)')
+            .order('created_at', ascending: false)
+            .limit(1);
+
+        if (messages.isNotEmpty) {
+          chats.add({
+            'friend': friend,
+            'lastMessage': messages.first,
+          });
+        } else {
+          chats.add({
+            'friend': friend,
+            'lastMessage': null,
+          });
+        }
+      }
+
+      chats.sort((a, b) {
+        final aTime = a['lastMessage']?['created_at'];
+        final bTime = b['lastMessage']?['created_at'];
+        if (aTime == null && bTime == null) return 0;
+        if (aTime == null) return 1;
+        if (bTime == null) return -1;
+        return bTime.compareTo(aTime);
+      });
+
+      return chats;
+    } catch (e) {
+      throw Exception('Failed to load chat list: $e');
+    }
+  }
+
+  // ==================================================
+  // USER SEARCH (Always fetch fresh)
+  // ==================================================
+
+  static Future<List<Map<String, dynamic>>> searchUsers(String query) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final searchQuery = query.trim();
+      if (searchQuery.isEmpty) return [];
+
+      try {
+        final response = await _supabase.rpc('search_users_fuzzy', params: {
+          'search_query': searchQuery,
+          'current_user_id': currentUserId!,
+        });
+
+        return List<Map<String, dynamic>>.from(response);
+      } catch (rpcError) {
+        print('RPC search failed, falling back to basic search: $rpcError');
+        
+        final response = await _supabase
+            .from('user_profiles')
+            .select('id, email, username, first_name, last_name, avatar_url')
+            .or('email.ilike.%$searchQuery%,username.ilike.%$searchQuery%,first_name.ilike.%$searchQuery%,last_name.ilike.%$searchQuery%')
+            .neq('id', currentUserId!)
+            .limit(50);
+
+        return List<Map<String, dynamic>>.from(response);
+      }
+    } catch (e) {
+      throw Exception('Failed to search users: $e');
+    }
+  }
+
+  static Future<void> debugTestUserSearch() async {
+    ensureUserAuthenticated();
+    
+    try {
+      print('🔍 DEBUG: Starting user search test...');
+      print('📝 Current user ID: $currentUserId');
+      
+      print('\n--- TEST 1: Fetching all users ---');
+      final allUsers = await _supabase
+          .from('user_profiles')
+          .select('id, email, username, first_name, last_name')
+          .neq('id', currentUserId!)
+          .limit(10);
+      
+      print('✅ Found ${(allUsers as List).length} users in database');
+      for (var user in allUsers) {
+        print('  👤 ${user['username'] ?? user['email']} (${user['first_name']} ${user['last_name']})');
+      }
+      
+      print('\n--- TEST 2: Testing basic search ---');
+      final searchResult = await _supabase
+          .from('user_profiles')
+          .select('id, email, username, first_name, last_name')
+          .or('email.ilike.%test%,username.ilike.%test%,first_name.ilike.%test%,last_name.ilike.%test%')
+          .neq('id', currentUserId!)
+          .limit(10);
+      
+      print('✅ Basic search found ${(searchResult as List).length} results');
+      
+      print('\n--- TEST 3: Testing RPC function ---');
+      try {
+        final rpcResult = await _supabase.rpc('search_users_fuzzy', params: {
+          'search_query': 'test',
+          'current_user_id': currentUserId!,
+        });
+        print('✅ RPC function works! Found ${(rpcResult as List).length} results');
+      } catch (rpcError) {
+        print('⚠️  RPC function not available: $rpcError');
+      }
+      
+      print('\n✅ DEBUG TEST COMPLETED');
+    } catch (e) {
+      print('❌ DEBUG TEST FAILED: $e');
+      throw Exception('Debug test failed: $e');
+    }
+  }
+}('Failed to get user profile: $e');
     }
   }
 
@@ -793,6 +1564,10 @@ class DatabaseService {
           .from('user_profiles')
           .update(updates)
           .eq('id', currentUserId!);
+      
+      // Invalidate profile cache
+      await _clearCache('$_CACHE_USER_PROFILE$currentUserId');
+      await _clearCache('$_CACHE_PROFILE_TIMESTAMP$currentUserId');
           
     } catch (e) {
       if (e.toString().contains('duplicate key value') || 
@@ -811,6 +1586,10 @@ class DatabaseService {
         'is_premium': isPremium,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', userId);
+      
+      // Invalidate cache
+      await _clearCache('$_CACHE_USER_PROFILE$userId');
+      await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
     } catch (e) {
       throw Exception('Failed to update premium status: $e');
     }
@@ -870,6 +1649,10 @@ class DatabaseService {
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', userId);
+      
+      // Invalidate cache
+      await _clearCache('$_CACHE_USER_PROFILE$userId');
+      await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
       
       return publicUrl;
     } catch (e) {
@@ -935,6 +1718,10 @@ class DatabaseService {
               'updated_at': DateTime.now().toIso8601String(),
             })
             .eq('id', userId);
+        
+        // Invalidate cache
+        await _clearCache('$_CACHE_USER_PROFILE$userId');
+        await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
       }
     } catch (e) {
       throw Exception('Failed to delete picture: $e');
@@ -952,6 +1739,10 @@ class DatabaseService {
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', currentUserId!);
+      
+      // Invalidate cache
+      await _clearCache('$_CACHE_USER_PROFILE$currentUserId');
+      await _clearCache('$_CACHE_PROFILE_TIMESTAMP$currentUserId');
     } catch (e) {
       throw Exception('Failed to set profile picture: $e');
     }
@@ -1017,6 +1808,10 @@ class DatabaseService {
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', currentUserId!);
+      
+      // Invalidate cache
+      await _clearCache('$_CACHE_USER_PROFILE$currentUserId');
+      await _clearCache('$_CACHE_PROFILE_TIMESTAMP$currentUserId');
     } catch (e) {
       throw Exception('Failed to update privacy setting: $e');
     }
@@ -1040,6 +1835,11 @@ class DatabaseService {
           'daily_scans_used': 0,
           'last_scan_date': today,
         }).eq('id', userId);
+        
+        // Invalidate cache
+        await _clearCache('$_CACHE_USER_PROFILE$userId');
+        await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
+        
         return 0;
       }
 
@@ -1069,6 +1869,10 @@ class DatabaseService {
         'daily_scans_used': currentCount + 1,
       }).eq('id', currentUserId!);
       
+      // Invalidate cache
+      await _clearCache('$_CACHE_USER_PROFILE$currentUserId');
+      await _clearCache('$_CACHE_PROFILE_TIMESTAMP$currentUserId');
+      
       await awardBadge('first_scan');
       final totalScans = currentCount + 1;
       if (totalScans >= 10) await awardBadge('scans_10');
@@ -1079,23 +1883,35 @@ class DatabaseService {
   }
 
   // ==================================================
-  // FAVORITE RECIPES
+  // FAVORITE RECIPES (CACHED)
   // ==================================================
   
   static Future<List<FavoriteRecipe>> getFavoriteRecipes() async {
     if (currentUserId == null) return [];
 
     try {
+      // Check cache first
+      final cached = await _getCachedData(_CACHE_FAVORITE_RECIPES);
+      if (cached != null) {
+        final List<dynamic> decoded = jsonDecode(cached);
+        return decoded.map((recipe) => FavoriteRecipe.fromJson(recipe)).toList();
+      }
+      
+      // Fetch from server
       final response = await _supabase
           .from('favorite_recipes')
           .select()
           .eq('user_id', currentUserId!)
           .order('created_at', ascending: false);
 
-      return (response as List)
-      // CONTINUATION FROM: return (response as List)
+      final recipes = (response as List)
           .map((recipe) => FavoriteRecipe.fromJson(recipe))
           .toList();
+      
+      // Cache the result
+      await _cacheData(_CACHE_FAVORITE_RECIPES, jsonEncode(response));
+      
+      return recipes;
     } catch (e) {
       throw Exception('Failed to load favorite recipes: $e');
     }
@@ -1113,6 +1929,9 @@ class DatabaseService {
         'directions': directions,
         'created_at': DateTime.now().toIso8601String(),
       });
+      
+      // Invalidate cache
+      await _clearCache(_CACHE_FAVORITE_RECIPES);
     } catch (e) {
       throw Exception('Failed to add favorite recipe: $e');
     }
@@ -1123,6 +1942,9 @@ class DatabaseService {
 
     try {
       await _supabase.from('favorite_recipes').delete().eq('id', recipeId);
+      
+      // Invalidate cache
+      await _clearCache(_CACHE_FAVORITE_RECIPES);
     } catch (e) {
       throw Exception('Failed to remove favorite recipe: $e');
     }
@@ -1179,7 +2001,7 @@ class DatabaseService {
       if (items.isNotEmpty) {
         final groceryItems = items.asMap().entries.map((entry) => {
               'user_id': currentUserId!,
-              'item': entry.value, // Stores "2 x Milk" format or just "Milk"
+              'item': entry.value,
               'order_index': entry.key,
               'created_at': DateTime.now().toIso8601String(),
             }).toList();
@@ -1204,9 +2026,7 @@ class DatabaseService {
     }
   }
 
-  // NEW: Parse grocery item with quantity
   static Map<String, String> parseGroceryItem(String itemText) {
-    // Parse "quantity x item" format
     final parts = itemText.split(' x ');
     
     if (parts.length == 2) {
@@ -1222,7 +2042,6 @@ class DatabaseService {
     }
   }
 
-  // NEW: Format grocery item with quantity
   static String formatGroceryItem(String name, String quantity) {
     if (quantity.isNotEmpty) {
       return '$quantity x $name';
@@ -1231,7 +2050,6 @@ class DatabaseService {
     }
   }
 
-  // ENHANCED: Add to grocery list with optional quantity
   static Future<void> addToGroceryList(String item, {String? quantity}) async {
     ensureUserAuthenticated();
 
@@ -1239,7 +2057,6 @@ class DatabaseService {
       final currentItems = await getGroceryList();
       final newOrderIndex = currentItems.length;
       
-      // Format with quantity if provided
       final formattedItem = quantity != null && quantity.isNotEmpty 
           ? '$quantity x $item' 
           : item;
@@ -1281,7 +2098,6 @@ class DatabaseService {
     return false;
   }
 
-  // ENHANCED: Add recipe to shopping list with better quantity handling
   static Future<Map<String, dynamic>> addRecipeToShoppingList(
     String recipeName,
     String ingredients,
@@ -1291,7 +2107,6 @@ class DatabaseService {
     try {
       final currentItems = await getGroceryList();
       final currentItemNames = currentItems.map((item) {
-        // Parse out quantity to compare just the item names
         final parsed = parseGroceryItem(item.item);
         return parsed['name']!.toLowerCase();
       }).toList();
@@ -1357,22 +2172,35 @@ class DatabaseService {
   }
 
   // ==================================================
-  // SUBMITTED RECIPES
+  // SUBMITTED RECIPES (CACHED)
   // ==================================================
   
   static Future<List<SubmittedRecipe>> getSubmittedRecipes() async {
     if (currentUserId == null) return [];
 
     try {
+      // Check cache first
+      final cached = await _getCachedData(_CACHE_SUBMITTED_RECIPES);
+      if (cached != null) {
+        final List<dynamic> decoded = jsonDecode(cached);
+        return decoded.map((recipe) => SubmittedRecipe.fromJson(recipe)).toList();
+      }
+      
+      // Fetch from server
       final response = await _supabase
           .from('submitted_recipes')
           .select()
           .eq('user_id', currentUserId!)
           .order('created_at', ascending: false);
 
-      return (response as List)
+      final recipes = (response as List)
           .map((recipe) => SubmittedRecipe.fromJson(recipe))
           .toList();
+      
+      // Cache the result
+      await _cacheData(_CACHE_SUBMITTED_RECIPES, jsonEncode(response));
+      
+      return recipes;
     } catch (e) {
       throw Exception('Failed to load submitted recipes: $e');
     }
@@ -1391,6 +2219,9 @@ class DatabaseService {
         'created_at': DateTime.now().toIso8601String(),
       });
       
+      // Invalidate cache
+      await _clearCache(_CACHE_SUBMITTED_RECIPES);
+      
       await addXP(50, reason: 'Recipe submitted');
       await checkAchievements();
     } catch (e) {
@@ -1403,13 +2234,16 @@ class DatabaseService {
 
     try {
       await _supabase.from('submitted_recipes').delete().eq('id', recipeId);
+      
+      // Invalidate cache
+      await _clearCache(_CACHE_SUBMITTED_RECIPES);
     } catch (e) {
       throw Exception('Failed to delete submitted recipe: $e');
     }
   }
 
   // ==================================================
-  // RECIPE RATINGS & MANAGEMENT
+  // RECIPE RATINGS & MANAGEMENT (Always fetch fresh)
   // ==================================================
 
   static Future<void> rateRecipe(int recipeId, int rating) async {
@@ -1537,10 +2371,14 @@ class DatabaseService {
         'ingredients': ingredients,
         'directions': directions,
       }).eq('id', recipeId);
+      
+      // Invalidate cache
+      await _clearCache(_CACHE_SUBMITTED_RECIPES);
     } catch (e) {
       throw Exception('Failed to update recipe: $e');
     }
   }
+
 
   static Future<Map<String, dynamic>?> getRecipeById(int recipeId) async {
     try {
@@ -1598,13 +2436,23 @@ Shared from Recipe Scanner App
   }
 
   // ==================================================
-  // SOCIAL FEATURES - FRIENDS
+  // SOCIAL FEATURES - FRIENDS (CACHED)
   // ==================================================
 
   static Future<List<Map<String, dynamic>>> getFriends() async {
     ensureUserAuthenticated();
     
     try {
+      // Check cache first
+      final cacheKey = '$_CACHE_FRIENDS$currentUserId';
+      final cached = await _getCachedData(cacheKey);
+      
+      if (cached != null) {
+        final List<dynamic> decoded = jsonDecode(cached);
+        return List<Map<String, dynamic>>.from(decoded);
+      }
+      
+      // Fetch from server
       final response = await _supabase
           .from('friend_requests')
           .select('sender:user_profiles!friend_requests_sender_fkey(id, email, username, first_name, last_name, avatar_url), receiver:user_profiles!friend_requests_receiver_fkey(id, email, username, first_name, last_name, avatar_url)')
@@ -1618,12 +2466,17 @@ Shared from Recipe Scanner App
             : row['sender'];
         friends.add(friend);
       }
+      
+      // Cache the result
+      await _cacheData(cacheKey, jsonEncode(friends));
+      
       return friends;
     } catch (e) {
       throw Exception('Failed to load friends: $e');
     }
   }
 
+  // Friend requests always fetch fresh (user needs to see pending requests)
   static Future<List<Map<String, dynamic>>> getFriendRequests() async {
     ensureUserAuthenticated();
     
@@ -1730,6 +2583,9 @@ Shared from Recipe Scanner App
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', requestId);
+      
+      // Invalidate friends cache
+      await _clearCache('$_CACHE_FRIENDS$currentUserId');
     } catch (e) {
       throw Exception('Failed to accept friend request: $e');
     }
@@ -1794,6 +2650,9 @@ Shared from Recipe Scanner App
           .delete()
           .or('and(sender.eq.$currentUserId,receiver.eq.$friendId),and(sender.eq.$friendId,receiver.eq.$currentUserId)')
           .eq('status', 'accepted');
+      
+      // Invalidate friends cache
+      await _clearCache('$_CACHE_FRIENDS$currentUserId');
     } catch (e) {
       throw Exception('Failed to remove friend: $e');
     }
@@ -1879,20 +2738,66 @@ Shared from Recipe Scanner App
   }
 
   // ==================================================
-  // MESSAGING
+  // MESSAGING (SMART CACHING - OLD MESSAGES CACHED)
   // ==================================================
 
-  static Future<List<Map<String, dynamic>>> getMessages(String friendId) async {
+  static Future<List<Map<String, dynamic>>> getMessages(String friendId, {bool forceRefresh = false}) async {
     ensureUserAuthenticated();
     
     try {
+      final cacheKey = '$_CACHE_MESSAGES${currentUserId}_$friendId';
+      final lastTimeKey = '$_CACHE_LAST_MESSAGE_TIME${currentUserId}_$friendId';
+      
+      // If not force refresh, try to use cache + fetch only new messages
+      if (!forceRefresh) {
+        final cached = await _getCachedData(cacheKey);
+        final lastFetchTime = await _getCachedData(lastTimeKey);
+        
+        if (cached != null && lastFetchTime != null) {
+          // Get cached messages
+          final List<dynamic> cachedList = jsonDecode(cached);
+          final cachedMessages = List<Map<String, dynamic>>.from(cachedList);
+          
+          // Fetch only NEW messages since last fetch
+          final newMessages = await _supabase
+              .from('messages')
+              .select('*')
+              .or('and(sender.eq.$currentUserId,receiver.eq.$friendId),and(sender.eq.$friendId,receiver.eq.$currentUserId)')
+              .gt('created_at', lastFetchTime)
+              .order('created_at');
+          
+          final newMessagesList = List<Map<String, dynamic>>.from(newMessages);
+          
+          if (newMessagesList.isNotEmpty) {
+            // Combine cached + new messages
+            final combined = [...cachedMessages, ...newMessagesList];
+            
+            // Update cache
+            await _cacheData(cacheKey, jsonEncode(combined));
+            await _cacheData(lastTimeKey, DateTime.now().toIso8601String());
+            
+            return combined;
+          }
+          
+          // No new messages, return cached
+          return cachedMessages;
+        }
+      }
+      
+      // Full fetch (first time or force refresh)
       final response = await _supabase
           .from('messages')
           .select('*')
           .or('and(sender.eq.$currentUserId,receiver.eq.$friendId),and(sender.eq.$friendId,receiver.eq.$currentUserId)')
           .order('created_at');
 
-      return List<Map<String, dynamic>>.from(response);
+      final messages = List<Map<String, dynamic>>.from(response);
+      
+      // Cache the results
+      await _cacheData(cacheKey, jsonEncode(messages));
+      await _cacheData(lastTimeKey, DateTime.now().toIso8601String());
+      
+      return messages;
     } catch (e) {
       throw Exception('Failed to load messages: $e');
     }
@@ -1909,11 +2814,16 @@ Shared from Recipe Scanner App
         'is_read': false,
         'created_at': DateTime.now().toIso8601String(),
       });
+      
+      // Invalidate message cache for this conversation
+      await _clearCache('$_CACHE_MESSAGES${currentUserId}_$receiverId');
+      await _clearCache('$_CACHE_LAST_MESSAGE_TIME${currentUserId}_$receiverId');
     } catch (e) {
       throw Exception('Failed to send message: $e');
     }
   }
 
+  // Unread count always fetches fresh (must be accurate)
   static Future<int> getUnreadMessageCount() async {
     ensureUserAuthenticated();
     
@@ -1959,6 +2869,7 @@ Shared from Recipe Scanner App
     }
   }
 
+  // Chat list always fetches fresh (user needs latest message preview)
   static Future<List<Map<String, dynamic>>> getChatList() async {
     ensureUserAuthenticated();
     
@@ -2003,82 +2914,84 @@ Shared from Recipe Scanner App
   }
 
   // ==================================================
-  // USER SEARCH
+  // USER SEARCH (Always fetch fresh)
   // ==================================================
 
   static Future<List<Map<String, dynamic>>> searchUsers(String query) async {
-  ensureUserAuthenticated();
-  
-  try {
-    final searchQuery = query.trim();
-    if (searchQuery.isEmpty) return [];
-
+    ensureUserAuthenticated();
+    
     try {
-      final response = await _supabase.rpc('search_users_fuzzy', params: {
-        'search_query': searchQuery,
-        'current_user_id': currentUserId!,
-      });
+      final searchQuery = query.trim();
+      if (searchQuery.isEmpty) return [];
 
-      return List<Map<String, dynamic>>.from(response);
-    } catch (rpcError) {
-      print('RPC search failed, falling back to basic search: $rpcError');
-      
-      final response = await _supabase
-          .from('user_profiles')
-          .select('id, email, username, first_name, last_name, avatar_url')
-          .or('email.ilike.%$searchQuery%,username.ilike.%$searchQuery%,first_name.ilike.%$searchQuery%,last_name.ilike.%$searchQuery%')
-          .neq('id', currentUserId!)
-          .limit(50);
+      try {
+        final response = await _supabase.rpc('search_users_fuzzy', params: {
+          'search_query': searchQuery,
+          'current_user_id': currentUserId!,
+        });
 
-      return List<Map<String, dynamic>>.from(response);
+        return List<Map<String, dynamic>>.from(response);
+      } catch (rpcError) {
+        print('RPC search failed, falling back to basic search: $rpcError');
+        
+        final response = await _supabase
+            .from('user_profiles')
+            .select('id, email, username, first_name, last_name, avatar_url')
+            .or('email.ilike.%$searchQuery%,username.ilike.%$searchQuery%,first_name.ilike.%$searchQuery%,last_name.ilike.%$searchQuery%')
+            .neq('id', currentUserId!)
+            .limit(50);
+
+        return List<Map<String, dynamic>>.from(response);
+      }
+    } catch (e) {
+      throw Exception('Failed to search users: $e');
     }
-  } catch (e) {
-    throw Exception('Failed to search users: $e');
+  }
+
+  static Future<void> debugTestUserSearch() async {
+    ensureUserAuthenticated();
+    
+    try {
+      print('🔍 DEBUG: Starting user search test...');
+      print('📝 Current user ID: $currentUserId');
+      
+      print('\n--- TEST 1: Fetching all users ---');
+      final allUsers = await _supabase
+          .from('user_profiles')
+          .select('id, email, username, first_name, last_name')
+          .neq('id', currentUserId!)
+          .limit(10);
+      
+      print('✅ Found ${(allUsers as List).length} users in database');
+      for (var user in allUsers) {
+        print('  👤 ${user['username'] ?? user['email']} (${user['first_name']} ${user['last_name']})');
+      }
+      
+      print('\n--- TEST 2: Testing basic search ---');
+      final searchResult = await _supabase
+          .from('user_profiles')
+          .select('id, email, username, first_name, last_name')
+          .or('email.ilike.%test%,username.ilike.%test%,first_name.ilike.%test%,last_name.ilike.%test%')
+          .neq('id', currentUserId!)
+          .limit(10);
+      
+      print('✅ Basic search found ${(searchResult as List).length} results');
+      
+      print('\n--- TEST 3: Testing RPC function ---');
+      try {
+        final rpcResult = await _supabase.rpc('search_users_fuzzy', params: {
+          'search_query': 'test',
+          'current_user_id': currentUserId!,
+        });
+        print('✅ RPC function works! Found ${(rpcResult as List).length} results');
+      } catch (rpcError) {
+        print('⚠️  RPC function not available: $rpcError');
+      }
+      
+      print('\n✅ DEBUG TEST COMPLETED');
+    } catch (e) {
+      print('❌ DEBUG TEST FAILED: $e');
+      throw Exception('Debug test failed: $e');
+    }
   }
 }
-static Future<void> debugTestUserSearch() async {
-  ensureUserAuthenticated();
-  
-  try {
-    print('🔍 DEBUG: Starting user search test...');
-    print('📝 Current user ID: $currentUserId');
-    
-    print('\n--- TEST 1: Fetching all users ---');
-    final allUsers = await _supabase
-        .from('user_profiles')
-        .select('id, email, username, first_name, last_name')
-        .neq('id', currentUserId!)
-        .limit(10);
-    
-    print('✅ Found ${(allUsers as List).length} users in database');
-    for (var user in allUsers) {
-      print('  👤 ${user['username'] ?? user['email']} (${user['first_name']} ${user['last_name']})');
-    }
-    
-    print('\n--- TEST 2: Testing basic search ---');
-    final searchResult = await _supabase
-        .from('user_profiles')
-        .select('id, email, username, first_name, last_name')
-        .or('email.ilike.%test%,username.ilike.%test%,first_name.ilike.%test%,last_name.ilike.%test%')
-        .neq('id', currentUserId!)
-        .limit(10);
-    
-    print('✅ Basic search found ${(searchResult as List).length} results');
-    
-    print('\n--- TEST 3: Testing RPC function ---');
-    try {
-      final rpcResult = await _supabase.rpc('search_users_fuzzy', params: {
-        'search_query': 'test',
-        'current_user_id': currentUserId!,
-      });
-      print('✅ RPC function works! Found ${(rpcResult as List).length} results');
-    } catch (rpcError) {
-      print('⚠️  RPC function not available: $rpcError');
-    }
-    
-    print('\n✅ DEBUG TEST COMPLETED');
-  } catch (e) {
-    print('❌ DEBUG TEST FAILED: $e');
-    throw Exception('Debug test failed: $e');
-  }
-}}

@@ -1,6 +1,8 @@
-// lib/widgets/recipe_card.dart
+// lib/widgets/recipe_card.dart - OPTIMIZED: Aggressive caching for ratings (HIGHEST EGRESS REDUCTION)
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import '../models/submitted_recipe.dart';
 import '../services/database_service.dart';
 import '../services/error_handling_service.dart';
@@ -30,12 +32,22 @@ class _RecipeCardState extends State<RecipeCard> {
   bool _isLoadingRating = true;
   int? _userRating;
 
+  // Cache keys
+  static const String _ratingCachePrefix = 'recipe_rating_';
+  static const String _userRatingCachePrefix = 'recipe_user_rating_';
+  static const Duration _cacheDuration = Duration(minutes: 5); // Ratings don't change frequently
+
   @override
   void initState() {
     super.initState();
     _loadRating();
   }
 
+  /// Get cache key for recipe ratings
+  String _getRatingCacheKey() => '${_ratingCachePrefix}${widget.recipe.id}';
+  String _getUserRatingCacheKey() => '${_userRatingCachePrefix}${widget.recipe.id}';
+
+  /// Load rating from cache first, then database if stale
   Future<void> _loadRating() async {
     if (!mounted) return;
 
@@ -56,8 +68,54 @@ class _RecipeCardState extends State<RecipeCard> {
     });
 
     try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Try to load from cache first
+      final cachedRatingData = prefs.getString(_getRatingCacheKey());
+      final cachedUserRating = prefs.getInt(_getUserRatingCacheKey());
+      
+      bool usedCache = false;
+      
+      if (cachedRatingData != null) {
+        final ratingData = json.decode(cachedRatingData);
+        final cacheTime = ratingData['timestamp'] as int?;
+        
+        if (cacheTime != null) {
+          final cacheAge = DateTime.now().millisecondsSinceEpoch - cacheTime;
+          
+          if (cacheAge < _cacheDuration.inMilliseconds) {
+            // Cache is valid, use it
+            if (mounted) {
+              setState(() {
+                _averageRating = (ratingData['average'] as num?)?.toDouble() ?? 0.0;
+                _ratingCount = ratingData['count'] as int? ?? 0;
+                _userRating = cachedUserRating;
+                _isLoadingRating = false;
+              });
+            }
+            usedCache = true;
+            return;
+          }
+        }
+      }
+      
+      // Cache miss or stale, fetch from database
       final ratingData = await DatabaseService.getRecipeAverageRating(widget.recipe.id!);
       final userRating = await DatabaseService.getUserRecipeRating(widget.recipe.id!);
+
+      // Cache the results
+      final cacheData = {
+        'average': ratingData['average'] ?? 0.0,
+        'count': ratingData['count'] ?? 0,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+      
+      await prefs.setString(_getRatingCacheKey(), json.encode(cacheData));
+      if (userRating != null) {
+        await prefs.setInt(_getUserRatingCacheKey(), userRating);
+      } else {
+        await prefs.remove(_getUserRatingCacheKey());
+      }
 
       if (mounted) {
         setState(() {
@@ -69,11 +127,48 @@ class _RecipeCardState extends State<RecipeCard> {
       }
     } catch (e) {
       if (mounted) {
+        // On error, try to use cached value even if stale
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          final cachedRatingData = prefs.getString(_getRatingCacheKey());
+          final cachedUserRating = prefs.getInt(_getUserRatingCacheKey());
+          
+          if (cachedRatingData != null) {
+            final ratingData = json.decode(cachedRatingData);
+            setState(() {
+              _averageRating = (ratingData['average'] as num?)?.toDouble() ?? 0.0;
+              _ratingCount = ratingData['count'] as int? ?? 0;
+              _userRating = cachedUserRating;
+              _isLoadingRating = false;
+            });
+            return;
+          }
+        } catch (_) {}
+        
+        // Fall back to zero state
         setState(() {
           _averageRating = 0.0;
           _ratingCount = 0;
           _isLoadingRating = false;
         });
+      }
+    }
+  }
+
+  /// Invalidate cache for a specific recipe (call after rating)
+  static Future<void> invalidateRecipeCache(int recipeId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('${_ratingCachePrefix}$recipeId');
+    await prefs.remove('${_userRatingCachePrefix}$recipeId');
+  }
+
+  /// Clear all recipe rating caches (for debugging or logout)
+  static Future<void> clearAllRatingCaches() async {
+    final prefs = await SharedPreferences.getInstance();
+    final keys = prefs.getKeys();
+    for (final key in keys) {
+      if (key.startsWith(_ratingCachePrefix) || key.startsWith(_userRatingCachePrefix)) {
+        await prefs.remove(key);
       }
     }
   }
@@ -103,6 +198,10 @@ class _RecipeCardState extends State<RecipeCard> {
     );
 
     if (confirm == true) {
+      // Invalidate cache when deleting
+      if (widget.recipe.id != null) {
+        await invalidateRecipeCache(widget.recipe.id!);
+      }
       widget.onDelete();
     }
   }
@@ -153,7 +252,9 @@ class _RecipeCardState extends State<RecipeCard> {
     );
 
     if (result != null) {
-      await _loadRating();
+      // Invalidate cache after rating change
+      await invalidateRecipeCache(widget.recipe.id!);
+      await _loadRating(); // Reload with fresh data
       widget.onRatingChanged();
     }
   }

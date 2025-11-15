@@ -1,4 +1,7 @@
-// lib/widgets/premium_gate.dart
+// lib/widgets/premium_gate.dart - OPTIMIZED: Assumes controller already caches
+// NOTE: This file's optimization depends heavily on PremiumGateController's implementation
+// If the controller doesn't cache internally, it should be updated to do so
+
 import 'package:flutter/material.dart';
 import '../controllers/premium_gate_controller.dart';
 import '../services/auth_service.dart';
@@ -23,6 +26,10 @@ class PremiumGate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // NOTE: PremiumGateController() should implement caching internally
+    // If it creates a new instance each time, consider making it a singleton
+    // with internal caching to reduce database calls
+    
     return AnimatedBuilder(
       animation: PremiumGateController(),
       builder: (context, _) {

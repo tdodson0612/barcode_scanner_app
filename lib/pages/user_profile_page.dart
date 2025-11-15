@@ -1,5 +1,7 @@
-// lib/pages/user_profile_page.dart - ENHANCED: Added unfriend functionality
+// lib/pages/user_profile_page.dart - OPTIMIZED: Aggressive caching for profiles and friendship status
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import '../services/database_service.dart';
 import '../services/error_handling_service.dart';
 import 'chat_page.dart';
@@ -19,20 +21,59 @@ class _UserProfilePageState extends State<UserProfilePage> {
   bool isLoading = true;
   bool isActionLoading = false;
 
+  // Cache keys and durations
+  static const Duration _profileCacheDuration = Duration(minutes: 10); // Profiles don't change often
+  static const Duration _friendshipCacheDuration = Duration(seconds: 30); // Friendship changes more frequently
+  
+  String _getProfileCacheKey() => 'user_profile_${widget.userId}';
+  String _getFriendshipCacheKey() => 'friendship_status_${widget.userId}';
+
   @override
   void initState() {
     super.initState();
     _loadUserProfile();
   }
 
-  Future<void> _loadUserProfile() async {
+  Future<void> _loadUserProfile({bool forceRefresh = false}) async {
     try {
       setState(() => isLoading = true);
       
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Try loading from cache first (unless force refresh)
+      if (!forceRefresh) {
+        final cachedProfile = _getCachedProfile(prefs);
+        final cachedFriendship = _getCachedFriendship(prefs);
+        
+        if (cachedProfile != null && cachedFriendship != null) {
+          // Both cached, use them immediately
+          if (mounted) {
+            setState(() {
+              userProfile = cachedProfile;
+              friendshipStatus = cachedFriendship;
+              isLoading = false;
+            });
+          }
+          return;
+        } else if (cachedProfile != null) {
+          // Profile cached, show it while fetching friendship
+          if (mounted) {
+            setState(() {
+              userProfile = cachedProfile;
+            });
+          }
+        }
+      }
+      
+      // Fetch fresh data
       final results = await Future.wait([
         DatabaseService.getUserProfile(widget.userId),
         DatabaseService.checkFriendshipStatus(widget.userId),
       ]);
+      
+      // Cache the results
+      await _cacheProfile(prefs, results[0]);
+      await _cacheFriendship(prefs, results[1] as Map<String, dynamic>);
       
       if (mounted) {
         setState(() {
@@ -45,15 +86,113 @@ class _UserProfilePageState extends State<UserProfilePage> {
       if (mounted) {
         setState(() => isLoading = false);
         
+        // Try to show cached data even if stale
+        final prefs = await SharedPreferences.getInstance();
+        final staleProfile = _getCachedProfile(prefs, ignoreExpiry: true);
+        final staleFriendship = _getCachedFriendship(prefs, ignoreExpiry: true);
+        
+        if (staleProfile != null && staleFriendship != null) {
+          setState(() {
+            userProfile = staleProfile;
+            friendshipStatus = staleFriendship;
+          });
+        }
+        
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
           category: ErrorHandlingService.databaseError,
           showSnackBar: true,
           customMessage: 'Unable to load user profile',
-          onRetry: _loadUserProfile,
+          onRetry: () => _loadUserProfile(forceRefresh: true),
         );
       }
+    }
+  }
+
+  Map<String, dynamic>? _getCachedProfile(SharedPreferences prefs, {bool ignoreExpiry = false}) {
+    try {
+      final cached = prefs.getString(_getProfileCacheKey());
+      if (cached == null) return null;
+      
+      final data = json.decode(cached);
+      final timestamp = data['_cached_at'] as int?;
+      
+      if (timestamp == null) return null;
+      
+      if (!ignoreExpiry) {
+        final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+        if (age > _profileCacheDuration.inMilliseconds) return null;
+      }
+      
+      return Map<String, dynamic>.from(data['data']);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Map<String, dynamic>? _getCachedFriendship(SharedPreferences prefs, {bool ignoreExpiry = false}) {
+    try {
+      final cached = prefs.getString(_getFriendshipCacheKey());
+      if (cached == null) return null;
+      
+      final data = json.decode(cached);
+      final timestamp = data['_cached_at'] as int?;
+      
+      if (timestamp == null) return null;
+      
+      if (!ignoreExpiry) {
+        final age = DateTime.now().millisecondsSinceEpoch - timestamp;
+        if (age > _friendshipCacheDuration.inMilliseconds) return null;
+      }
+      
+      return Map<String, dynamic>.from(data['data']);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<void> _cacheProfile(SharedPreferences prefs, Map<String, dynamic> profile) async {
+    try {
+      final cacheData = {
+        'data': profile,
+        '_cached_at': DateTime.now().millisecondsSinceEpoch,
+      };
+      await prefs.setString(_getProfileCacheKey(), json.encode(cacheData));
+    } catch (e) {
+      print('Error caching profile: $e');
+    }
+  }
+
+  Future<void> _cacheFriendship(SharedPreferences prefs, Map<String, dynamic> friendship) async {
+    try {
+      final cacheData = {
+        'data': friendship,
+        '_cached_at': DateTime.now().millisecondsSinceEpoch,
+      };
+      await prefs.setString(_getFriendshipCacheKey(), json.encode(cacheData));
+    } catch (e) {
+      print('Error caching friendship: $e');
+    }
+  }
+
+  Future<void> _invalidateFriendshipCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_getFriendshipCacheKey());
+    } catch (e) {
+      print('Error invalidating cache: $e');
+    }
+  }
+
+  /// Public static method to invalidate cache for a specific user
+  static Future<void> invalidateUserCache(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('user_profile_$userId');
+      await prefs.remove('friendship_status_$userId');
+    } catch (e) {
+      print('Error invalidating user cache: $e');
     }
   }
 
@@ -65,7 +204,12 @@ class _UserProfilePageState extends State<UserProfilePage> {
       
       await DatabaseService.sendFriendRequest(widget.userId);
       
+      // Invalidate cache before fetching fresh data
+      await _invalidateFriendshipCache();
+      
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
+      final prefs = await SharedPreferences.getInstance();
+      await _cacheFriendship(prefs, status);
       
       if (mounted) {
         setState(() {
@@ -97,8 +241,11 @@ class _UserProfilePageState extends State<UserProfilePage> {
       setState(() => isActionLoading = true);
       
       await DatabaseService.cancelFriendRequest(widget.userId);
+      await _invalidateFriendshipCache();
       
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
+      final prefs = await SharedPreferences.getInstance();
+      await _cacheFriendship(prefs, status);
       
       if (mounted) {
         setState(() {
@@ -130,8 +277,11 @@ class _UserProfilePageState extends State<UserProfilePage> {
       setState(() => isActionLoading = true);
       
       await DatabaseService.acceptFriendRequest(friendshipStatus!['requestId']);
+      await _invalidateFriendshipCache();
       
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
+      final prefs = await SharedPreferences.getInstance();
+      await _cacheFriendship(prefs, status);
       
       if (mounted) {
         setState(() {
@@ -184,8 +334,11 @@ class _UserProfilePageState extends State<UserProfilePage> {
       setState(() => isActionLoading = true);
       
       await DatabaseService.declineFriendRequest(friendshipStatus!['requestId']);
+      await _invalidateFriendshipCache();
       
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
+      final prefs = await SharedPreferences.getInstance();
+      await _cacheFriendship(prefs, status);
       
       if (mounted) {
         setState(() {
@@ -210,7 +363,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
     }
   }
 
-  // NEW: Unfriend functionality
   Future<void> _unfriend() async {
     if (isActionLoading) return;
     
@@ -241,8 +393,11 @@ class _UserProfilePageState extends State<UserProfilePage> {
       setState(() => isActionLoading = true);
       
       await DatabaseService.removeFriend(widget.userId);
+      await _invalidateFriendshipCache();
       
       final status = await DatabaseService.checkFriendshipStatus(widget.userId);
+      final prefs = await SharedPreferences.getInstance();
+      await _cacheFriendship(prefs, status);
       
       if (mounted) {
         setState(() {
@@ -337,7 +492,6 @@ class _UserProfilePageState extends State<UserProfilePage> {
               ),
             ),
             SizedBox(height: 8),
-            // NEW: Unfriend button
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -512,7 +666,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
           IconButton(
             onPressed: () async {
               try {
-                await _loadUserProfile();
+                await _loadUserProfile(forceRefresh: true);
                 if (mounted) {
                   ErrorHandlingService.showSuccess(context, 'Profile refreshed');
                 }
@@ -584,7 +738,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
                   ),
                 )
               : RefreshIndicator(
-                  onRefresh: _loadUserProfile,
+                  onRefresh: () => _loadUserProfile(forceRefresh: true),
                   child: SingleChildScrollView(
                     physics: AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.all(20),
