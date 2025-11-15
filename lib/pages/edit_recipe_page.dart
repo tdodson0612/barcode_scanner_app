@@ -1,5 +1,6 @@
-// lib/pages/edit_recipe_page.dart
+// lib/pages/edit_recipe_page.dart - WITH CACHE INVALIDATION
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/submitted_recipe.dart';
 import '../services/database_service.dart';
 import '../services/error_handling_service.dart';
@@ -39,6 +40,24 @@ class _EditRecipePageState extends State<EditRecipePage> {
     super.dispose();
   }
 
+  // Invalidate cached recipes after update
+  Future<void> _invalidateRecipeCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Clear submitted recipes cache (list)
+      await prefs.remove('submitted_recipes_${widget.recipe.userId}');
+      
+      // Clear individual recipe cache if it exists
+      await prefs.remove('submitted_recipe_${widget.recipe.id}');
+      
+      print('Recipe cache invalidated after update');
+    } catch (e) {
+      print('Error invalidating recipe cache: $e');
+      // Don't throw - cache invalidation failure shouldn't break the update
+    }
+  }
+
   Future<void> _saveRecipe() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -64,6 +83,9 @@ class _EditRecipePageState extends State<EditRecipePage> {
         ingredients: _ingredientsController.text.trim(),
         directions: _directionsController.text.trim(),
       );
+
+      // Invalidate cache so next fetch gets fresh data
+      await _invalidateRecipeCache();
 
       if (mounted) {
         ErrorHandlingService.showSuccess(

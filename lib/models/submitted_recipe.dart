@@ -1,3 +1,4 @@
+//submitted_recipe.dart
 class SubmittedRecipe {
   final int? id;
   final String userId;
