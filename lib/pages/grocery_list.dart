@@ -1,4 +1,4 @@
-// lib/pages/grocery_list_page.dart - OPTIMIZED: Aggressive caching for grocery list
+// lib/pages/grocery_list_page.dart - FIXED: Added missing orderIndex parameter
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,7 +21,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
   bool isSaving = false;
 
   // Cache configuration
-  static const Duration _listCacheDuration = Duration(minutes: 5); // Grocery lists don't change often
+  static const Duration _listCacheDuration = Duration(minutes: 5);
 
   @override
   void initState() {
@@ -57,7 +57,6 @@ class _GroceryListPageState extends State<GroceryListPage> {
   void _addScannedItem(String item) {
     if (mounted) {
       setState(() {
-        // Remove the last empty controller pair if it exists
         if (itemControllers.isNotEmpty && 
             itemControllers.last['name']!.text.isEmpty) {
           itemControllers.last['name']!.dispose();
@@ -65,13 +64,11 @@ class _GroceryListPageState extends State<GroceryListPage> {
           itemControllers.removeLast();
         }
         
-        // Add the scanned item with quantity 1
         itemControllers.add({
           'name': TextEditingController(text: item),
           'quantity': TextEditingController(text: '1'),
         });
         
-        // Add new empty controller pair at the end
         itemControllers.add({
           'name': TextEditingController(),
           'quantity': TextEditingController(),
@@ -91,8 +88,6 @@ class _GroceryListPageState extends State<GroceryListPage> {
       );
     }
   }
-
-  // ========== CACHING HELPERS ==========
 
   Future<List<GroceryItem>?> _getCachedGroceryList() async {
     try {
@@ -339,18 +334,17 @@ class _GroceryListPageState extends State<GroceryListPage> {
           
       await DatabaseService.saveGroceryList(items);
       
-      // Invalidate cache after successful save
       await _invalidateGroceryListCache();
       
-      // Create GroceryItem list for caching
-      final groceryItems = items.map((item) => GroceryItem(
-        id: null, // We don't have IDs from the save operation
+      // FIXED: Added orderIndex parameter using asMap().entries
+      final groceryItems = items.asMap().entries.map((entry) => GroceryItem(
+        id: null,
         userId: DatabaseService.currentUserId ?? '',
-        item: item,
+        item: entry.value,
+        orderIndex: entry.key, // This is the fix - was missing before
         createdAt: DateTime.now(),
       )).toList();
       
-      // Cache the new list
       await _cacheGroceryList(groceryItems);
       
       if (mounted) {
@@ -396,7 +390,6 @@ class _GroceryListPageState extends State<GroceryListPage> {
               try {
                 await DatabaseService.clearGroceryList();
                 
-                // Invalidate cache after clearing
                 await _invalidateGroceryListCache();
                 
                 if (mounted) {
@@ -525,7 +518,6 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                   padding: const EdgeInsets.only(bottom: 12),
                                   child: Row(
                                     children: [
-                                      // Item number
                                       Container(
                                         width: 35,
                                         height: 35,
@@ -550,7 +542,6 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                       ),
                                       const SizedBox(width: 12),
                                       
-                                      // Quantity field
                                       SizedBox(
                                         width: 60,
                                         child: TextField(
@@ -583,7 +574,6 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                       ),
                                       const SizedBox(width: 8),
                                       
-                                      // Item name field
                                       Expanded(
                                         child: TextField(
                                           controller: itemControllers[index]['name'],
@@ -612,7 +602,6 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                         ),
                                       ),
                                       
-                                      // Remove button
                                       if (itemControllers.length > 1)
                                         Padding(
                                           padding: const EdgeInsets.only(left: 8),

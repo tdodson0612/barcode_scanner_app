@@ -169,7 +169,7 @@ class _MyAppState extends State<MyApp> {
       initialRoute: _getInitialRoute(supabase),
       routes: {
         '/login': (context) => const LoginPage(),
-        '/home': (context) => MainNavigation(isPremium: _isPremium), // ✅ Replaced with bottom nav
+        '/home': (context) => const HomePage(), // ✅ Changed back to HomeScreen
         '/profile': (context) => ProfileScreen(favoriteRecipes: const []),
         '/purchase': (context) => const PremiumPage(),
         '/grocery-list': (context) => const GroceryListPage(),
@@ -178,8 +178,8 @@ class _MyAppState extends State<MyApp> {
         '/search-users': (context) => const SearchUsersPage(),
         '/favorite-recipes': (context) => FavoriteRecipesPage(favoriteRecipes: const []),
         '/contact': (context) => const ContactScreen(),
-        '/create-post': (context) => const CreatePostPage(),
-        '/feed': (context) => const DiscoveryFeedPage(),
+        // '/create-post': (context) => const CreatePostPage(),
+        // '/feed': (context) => const DiscoveryFeedPage(),
       },
       onUnknownRoute: (settings) {
         if (AppConfig.enableDebugPrints) {
