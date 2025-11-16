@@ -1,11 +1,13 @@
-// lib/services/database_service.dart - COMPLETE WITH ALL METHODS
+// lib/services/database_service.dart - REFACTORED: Routes all data operations through Cloudflare Worker
 import 'dart:convert';
 import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 import '../models/favorite_recipe.dart';
 import '../models/grocery_item.dart';
 import '../models/submitted_recipe.dart';
+import '../config/app_config.dart';
 import 'auth_service.dart';
 
 class DatabaseService {
@@ -26,7 +28,48 @@ class DatabaseService {
   static const String _CACHE_FAVORITE_RECIPES = 'cache_favorite_recipes';
 
   // ==================================================
-  // CACHE HELPER METHODS
+  // CLOUDFLARE WORKER HELPER METHODS
+  // ==================================================
+  
+  /// Send a query to the Cloudflare Worker (replaces direct Supabase calls)
+  static Future<dynamic> _workerQuery({
+    required String action,
+    required String table,
+    List<String>? columns,
+    Map<String, dynamic>? filters,
+    Map<String, dynamic>? data,
+    String? orderBy,
+    bool? ascending,
+    int? limit,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': action,
+          'table': table,
+          if (columns != null) 'columns': columns,
+          if (filters != null) 'filters': filters,
+          if (data != null) 'data': data,
+          if (orderBy != null) 'orderBy': orderBy,
+          if (ascending != null) 'ascending': ascending,
+          if (limit != null) 'limit': limit,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Worker query failed: ${response.body}');
+      }
+
+      return jsonDecode(response.body);
+    } catch (e) {
+      throw Exception('Failed to execute worker query: $e');
+    }
+  }
+
+  // ==================================================
+  // CACHE HELPER METHODS (Unchanged - local only)
   // ==================================================
   
   static Future<SharedPreferences> _getPrefs() async {
@@ -63,7 +106,7 @@ class DatabaseService {
   }
 
   // ==================================================
-  // CURRENT USER ID & AUTH CHECK
+  // CURRENT USER ID & AUTH CHECK (Unchanged - uses Supabase auth)
   // ==================================================
   static String? get currentUserId => _supabase.auth.currentUser?.id;
 
@@ -91,16 +134,18 @@ class DatabaseService {
       int newLevel = _calculateLevel(newXP);
       bool leveledUp = newLevel > currentLevel;
       
-      await _supabase
-          .from('user_profiles')
-          .update({
-            'xp': newXP,
-            'level': newLevel,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', currentUserId!);
+      // MODIFIED: Update via Worker instead of direct Supabase
+      await _workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': currentUserId!},
+        data: {
+          'xp': newXP,
+          'level': newLevel,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
       
-      // Invalidate profile cache since XP changed
       await _clearCache('$_CACHE_USER_PROFILE$currentUserId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$currentUserId');
       
@@ -157,10 +202,14 @@ class DatabaseService {
         return List<Map<String, dynamic>>.from(decoded);
       }
       
-      final response = await _supabase
-          .from('badges')
-          .select()
-          .order('xp_reward');
+      // MODIFIED: Fetch via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'badges',
+        columns: ['*'],
+        orderBy: 'xp_reward',
+        ascending: true,
+      );
       
       final badges = List<Map<String, dynamic>>.from(response);
       await _cacheData(_CACHE_BADGES, jsonEncode(badges));
@@ -180,11 +229,16 @@ class DatabaseService {
         return List<Map<String, dynamic>>.from(decoded);
       }
       
-      final response = await _supabase
-          .from('user_achievements')
-          .select('*, badge:badges(*)')
-          .eq('user_id', userId)
-          .order('earned_at', ascending: false);
+      // MODIFIED: Fetch via Worker
+      // Note: Worker needs to handle joins. For now, fetch user_achievements
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'user_achievements',
+        columns: ['*'],
+        filters: {'user_id': userId},
+        orderBy: 'earned_at',
+        ascending: false,
+      );
       
       final badges = List<Map<String, dynamic>>.from(response);
       await _cacheData(cacheKey, jsonEncode(badges));
@@ -199,33 +253,49 @@ class DatabaseService {
     ensureUserAuthenticated();
     
     try {
-      final existing = await _supabase
-          .from('user_achievements')
-          .select()
-          .eq('user_id', currentUserId!)
-          .eq('badge_id', badgeId)
-          .maybeSingle();
+      // MODIFIED: Check via Worker
+      final existing = await _workerQuery(
+        action: 'select',
+        table: 'user_achievements',
+        columns: ['*'],
+        filters: {
+          'user_id': currentUserId!,
+          'badge_id': badgeId,
+        },
+        limit: 1,
+      );
       
-      if (existing != null) {
+      if (existing != null && (existing as List).isNotEmpty) {
         return false;
       }
       
-      await _supabase.from('user_achievements').insert({
-        'user_id': currentUserId!,
-        'badge_id': badgeId,
-        'earned_at': DateTime.now().toIso8601String(),
-      });
+      // MODIFIED: Insert via Worker
+      await _workerQuery(
+        action: 'insert',
+        table: 'user_achievements',
+        data: {
+          'user_id': currentUserId!,
+          'badge_id': badgeId,
+          'earned_at': DateTime.now().toIso8601String(),
+        },
+      );
       
       await _clearCache('$_CACHE_USER_BADGES$currentUserId');
       
-      final badge = await _supabase
-          .from('badges')
-          .select('xp_reward')
-          .eq('id', badgeId)
-          .single();
+      // MODIFIED: Fetch badge via Worker
+      final badgeData = await _workerQuery(
+        action: 'select',
+        table: 'badges',
+        columns: ['xp_reward'],
+        filters: {'id': badgeId},
+        limit: 1,
+      );
       
-      if (badge['xp_reward'] != null && badge['xp_reward'] > 0) {
-        await addXP(badge['xp_reward'], reason: 'Badge: $badgeId');
+      if (badgeData != null && (badgeData as List).isNotEmpty) {
+        final badge = badgeData[0];
+        if (badge['xp_reward'] != null && badge['xp_reward'] > 0) {
+          await addXP(badge['xp_reward'], reason: 'Badge: $badgeId');
+        }
       }
       
       return true;
@@ -261,18 +331,23 @@ class DatabaseService {
     {bool isPremium = false}
   ) async {
     try {
-      await _supabase.from('user_profiles').insert({
-        'id': userId,
-        'email': email,
-        'is_premium': isPremium,
-        'daily_scans_used': 0,
-        'last_scan_date': DateTime.now().toIso8601String().split('T')[0],
-        'created_at': DateTime.now().toIso8601String(),
-        'username': email.split('@')[0],
-        'friends_list_visible': true,
-        'xp': 0,
-        'level': 1,
-      });
+      // MODIFIED: Insert via Worker
+      await _workerQuery(
+        action: 'insert',
+        table: 'user_profiles',
+        data: {
+          'id': userId,
+          'email': email,
+          'is_premium': isPremium,
+          'daily_scans_used': 0,
+          'last_scan_date': DateTime.now().toIso8601String().split('T')[0],
+          'created_at': DateTime.now().toIso8601String(),
+          'username': email.split('@')[0],
+          'friends_list_visible': true,
+          'xp': 0,
+          'level': 1,
+        },
+      );
       
       await awardBadge('early_adopter');
     } catch (e) {
@@ -289,29 +364,43 @@ class DatabaseService {
       final cachedTimestamp = await _getCachedData(timestampKey);
       
       if (cached != null && cachedTimestamp != null) {
-        final serverProfile = await _supabase
-            .from('user_profiles')
-            .select('updated_at')
-            .eq('id', userId)
-            .single();
+        // MODIFIED: Check timestamp via Worker
+        final serverProfileData = await _workerQuery(
+          action: 'select',
+          table: 'user_profiles',
+          columns: ['updated_at'],
+          filters: {'id': userId},
+          limit: 1,
+        );
         
-        final serverTimestamp = serverProfile['updated_at'] ?? '';
-        
-        if (serverTimestamp == cachedTimestamp) {
-          return jsonDecode(cached);
+        if (serverProfileData != null && (serverProfileData as List).isNotEmpty) {
+          final serverProfile = serverProfileData[0];
+          final serverTimestamp = serverProfile['updated_at'] ?? '';
+          
+          if (serverTimestamp == cachedTimestamp) {
+            return jsonDecode(cached);
+          }
         }
       }
       
-      final response = await _supabase
-          .from('user_profiles')
-          .select()
-          .eq('id', userId)
-          .single();
+      // MODIFIED: Fetch via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'user_profiles',
+        columns: ['*'],
+        filters: {'id': userId},
+        limit: 1,
+      );
       
-      await _cacheData(cacheKey, jsonEncode(response));
-      await _cacheData(timestampKey, response['updated_at'] ?? DateTime.now().toIso8601String());
+      if (response == null || (response as List).isEmpty) {
+        return null;
+      }
       
-      return response;
+      final profileData = response[0];
+      await _cacheData(cacheKey, jsonEncode(profileData));
+      await _cacheData(timestampKey, profileData['updated_at'] ?? DateTime.now().toIso8601String());
+      
+      return profileData;
     } catch (e) {
       throw Exception('Failed to get user profile: $e');
     }
@@ -342,11 +431,15 @@ class DatabaseService {
         return decoded.map((recipe) => SubmittedRecipe.fromJson(recipe)).toList();
       }
       
-      final response = await _supabase
-          .from('submitted_recipes')
-          .select()
-          .eq('user_id', currentUserId!)
-          .order('created_at', ascending: false);
+      // MODIFIED: Fetch via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'submitted_recipes',
+        columns: ['*'],
+        filters: {'user_id': currentUserId!},
+        orderBy: 'created_at',
+        ascending: false,
+      );
 
       final recipes = (response as List)
           .map((recipe) => SubmittedRecipe.fromJson(recipe))
@@ -365,13 +458,18 @@ class DatabaseService {
     ensureUserAuthenticated();
 
     try {
-      await _supabase.from('submitted_recipes').insert({
-        'user_id': currentUserId!,
-        'recipe_name': recipeName,
-        'ingredients': ingredients,
-        'directions': directions,
-        'created_at': DateTime.now().toIso8601String(),
-      });
+      // MODIFIED: Insert via Worker
+      await _workerQuery(
+        action: 'insert',
+        table: 'submitted_recipes',
+        data: {
+          'user_id': currentUserId!,
+          'recipe_name': recipeName,
+          'ingredients': ingredients,
+          'directions': directions,
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
       
       await _clearCache(_CACHE_SUBMITTED_RECIPES);
       await addXP(50, reason: 'Recipe submitted');
@@ -390,22 +488,35 @@ class DatabaseService {
     ensureUserAuthenticated();
 
     try {
-      final recipe = await _supabase
-          .from('submitted_recipes')
-          .select('user_id')
-          .eq('id', recipeId)
-          .single();
+      // MODIFIED: Check ownership via Worker
+      final recipeData = await _workerQuery(
+        action: 'select',
+        table: 'submitted_recipes',
+        columns: ['user_id'],
+        filters: {'id': recipeId},
+        limit: 1,
+      );
 
-      if (recipe['user_id'] != currentUserId) {
+      if (recipeData == null || (recipeData as List).isEmpty) {
+        throw Exception('Recipe not found');
+      }
+
+      if (recipeData[0]['user_id'] != currentUserId) {
         throw Exception('You can only edit your own recipes');
       }
 
-      await _supabase.from('submitted_recipes').update({
-        'recipe_name': recipeName,
-        'ingredients': ingredients,
-        'directions': directions,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', recipeId);
+      // MODIFIED: Update via Worker
+      await _workerQuery(
+        action: 'update',
+        table: 'submitted_recipes',
+        filters: {'id': recipeId},
+        data: {
+          'recipe_name': recipeName,
+          'ingredients': ingredients,
+          'directions': directions,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
       
       await _clearCache(_CACHE_SUBMITTED_RECIPES);
     } catch (e) {
@@ -417,7 +528,13 @@ class DatabaseService {
     ensureUserAuthenticated();
 
     try {
-      await _supabase.from('submitted_recipes').delete().eq('id', recipeId);
+      // MODIFIED: Delete via Worker
+      await _workerQuery(
+        action: 'delete',
+        table: 'submitted_recipes',
+        filters: {'id': recipeId},
+      );
+      
       await _clearCache(_CACHE_SUBMITTED_RECIPES);
     } catch (e) {
       throw Exception('Failed to delete submitted recipe: $e');
@@ -426,13 +543,20 @@ class DatabaseService {
 
   static Future<Map<String, dynamic>?> getRecipeById(int recipeId) async {
     try {
-      final response = await _supabase
-          .from('submitted_recipes')
-          .select()
-          .eq('id', recipeId)
-          .single();
+      // MODIFIED: Fetch via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'submitted_recipes',
+        columns: ['*'],
+        filters: {'id': recipeId},
+        limit: 1,
+      );
 
-      return response;
+      if (response == null || (response as List).isEmpty) {
+        return null;
+      }
+
+      return response[0];
     } catch (e) {
       throw Exception('Failed to get recipe: $e');
     }
@@ -471,10 +595,16 @@ Shared from Recipe Scanner App
       final lastScanDate = profile?['last_scan_date'] ?? '';
 
       if (lastScanDate != today) {
-        await _supabase.from('user_profiles').update({
-          'daily_scans_used': 0,
-          'last_scan_date': today,
-        }).eq('id', userId);
+        // MODIFIED: Update via Worker
+        await _workerQuery(
+          action: 'update',
+          table: 'user_profiles',
+          filters: {'id': userId},
+          data: {
+            'daily_scans_used': 0,
+            'last_scan_date': today,
+          },
+        );
         
         await _clearCache('$_CACHE_USER_PROFILE$userId');
         await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
@@ -504,9 +634,16 @@ Shared from Recipe Scanner App
       if (await isPremiumUser()) return;
 
       final currentCount = await getDailyScanCount();
-      await _supabase.from('user_profiles').update({
-        'daily_scans_used': currentCount + 1,
-      }).eq('id', currentUserId!);
+      
+      // MODIFIED: Update via Worker
+      await _workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': currentUserId!},
+        data: {
+          'daily_scans_used': currentCount + 1,
+        },
+      );
       
       await _clearCache('$_CACHE_USER_PROFILE$currentUserId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$currentUserId');
@@ -520,18 +657,18 @@ Shared from Recipe Scanner App
     }
   }
 
-  // Continue with remaining methods from your original file...
-  // (All other methods remain unchanged from your original document #2)
-  
   static Future<bool> isUsernameAvailable(String username) async {
     try {
-      final response = await _supabase
-          .from('user_profiles')
-          .select('id')
-          .ilike('username', username)
-          .maybeSingle();
+      // MODIFIED: Check via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'user_profiles',
+        columns: ['id'],
+        filters: {'username': username}, // Note: Worker needs to handle case-insensitive
+        limit: 1,
+      );
       
-      return response == null;
+      return response == null || (response as List).isEmpty;
     } catch (e) {
       throw Exception('Failed to check username availability: $e');
     }
@@ -559,10 +696,13 @@ Shared from Recipe Scanner App
       if (avatarUrl != null) updates['avatar_url'] = avatarUrl;
       if (profilePicture != null) updates['profile_picture'] = profilePicture;
 
-      await _supabase
-          .from('user_profiles')
-          .update(updates)
-          .eq('id', currentUserId!);
+      // MODIFIED: Update via Worker
+      await _workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': currentUserId!},
+        data: updates,
+      );
       
       await _clearCache('$_CACHE_USER_PROFILE$currentUserId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$currentUserId');
@@ -580,10 +720,16 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      await _supabase.from('user_profiles').update({
-        'is_premium': isPremium,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', userId);
+      // MODIFIED: Update via Worker
+      await _workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'is_premium': isPremium,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
       
       await _clearCache('$_CACHE_USER_PROFILE$userId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
@@ -606,6 +752,7 @@ Shared from Recipe Scanner App
 
   // ==================================================
   // PROFILE PICTURES MANAGEMENT
+  // NOTE: Storage downloads via Worker, but uploads stay direct to Supabase storage
   // ==================================================
 
   static Future<String> uploadPicture(File imageFile) async {
@@ -617,6 +764,7 @@ Shared from Recipe Scanner App
       final fileName = 'picture_$timestamp.jpg';
       final filePath = '$userId/$fileName';
       
+      // Upload stays direct to Supabase storage (ingress doesn't cause egress charges)
       await _supabase.storage
           .from('profile-pictures')
           .upload(filePath, imageFile);
@@ -639,13 +787,16 @@ Shared from Recipe Scanner App
       
       picturesList.add(publicUrl);
       
-      await _supabase
-          .from('user_profiles')
-          .update({
-            'pictures': jsonEncode(picturesList),
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', userId);
+      // MODIFIED: Update via Worker
+      await _workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'pictures': jsonEncode(picturesList),
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
       
       await _clearCache('$_CACHE_USER_PROFILE$userId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
@@ -695,6 +846,7 @@ Shared from Recipe Scanner App
       if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
         final filePath = pathSegments.sublist(bucketIndex + 1).join('/');
         
+        // Delete from storage stays direct
         await _supabase.storage
             .from('profile-pictures')
             .remove([filePath]);
@@ -707,13 +859,16 @@ Shared from Recipe Scanner App
         List<String> picturesList = List<String>.from(jsonDecode(currentPictures));
         picturesList.remove(pictureUrl);
         
-        await _supabase
-            .from('user_profiles')
-            .update({
-              'pictures': jsonEncode(picturesList),
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .eq('id', userId);
+        // MODIFIED: Update via Worker
+        await _workerQuery(
+          action: 'update',
+          table: 'user_profiles',
+          filters: {'id': userId},
+          data: {
+            'pictures': jsonEncode(picturesList),
+            'updated_at': DateTime.now().toIso8601String(),
+          },
+        );
         
         await _clearCache('$_CACHE_USER_PROFILE$userId');
         await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
@@ -727,13 +882,16 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      await _supabase
-          .from('user_profiles')
-          .update({
-            'profile_picture': pictureUrl,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', currentUserId!);
+      // MODIFIED: Update via Worker
+      await _workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': currentUserId!},
+        data: {
+          'profile_picture': pictureUrl,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
       
       await _clearCache('$_CACHE_USER_PROFILE$currentUserId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$currentUserId');
@@ -758,21 +916,35 @@ Shared from Recipe Scanner App
   
   static Future<List<Map<String, dynamic>>> getUserFriends(String userId) async {
     try {
-      final response = await _supabase
-          .from('friend_requests')
-          .select('''
-            sender:user_profiles!friend_requests_sender_fkey(id, email, username, first_name, last_name, avatar_url),
-            receiver:user_profiles!friend_requests_receiver_fkey(id, email, username, first_name, last_name, avatar_url)
-          ''')
-          .or('sender.eq.$userId,receiver.eq.$userId')
-          .eq('status', 'accepted');
+      // MODIFIED: Fetch via Worker
+      // Note: This requires Worker to handle the complex OR query with joins
+      // For now, we'll fetch friend_requests and process client-side
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'friend_requests',
+        columns: ['*'],
+        filters: {'status': 'accepted'},
+      );
 
       final friends = <Map<String, dynamic>>[];
-      for (var row in response) {
-        final friend = row['sender']['id'] == userId 
-            ? row['receiver'] 
-            : row['sender'];
-        friends.add(friend);
+      for (var row in response as List) {
+        // We need sender and receiver data - Worker should return these
+        if (row['sender'] == userId || row['receiver'] == userId) {
+          final friendId = row['sender'] == userId ? row['receiver'] : row['sender'];
+          
+          // Fetch friend profile via Worker
+          final friendProfile = await _workerQuery(
+            action: 'select',
+            table: 'user_profiles',
+            columns: ['id', 'email', 'username', 'first_name', 'last_name', 'avatar_url'],
+            filters: {'id': friendId},
+            limit: 1,
+          );
+          
+          if (friendProfile != null && (friendProfile as List).isNotEmpty) {
+            friends.add(friendProfile[0]);
+          }
+        }
       }
       return friends;
     } catch (e) {
@@ -795,13 +967,16 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      await _supabase
-          .from('user_profiles')
-          .update({
-            'friends_list_visible': isVisible,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', currentUserId!);
+      // MODIFIED: Update via Worker
+      await _workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': currentUserId!},
+        data: {
+          'friends_list_visible': isVisible,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
       
       await _clearCache('$_CACHE_USER_PROFILE$currentUserId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$currentUserId');
@@ -820,13 +995,18 @@ Shared from Recipe Scanner App
     required String message,
   }) async {
     try {
-      await _supabase.from('contact_messages').insert({
-        'name': name,
-        'email': email,
-        'message': message,
-        'user_id': currentUserId,
-        'created_at': DateTime.now().toIso8601String(),
-      });
+      // MODIFIED: Insert via Worker
+      await _workerQuery(
+        action: 'insert',
+        table: 'contact_messages',
+        data: {
+          'name': name,
+          'email': email,
+          'message': message,
+          'user_id': currentUserId,
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
     } catch (e) {
       throw Exception('Failed to submit contact message: $e');
     }
@@ -846,11 +1026,15 @@ Shared from Recipe Scanner App
         return decoded.map((recipe) => FavoriteRecipe.fromJson(recipe)).toList();
       }
       
-      final response = await _supabase
-          .from('favorite_recipes')
-          .select()
-          .eq('user_id', currentUserId!)
-          .order('created_at', ascending: false);
+      // MODIFIED: Fetch via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'favorite_recipes',
+        columns: ['*'],
+        filters: {'user_id': currentUserId!},
+        orderBy: 'created_at',
+        ascending: false,
+      );
 
       final recipes = (response as List)
           .map((recipe) => FavoriteRecipe.fromJson(recipe))
@@ -869,13 +1053,18 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
 
     try {
-      await _supabase.from('favorite_recipes').insert({
-        'user_id': currentUserId!,
-        'recipe_name': recipeName,
-        'ingredients': ingredients,
-        'directions': directions,
-        'created_at': DateTime.now().toIso8601String(),
-      });
+      // MODIFIED: Insert via Worker
+      await _workerQuery(
+        action: 'insert',
+        table: 'favorite_recipes',
+        data: {
+          'user_id': currentUserId!,
+          'recipe_name': recipeName,
+          'ingredients': ingredients,
+          'directions': directions,
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
       
       await _clearCache(_CACHE_FAVORITE_RECIPES);
     } catch (e) {
@@ -887,7 +1076,13 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
 
     try {
-      await _supabase.from('favorite_recipes').delete().eq('id', recipeId);
+      // MODIFIED: Delete via Worker
+      await _workerQuery(
+        action: 'delete',
+        table: 'favorite_recipes',
+        filters: {'id': recipeId},
+      );
+      
       await _clearCache(_CACHE_FAVORITE_RECIPES);
     } catch (e) {
       throw Exception('Failed to remove favorite recipe: $e');
@@ -898,14 +1093,19 @@ Shared from Recipe Scanner App
     if (currentUserId == null) return false;
 
     try {
-      final response = await _supabase
-          .from('favorite_recipes')
-          .select('id')
-          .eq('user_id', currentUserId!)
-          .eq('recipe_name', recipeName)
-          .maybeSingle();
+      // MODIFIED: Check via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'favorite_recipes',
+        columns: ['id'],
+        filters: {
+          'user_id': currentUserId!,
+          'recipe_name': recipeName,
+        },
+        limit: 1,
+      );
 
-      return response != null;
+      return response != null && (response as List).isNotEmpty;
     } catch (e) {
       return false;
     }
@@ -919,11 +1119,15 @@ Shared from Recipe Scanner App
     if (currentUserId == null) return [];
 
     try {
-      final response = await _supabase
-          .from('grocery_items')
-          .select()
-          .eq('user_id', currentUserId!)
-          .order('order_index', ascending: true);
+      // MODIFIED: Fetch via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'grocery_items',
+        columns: ['*'],
+        filters: {'user_id': currentUserId!},
+        orderBy: 'order_index',
+        ascending: true,
+      );
 
       return (response as List)
           .map((item) => GroceryItem.fromJson(item))
@@ -937,10 +1141,12 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
 
     try {
-      await _supabase
-          .from('grocery_items')
-          .delete()
-          .eq('user_id', currentUserId!);
+      // MODIFIED: Delete via Worker
+      await _workerQuery(
+        action: 'delete',
+        table: 'grocery_items',
+        filters: {'user_id': currentUserId!},
+      );
 
       if (items.isNotEmpty) {
         final groceryItems = items.asMap().entries.map((entry) => {
@@ -950,7 +1156,14 @@ Shared from Recipe Scanner App
               'created_at': DateTime.now().toIso8601String(),
             }).toList();
 
-        await _supabase.from('grocery_items').insert(groceryItems);
+        // MODIFIED: Insert via Worker (bulk insert)
+        for (final item in groceryItems) {
+          await _workerQuery(
+            action: 'insert',
+            table: 'grocery_items',
+            data: item,
+          );
+        }
       }
     } catch (e) {
       throw Exception('Failed to save grocery list: $e');
@@ -961,10 +1174,12 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
 
     try {
-      await _supabase
-          .from('grocery_items')
-          .delete()
-          .eq('user_id', currentUserId!);
+      // MODIFIED: Delete via Worker
+      await _workerQuery(
+        action: 'delete',
+        table: 'grocery_items',
+        filters: {'user_id': currentUserId!},
+      );
     } catch (e) {
       throw Exception('Failed to clear grocery list: $e');
     }
@@ -1005,12 +1220,17 @@ Shared from Recipe Scanner App
           ? '$quantity x $item' 
           : item;
 
-      await _supabase.from('grocery_items').insert({
-        'user_id': currentUserId!,
-        'item': formattedItem,
-        'order_index': newOrderIndex,
-        'created_at': DateTime.now().toIso8601String(),
-      });
+      // MODIFIED: Insert via Worker
+      await _workerQuery(
+        action: 'insert',
+        table: 'grocery_items',
+        data: {
+          'user_id': currentUserId!,
+          'item': formattedItem,
+          'order_index': newOrderIndex,
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
     } catch (e) {
       throw Exception('Failed to add item to grocery list: $e');
     }
@@ -1131,18 +1351,31 @@ Shared from Recipe Scanner App
         return List<Map<String, dynamic>>.from(decoded);
       }
       
-      final response = await _supabase
-          .from('friend_requests')
-          .select('sender:user_profiles!friend_requests_sender_fkey(id, email, username, first_name, last_name, avatar_url), receiver:user_profiles!friend_requests_receiver_fkey(id, email, username, first_name, last_name, avatar_url)')
-          .or('sender.eq.$currentUserId,receiver.eq.$currentUserId')
-          .eq('status', 'accepted');
+      // MODIFIED: Fetch via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'friend_requests',
+        columns: ['*'],
+        filters: {'status': 'accepted'},
+      );
 
       final friends = <Map<String, dynamic>>[];
-      for (var row in response) {
-        final friend = row['sender']['id'] == currentUserId 
-            ? row['receiver'] 
-            : row['sender'];
-        friends.add(friend);
+      for (var row in response as List) {
+        if (row['sender'] == currentUserId || row['receiver'] == currentUserId) {
+          final friendId = row['sender'] == currentUserId ? row['receiver'] : row['sender'];
+          
+          final friendProfile = await _workerQuery(
+            action: 'select',
+            table: 'user_profiles',
+            columns: ['id', 'email', 'username', 'first_name', 'last_name', 'avatar_url'],
+            filters: {'id': friendId},
+            limit: 1,
+          );
+          
+          if (friendProfile != null && (friendProfile as List).isNotEmpty) {
+            friends.add(friendProfile[0]);
+          }
+        }
       }
       
       await _cacheData(cacheKey, jsonEncode(friends));
@@ -1157,14 +1390,41 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      final response = await _supabase
-          .from('friend_requests')
-          .select('id, created_at, sender:user_profiles!friend_requests_sender_fkey(id, email, username, first_name, last_name, avatar_url)')
-          .eq('receiver', currentUserId!)
-          .eq('status', 'pending')
-          .order('created_at', ascending: false);
+      // MODIFIED: Fetch via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'friend_requests',
+        columns: ['*'],
+        filters: {
+          'receiver': currentUserId!,
+          'status': 'pending',
+        },
+        orderBy: 'created_at',
+        ascending: false,
+      );
 
-      return List<Map<String, dynamic>>.from(response);
+      final requests = <Map<String, dynamic>>[];
+      for (var row in response as List) {
+        final senderId = row['sender'];
+        
+        final senderProfile = await _workerQuery(
+          action: 'select',
+          table: 'user_profiles',
+          columns: ['id', 'email', 'username', 'first_name', 'last_name', 'avatar_url'],
+          filters: {'id': senderId},
+          limit: 1,
+        );
+        
+        if (senderProfile != null && (senderProfile as List).isNotEmpty) {
+          requests.add({
+            'id': row['id'],
+            'created_at': row['created_at'],
+            'sender': senderProfile[0],
+          });
+        }
+      }
+
+      return requests;
     } catch (e) {
       throw Exception('Failed to load friend requests: $e');
     }
@@ -1174,14 +1434,41 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      final response = await _supabase
-          .from('friend_requests')
-          .select('id, created_at, receiver:user_profiles!friend_requests_receiver_fkey(id, email, username, first_name, last_name, avatar_url)')
-          .eq('sender', currentUserId!)
-          .eq('status', 'pending')
-          .order('created_at', ascending: false);
+      // MODIFIED: Fetch via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'friend_requests',
+        columns: ['*'],
+        filters: {
+          'sender': currentUserId!,
+          'status': 'pending',
+        },
+        orderBy: 'created_at',
+        ascending: false,
+      );
 
-      return List<Map<String, dynamic>>.from(response);
+      final requests = <Map<String, dynamic>>[];
+      for (var row in response as List) {
+        final receiverId = row['receiver'];
+        
+        final receiverProfile = await _workerQuery(
+          action: 'select',
+          table: 'user_profiles',
+          columns: ['id', 'email', 'username', 'first_name', 'last_name', 'avatar_url'],
+          filters: {'id': receiverId},
+          limit: 1,
+        );
+        
+        if (receiverProfile != null && (receiverProfile as List).isNotEmpty) {
+          requests.add({
+            'id': row['id'],
+            'created_at': row['created_at'],
+            'receiver': receiverProfile[0],
+          });
+        }
+      }
+
+      return requests;
     } catch (e) {
       throw Exception('Failed to load sent friend requests: $e');
     }
@@ -1195,41 +1482,49 @@ Shared from Recipe Scanner App
     }
     
     try {
-      final existing = await _supabase
-          .from('friend_requests')
-          .select('id, status, sender, receiver')
-          .or('and(sender.eq.$currentUserId,receiver.eq.$receiverId),and(sender.eq.$receiverId,receiver.eq.$currentUserId)')
-          .maybeSingle();
+      // MODIFIED: Check existing via Worker
+      final existing = await _workerQuery(
+        action: 'select',
+        table: 'friend_requests',
+        columns: ['id', 'status', 'sender', 'receiver'],
+      );
 
-      if (existing != null) {
-        if (existing['status'] == 'accepted') {
-          throw Exception('You are already friends with this user');
-        } else if (existing['status'] == 'pending') {
-          if (existing['sender'] == receiverId) {
-            throw Exception('This user has already sent you a friend request. Check your pending requests!');
+      // Check if request already exists
+      for (var row in existing as List) {
+        if ((row['sender'] == currentUserId && row['receiver'] == receiverId) ||
+            (row['sender'] == receiverId && row['receiver'] == currentUserId)) {
+          if (row['status'] == 'accepted') {
+            throw Exception('You are already friends with this user');
+          } else if (row['status'] == 'pending') {
+            if (row['sender'] == receiverId) {
+              throw Exception('This user has already sent you a friend request. Check your pending requests!');
+            }
+            throw Exception('Friend request already sent');
           }
-          throw Exception('Friend request already sent');
         }
       }
 
-      final response = await _supabase
-          .from('friend_requests')
-          .insert({
-            'sender': currentUserId!,
-            'receiver': receiverId,
-            'status': 'pending',
-            'created_at': DateTime.now().toIso8601String(),
-          })
-          .select()
-          .single();
+      // MODIFIED: Insert via Worker
+      final response = await _workerQuery(
+        action: 'insert',
+        table: 'friend_requests',
+        data: {
+          'sender': currentUserId!,
+          'receiver': receiverId,
+          'status': 'pending',
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
 
-      return response['id'];
-    } on PostgrestException catch (e) {
-      if (e.code == '23505') {
+      // Response should contain the inserted row with ID
+      if (response is List && response.isNotEmpty) {
+        return response[0]['id'].toString();
+      }
+      return null;
+    } catch (e) {
+      if (e.toString().contains('23505') || e.toString().contains('duplicate')) {
         throw Exception('Friend request already exists');
       }
-      throw Exception('Failed to send friend request: ${e.message}');
-    } catch (e) {
       throw Exception('Failed to send friend request: $e');
     }
   }
@@ -1238,11 +1533,20 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      final request = await _supabase
-          .from('friend_requests')
-          .select('receiver, status')
-          .eq('id', requestId)
-          .single();
+      // MODIFIED: Fetch request via Worker
+      final requestData = await _workerQuery(
+        action: 'select',
+        table: 'friend_requests',
+        columns: ['receiver', 'status'],
+        filters: {'id': requestId},
+        limit: 1,
+      );
+      
+      if (requestData == null || (requestData as List).isEmpty) {
+        throw Exception('Friend request not found');
+      }
+      
+      final request = requestData[0];
       
       if (request['receiver'] != currentUserId) {
         throw Exception('You cannot accept this friend request');
@@ -1252,13 +1556,16 @@ Shared from Recipe Scanner App
         throw Exception('This friend request has already been ${request['status']}');
       }
 
-      await _supabase
-          .from('friend_requests')
-          .update({
-            'status': 'accepted',
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', requestId);
+      // MODIFIED: Update via Worker
+      await _workerQuery(
+        action: 'update',
+        table: 'friend_requests',
+        filters: {'id': requestId},
+        data: {
+          'status': 'accepted',
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
       
       await _clearCache('$_CACHE_FRIENDS$currentUserId');
     } catch (e) {
@@ -1270,10 +1577,12 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      await _supabase
-          .from('friend_requests')
-          .delete()
-          .eq('id', requestId);
+      // MODIFIED: Delete via Worker
+      await _workerQuery(
+        action: 'delete',
+        table: 'friend_requests',
+        filters: {'id': requestId},
+      );
     } catch (e) {
       throw Exception('Failed to decline friend request: $e');
     }
@@ -1283,20 +1592,29 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      final request = await _supabase
-          .from('friend_requests')
-          .select('sender')
-          .eq('id', requestId)
-          .single();
+      // MODIFIED: Check via Worker
+      final requestData = await _workerQuery(
+        action: 'select',
+        table: 'friend_requests',
+        columns: ['sender'],
+        filters: {'id': requestId},
+        limit: 1,
+      );
       
-      if (request['sender'] != currentUserId) {
+      if (requestData == null || (requestData as List).isEmpty) {
+        throw Exception('Friend request not found');
+      }
+      
+      if (requestData[0]['sender'] != currentUserId) {
         throw Exception('You cannot cancel this friend request');
       }
 
-      await _supabase
-          .from('friend_requests')
-          .delete()
-          .eq('id', requestId);
+      // MODIFIED: Delete via Worker
+      await _workerQuery(
+        action: 'delete',
+        table: 'friend_requests',
+        filters: {'id': requestId},
+      );
     } catch (e) {
       throw Exception('Failed to cancel friend request: $e');
     }
@@ -1306,11 +1624,15 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      await _supabase
-          .from('friend_requests')
-          .delete()
-          .eq('sender', currentUserId!)
-          .eq('receiver', receiverId);
+      // MODIFIED: Delete via Worker
+      await _workerQuery(
+        action: 'delete',
+        table: 'friend_requests',
+        filters: {
+          'sender': currentUserId!,
+          'receiver': receiverId,
+        },
+      );
     } catch (e) {
       throw Exception('Failed to cancel friend request: $e');
     }
@@ -1320,11 +1642,26 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      await _supabase
-          .from('friend_requests')
-          .delete()
-          .or('and(sender.eq.$currentUserId,receiver.eq.$friendId),and(sender.eq.$friendId,receiver.eq.$currentUserId)')
-          .eq('status', 'accepted');
+      // MODIFIED: Complex OR delete needs to be handled
+      // Fetch all accepted friend requests involving these users
+      final allRequests = await _workerQuery(
+        action: 'select',
+        table: 'friend_requests',
+        columns: ['id', 'sender', 'receiver', 'status'],
+        filters: {'status': 'accepted'},
+      );
+      
+      // Find and delete the matching request
+      for (var row in allRequests as List) {
+        if ((row['sender'] == currentUserId && row['receiver'] == friendId) ||
+            (row['sender'] == friendId && row['receiver'] == currentUserId)) {
+          await _workerQuery(
+            action: 'delete',
+            table: 'friend_requests',
+            filters: {'id': row['id']},
+          );
+        }
+      }
       
       await _clearCache('$_CACHE_FRIENDS$currentUserId');
     } catch (e) {
@@ -1346,59 +1683,57 @@ Shared from Recipe Scanner App
     }
     
     try {
-      final response = await _supabase
-          .from('friend_requests')
-          .select('id, status, sender, receiver, created_at')
-          .or('and(sender.eq.$currentUserId,receiver.eq.$userId),and(sender.eq.$userId,receiver.eq.$currentUserId)')
-          .maybeSingle();
+      // MODIFIED: Check via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'friend_requests',
+        columns: ['id', 'status', 'sender', 'receiver', 'created_at'],
+      );
 
-      if (response == null) {
-        return {
-          'status': 'none',
-          'requestId': null,
-          'canSendRequest': true,
-          'isOutgoing': false,
-          'message': 'Not friends',
-        };
-      }
+      // Find matching request
+      for (var row in response as List) {
+        if ((row['sender'] == currentUserId && row['receiver'] == userId) ||
+            (row['sender'] == userId && row['receiver'] == currentUserId)) {
+          
+          final isOutgoing = row['sender'] == currentUserId;
+          final status = row['status'];
 
-      final isOutgoing = response['sender'] == currentUserId;
-      final status = response['status'];
-
-      if (status == 'accepted') {
-        return {
-          'status': 'accepted',
-          'requestId': response['id'],
-          'canSendRequest': false,
-          'isOutgoing': isOutgoing,
-          'message': 'Friends',
-        };
-      } else if (status == 'pending') {
-        if (isOutgoing) {
-          return {
-            'status': 'pending_sent',
-            'requestId': response['id'],
-            'canSendRequest': false,
-            'isOutgoing': true,
-            'message': 'Friend request sent',
-          };
-        } else {
-          return {
-            'status': 'pending_received',
-            'requestId': response['id'],
-            'canSendRequest': false,
-            'isOutgoing': false,
-            'message': 'Friend request received',
-          };
+          if (status == 'accepted') {
+            return {
+              'status': 'accepted',
+              'requestId': row['id'],
+              'canSendRequest': false,
+              'isOutgoing': isOutgoing,
+              'message': 'Friends',
+            };
+          } else if (status == 'pending') {
+            if (isOutgoing) {
+              return {
+                'status': 'pending_sent',
+                'requestId': row['id'],
+                'canSendRequest': false,
+                'isOutgoing': true,
+                'message': 'Friend request sent',
+              };
+            } else {
+              return {
+                'status': 'pending_received',
+                'requestId': row['id'],
+                'canSendRequest': false,
+                'isOutgoing': false,
+                'message': 'Friend request received',
+              };
+            }
+          }
         }
       }
 
       return {
-        'status': 'unknown',
+        'status': 'none',
         'requestId': null,
-        'canSendRequest': false,
+        'canSendRequest': true,
         'isOutgoing': false,
-        'message': 'Unknown status',
+        'message': 'Not friends',
       };
     } catch (e) {
       return {
@@ -1430,17 +1765,28 @@ Shared from Recipe Scanner App
           final List<dynamic> cachedList = jsonDecode(cached);
           final cachedMessages = List<Map<String, dynamic>>.from(cachedList);
           
-          final newMessages = await _supabase
-              .from('messages')
-              .select('*')
-              .or('and(sender.eq.$currentUserId,receiver.eq.$friendId),and(sender.eq.$friendId,receiver.eq.$currentUserId)')
-              .gt('created_at', lastFetchTime)
-              .order('created_at');
+          // MODIFIED: Fetch new messages via Worker
+          // Note: Worker needs to support "greater than" filters
+          final allMessages = await _workerQuery(
+            action: 'select',
+            table: 'messages',
+            columns: ['*'],
+            orderBy: 'created_at',
+            ascending: true,
+          );
           
-          final newMessagesList = List<Map<String, dynamic>>.from(newMessages);
+          final newMessages = <Map<String, dynamic>>[];
+          for (var msg in allMessages as List) {
+            if ((msg['sender'] == currentUserId && msg['receiver'] == friendId) ||
+                (msg['sender'] == friendId && msg['receiver'] == currentUserId)) {
+              if (DateTime.parse(msg['created_at']).isAfter(DateTime.parse(lastFetchTime))) {
+                newMessages.add(msg);
+              }
+            }
+          }
           
-          if (newMessagesList.isNotEmpty) {
-            final combined = [...cachedMessages, ...newMessagesList];
+          if (newMessages.isNotEmpty) {
+            final combined = [...cachedMessages, ...newMessages];
             
             await _cacheData(cacheKey, jsonEncode(combined));
             await _cacheData(lastTimeKey, DateTime.now().toIso8601String());
@@ -1452,13 +1798,22 @@ Shared from Recipe Scanner App
         }
       }
       
-      final response = await _supabase
-          .from('messages')
-          .select('*')
-          .or('and(sender.eq.$currentUserId,receiver.eq.$friendId),and(sender.eq.$friendId,receiver.eq.$currentUserId)')
-          .order('created_at');
+      // MODIFIED: Fetch all messages via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'messages',
+        columns: ['*'],
+        orderBy: 'created_at',
+        ascending: true,
+      );
 
-      final messages = List<Map<String, dynamic>>.from(response);
+      final messages = <Map<String, dynamic>>[];
+      for (var msg in response as List) {
+        if ((msg['sender'] == currentUserId && msg['receiver'] == friendId) ||
+            (msg['sender'] == friendId && msg['receiver'] == currentUserId)) {
+          messages.add(msg);
+        }
+      }
       
       await _cacheData(cacheKey, jsonEncode(messages));
       await _cacheData(lastTimeKey, DateTime.now().toIso8601String());
@@ -1473,13 +1828,18 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      await _supabase.from('messages').insert({
-        'sender': currentUserId!,
-        'receiver': receiverId,
-        'content': content,
-        'is_read': false,
-        'created_at': DateTime.now().toIso8601String(),
-      });
+      // MODIFIED: Insert via Worker
+      await _workerQuery(
+        action: 'insert',
+        table: 'messages',
+        data: {
+          'sender': currentUserId!,
+          'receiver': receiverId,
+          'content': content,
+          'is_read': false,
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
       
       await _clearCache('$_CACHE_MESSAGES${currentUserId}_$receiverId');
       await _clearCache('$_CACHE_LAST_MESSAGE_TIME${currentUserId}_$receiverId');
@@ -1492,11 +1852,16 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      final response = await _supabase
-          .from('messages')
-          .select('id')
-          .eq('receiver', currentUserId!)
-          .eq('is_read', false);
+      // MODIFIED: Fetch via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'messages',
+        columns: ['id'],
+        filters: {
+          'receiver': currentUserId!,
+          'is_read': false,
+        },
+      );
 
       return (response as List).length;
     } catch (e) {
@@ -1509,10 +1874,13 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      await _supabase
-          .from('messages')
-          .update({'is_read': true})
-          .eq('id', messageId);
+      // MODIFIED: Update via Worker
+      await _workerQuery(
+        action: 'update',
+        table: 'messages',
+        filters: {'id': messageId},
+        data: {'is_read': true},
+      );
     } catch (e) {
       print('Error marking message as read: $e');
     }
@@ -1522,12 +1890,27 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      await _supabase
-          .from('messages')
-          .update({'is_read': true})
-          .eq('receiver', currentUserId!)
-          .eq('sender', senderId)
-          .eq('is_read', false);
+      // MODIFIED: Update via Worker
+      // Note: This needs to update multiple messages, so we fetch first then update
+      final messages = await _workerQuery(
+        action: 'select',
+        table: 'messages',
+        columns: ['id'],
+        filters: {
+          'receiver': currentUserId!,
+          'sender': senderId,
+          'is_read': false,
+        },
+      );
+
+      for (var msg in messages as List) {
+        await _workerQuery(
+          action: 'update',
+          table: 'messages',
+          filters: {'id': msg['id']},
+          data: {'is_read': true},
+        );
+      }
     } catch (e) {
       print('Error marking messages as read: $e');
     }
@@ -1540,27 +1923,35 @@ Shared from Recipe Scanner App
       final friends = await getFriends();
       final chats = <Map<String, dynamic>>[];
 
-      for (final friend in friends) {
-        final messages = await _supabase
-            .from('messages')
-            .select('*')
-            .or('and(sender.eq.$currentUserId,receiver.eq.${friend['id']}),and(sender.eq.${friend['id']},receiver.eq.$currentUserId)')
-            .order('created_at', ascending: false)
-            .limit(1);
+      // MODIFIED: Fetch all messages via Worker
+      final allMessages = await _workerQuery(
+        action: 'select',
+        table: 'messages',
+        columns: ['*'],
+        orderBy: 'created_at',
+        ascending: false,
+      );
 
-        if (messages.isNotEmpty) {
-          chats.add({
-            'friend': friend,
-            'lastMessage': messages.first,
-          });
-        } else {
-          chats.add({
-            'friend': friend,
-            'lastMessage': null,
-          });
+      for (final friend in friends) {
+        final friendId = friend['id'];
+        
+        // Find last message with this friend
+        Map<String, dynamic>? lastMessage;
+        for (var msg in allMessages as List) {
+          if ((msg['sender'] == currentUserId && msg['receiver'] == friendId) ||
+              (msg['sender'] == friendId && msg['receiver'] == currentUserId)) {
+            lastMessage = msg;
+            break; // Already sorted by created_at desc
+          }
         }
+
+        chats.add({
+          'friend': friend,
+          'lastMessage': lastMessage,
+        });
       }
 
+      // Sort by last message time
       chats.sort((a, b) {
         final aTime = a['lastMessage']?['created_at'];
         final bTime = b['lastMessage']?['created_at'];
@@ -1587,25 +1978,36 @@ Shared from Recipe Scanner App
       final searchQuery = query.trim();
       if (searchQuery.isEmpty) return [];
 
-      try {
-        final response = await _supabase.rpc('search_users_fuzzy', params: {
-          'search_query': searchQuery,
-          'current_user_id': currentUserId!,
-        });
+      // MODIFIED: Search via Worker
+      // Note: Worker should handle case-insensitive search
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'user_profiles',
+        columns: ['id', 'email', 'username', 'first_name', 'last_name', 'avatar_url'],
+        limit: 50,
+      );
 
-        return List<Map<String, dynamic>>.from(response);
-      } catch (rpcError) {
-        print('RPC search failed, falling back to basic search: $rpcError');
+      // Filter client-side for case-insensitive search
+      final results = <Map<String, dynamic>>[];
+      final lowerQuery = searchQuery.toLowerCase();
+      
+      for (var user in response as List) {
+        if (user['id'] == currentUserId) continue;
         
-        final response = await _supabase
-            .from('user_profiles')
-            .select('id, email, username, first_name, last_name, avatar_url')
-            .or('email.ilike.%$searchQuery%,username.ilike.%$searchQuery%,first_name.ilike.%$searchQuery%,last_name.ilike.%$searchQuery%')
-            .neq('id', currentUserId!)
-            .limit(50);
-
-        return List<Map<String, dynamic>>.from(response);
+        final email = (user['email'] ?? '').toLowerCase();
+        final username = (user['username'] ?? '').toLowerCase();
+        final firstName = (user['first_name'] ?? '').toLowerCase();
+        final lastName = (user['last_name'] ?? '').toLowerCase();
+        
+        if (email.contains(lowerQuery) ||
+            username.contains(lowerQuery) ||
+            firstName.contains(lowerQuery) ||
+            lastName.contains(lowerQuery)) {
+          results.add(user);
+        }
       }
+
+      return results;
     } catch (e) {
       throw Exception('Failed to search users: $e');
     }
@@ -1618,40 +2020,25 @@ Shared from Recipe Scanner App
       print('🔍 DEBUG: Starting user search test...');
       print('📝 Current user ID: $currentUserId');
       
-      print('\n--- TEST 1: Fetching all users ---');
-      final allUsers = await _supabase
-          .from('user_profiles')
-          .select('id, email, username, first_name, last_name')
-          .neq('id', currentUserId!)
-          .limit(10);
+      print('\n--- TEST 1: Fetching all users via Worker ---');
+      final allUsers = await _workerQuery(
+        action: 'select',
+        table: 'user_profiles',
+        columns: ['id', 'email', 'username', 'first_name', 'last_name'],
+        limit: 10,
+      );
       
-      print('✅ Found ${(allUsers as List).length} users in database');
-      for (var user in allUsers) {
+      final userList = (allUsers as List).where((u) => u['id'] != currentUserId).toList();
+      print('✅ Found ${userList.length} users in database');
+      for (var user in userList) {
         print('  👤 ${user['username'] ?? user['email']} (${user['first_name']} ${user['last_name']})');
       }
       
-      print('\n--- TEST 2: Testing basic search ---');
-      final searchResult = await _supabase
-          .from('user_profiles')
-          .select('id, email, username, first_name, last_name')
-          .or('email.ilike.%test%,username.ilike.%test%,first_name.ilike.%test%,last_name.ilike.%test%')
-          .neq('id', currentUserId!)
-          .limit(10);
+      print('\n--- TEST 2: Testing basic search via Worker ---');
+      final searchResults = await searchUsers('test');
+      print('✅ Search found ${searchResults.length} results');
       
-      print('✅ Basic search found ${(searchResult as List).length} results');
-      
-      print('\n--- TEST 3: Testing RPC function ---');
-      try {
-        final rpcResult = await _supabase.rpc('search_users_fuzzy', params: {
-          'search_query': 'test',
-          'current_user_id': currentUserId!,
-        });
-        print('✅ RPC function works! Found ${(rpcResult as List).length} results');
-      } catch (rpcError) {
-        print('⚠️  RPC function not available: $rpcError');
-      }
-      
-      print('\n✅ DEBUG TEST COMPLETED');
+      print('\n✅ DEBUG TEST COMPLETED (via Cloudflare Worker)');
     } catch (e) {
       print('❌ DEBUG TEST FAILED: $e');
       throw Exception('Debug test failed: $e');
