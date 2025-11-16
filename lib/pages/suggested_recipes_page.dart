@@ -1,11 +1,12 @@
 // lib/pages/suggested_recipes_page.dart - OPTIMIZED: Cache recipes, favorite status, and premium checks
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../services/database_service.dart';
 import '../widgets/premium_gate.dart';
 import '../controllers/premium_gate_controller.dart';
+import 'package:http/http.dart' as http;
+import '../config/app_config.dart';
 
 class Recipe {
   final String id;
@@ -202,7 +203,7 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           setState(() {
             _allRecipes = cachedRecipes;
             _currentRecipes = cachedRecipes;
-            _hasMore = false; // Cached data includes all recipes
+            _hasMore = false;
             _isLoading = false;
             _ingredientsExist = true;
           });
@@ -226,15 +227,29 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
         return;
       }
 
-      // Fetch recipes from database
-      final response = await Supabase.instance.client
-          .from('recipes')
-          .select('*')
-          .contains('ingredients', widget.productIngredients)
-          .order('health_score', ascending: false)
-          .range(_currentPage * 2, (_currentPage * 2) + 1);
+      // MODIFIED: Fetch recipes via Worker instead of direct Supabase
+      final response = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'select',
+          'table': 'recipes',
+          'columns': ['*'],
+          'filters': {'ingredients_contains_any': widget.productIngredients},
+          'orderBy': 'health_score',
+          'ascending': false,
+          'limit': 2,
+          'offset': _currentPage * 2,
+        }),
+      );
 
-      List<Recipe> newRecipes = (response as List).map<Recipe>((recipeData) {
+      if (response.statusCode != 200) {
+        throw Exception('Worker query failed: ${response.body}');
+      }
+
+      final data = jsonDecode(response.body);
+      
+      List<Recipe> newRecipes = (data as List).map<Recipe>((recipeData) {
         return Recipe(
           id: recipeData['id']?.toString() ?? '',
           title: recipeData['title'] ?? 'Unknown Recipe',
@@ -283,14 +298,24 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
   Future<bool> _checkIngredientsExist() async {
     try {
       for (String ingredient in widget.productIngredients) {
-        final response = await Supabase.instance.client
-            .from('recipes')
-            .select('id')
-            .contains('ingredients', [ingredient])
-            .limit(1);
+        // MODIFIED: Check via Worker
+        final response = await http.post(
+          Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'action': 'select',
+            'table': 'recipes',
+            'columns': ['id'],
+            'filters': {'ingredients_contains': ingredient},
+            'limit': 1,
+          }),
+        );
         
-        if (response.isNotEmpty) {
-          return true;
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data is List && data.isNotEmpty) {
+            return true;
+          }
         }
       }
       return false;
@@ -309,14 +334,29 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
     });
 
     try {
-      final response = await Supabase.instance.client
-          .from('recipes')
-          .select('*')
-          .contains('ingredients', widget.productIngredients)
-          .order('health_score', ascending: false)
-          .range(_currentPage * 2, (_currentPage * 2) + 1);
+      // MODIFIED: Fetch via Worker
+      final response = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'select',
+          'table': 'recipes',
+          'columns': ['*'],
+          'filters': {'ingredients_contains_any': widget.productIngredients},
+          'orderBy': 'health_score',
+          'ascending': false,
+          'limit': 2,
+          'offset': _currentPage * 2,
+        }),
+      );
 
-      List<Recipe> newRecipes = (response as List).map<Recipe>((recipeData) {
+      if (response.statusCode != 200) {
+        throw Exception('Worker query failed: ${response.body}');
+      }
+
+      final data = jsonDecode(response.body);
+
+      List<Recipe> newRecipes = (data as List).map<Recipe>((recipeData) {
         return Recipe(
           id: recipeData['id']?.toString() ?? '',
           title: recipeData['title'] ?? 'Unknown Recipe',

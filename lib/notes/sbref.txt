@@ -7,14 +7,14 @@ homepage/ login
 
 // CHANGES NEEDED FOR suggested_recipes_page.dart
 
-// 1. REMOVE this import at the top:
+// -1. REMOVE this import at the top:
 // import 'package:supabase_flutter/supabase_flutter.dart'; // DELETE THIS LINE
 
-// 2. ADD these imports at the top:
+// -2. ADD these imports at the top:
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 
-// 3. REPLACE the _loadRecipes() method with this:
+// -3. REPLACE the _loadRecipes() method with this:
 Future<void> _loadRecipes() async {
   if (_isLoading) return;
   
@@ -123,7 +123,7 @@ Future<void> _loadRecipes() async {
   }
 }
 
-// 4. REPLACE the _checkIngredientsExist() method with this:
+// -4. REPLACE the _checkIngredientsExist() method with this:
 Future<bool> _checkIngredientsExist() async {
   try {
     for (String ingredient in widget.productIngredients) {
