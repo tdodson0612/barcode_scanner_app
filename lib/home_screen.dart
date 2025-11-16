@@ -184,32 +184,46 @@ class LiverHealthCalculator {
 
 /// --- Recipe Generator ---
 class RecipeGenerator {
+  // MODIFIED: Route through Cloudflare Worker instead of direct Supabase
   static Future<List<Recipe>> generateSuggestionsFromProduct(String productName) async {
-  final keyword = IngredientKeywordExtractor.extract(productName);
-  AppConfig.debugPrint('Product: $productName -> Keyword: $keyword');
-  
-  try {
-    // Query Supabase for recipes containing the keyword in ingredients
-    final response = await Supabase.instance.client
-      .from('recipes')
-      .select()
-      .ilike('ingredients', '%$keyword%')
-      .limit(5);
+    final keyword = IngredientKeywordExtractor.extract(productName);
+    AppConfig.debugPrint('Product: $productName -> Keyword: $keyword');
     
-    // Convert response to Recipe objects
-    final recipes = (response as List)
-        .map((json) => Recipe.fromJson(json))
-        .toList();
-    
-    AppConfig.debugPrint('Found ${recipes.length} recipes for keyword: $keyword');
-    
-    return recipes.isEmpty ? _getHealthyRecipes() : recipes;
-  } catch (e) {
-    AppConfig.debugPrint('Error fetching recipes from Supabase: $e');
-    // Fallback to default recipes on error
-    return _getHealthyRecipes();
+    try {
+      // MODIFIED: Fetch recipes via Worker instead of direct Supabase
+      final response = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'select',
+          'table': 'recipes',
+          'columns': ['*'],
+          // Note: Worker needs to handle case-insensitive LIKE queries
+          'filters': {'ingredients_contains': keyword}, // Worker should do ILIKE
+          'limit': 5,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Worker query failed: ${response.body}');
+      }
+
+      final data = jsonDecode(response.body);
+      
+      // Convert response to Recipe objects
+      final recipes = (data as List)
+          .map((json) => Recipe.fromJson(json))
+          .toList();
+      
+      AppConfig.debugPrint('Found ${recipes.length} recipes for keyword: $keyword');
+      
+      return recipes.isEmpty ? _getHealthyRecipes() : recipes;
+    } catch (e) {
+      AppConfig.debugPrint('Error fetching recipes from Worker: $e');
+      // Fallback to default recipes on error
+      return _getHealthyRecipes();
+    }
   }
-}
 
   static List<Recipe> generateSuggestions(int liverHealthScore) {
     if (liverHealthScore >= 75) {

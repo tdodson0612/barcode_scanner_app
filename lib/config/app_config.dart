@@ -1,10 +1,16 @@
-// lib/config/app_config.dart - FIXED: Correct Supabase credentials
+// lib/config/app_config.dart - Updated with Cloudflare Worker configuration
 class AppConfig {
-  // STEP 1: Put your real keys here (replace the placeholder text)
-  
-  // Your Supabase keys (get these from your Supabase dashboard)
+  // Supabase credentials (kept for auth and other non-egress operations)
   static const String supabaseUrl = 'https://jmnwyzearnndhlitruyu.supabase.co';
   static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imptbnd5emVhcm5uZGhsaXRydXl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ0MTc4MTMsImV4cCI6MjA2OTk5MzgxM30.i1_79Ew1co2wIsZTyai_t6KucM-fH_NuKBIhqEuY-44';
+  
+  // Cloudflare Worker configuration (for zero-egress data operations)
+  // ALL database reads/writes and storage downloads go through this Worker
+  static const String cloudflareWorkerUrl = 'https://shrill-paper-a8ce.terryd0612.workers.dev';
+  static const String cloudflareWorkerQueryEndpoint = '$cloudflareWorkerUrl/query';
+  
+  // NOTE: Cloudflare API token is NOT included here for security
+  // The Worker handles authentication internally - Flutter only calls the Worker URL
   
   // App settings
   static const String appName = 'LiverWise';
