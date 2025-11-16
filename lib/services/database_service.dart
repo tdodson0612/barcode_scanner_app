@@ -752,7 +752,7 @@ Shared from Recipe Scanner App
 
   // ==================================================
   // PROFILE PICTURES MANAGEMENT
-  // NOTE: Storage downloads via Worker, but uploads stay direct to Supabase storage
+  // FIXED: Storage uploads routed through Cloudflare Worker → R2
   // ==================================================
 
   static Future<String> uploadPicture(File imageFile) async {
@@ -764,14 +764,32 @@ Shared from Recipe Scanner App
       final fileName = 'picture_$timestamp.jpg';
       final filePath = '$userId/$fileName';
       
-      // Upload stays direct to Supabase storage (ingress doesn't cause egress charges)
-      await _supabase.storage
-          .from('profile-pictures')
-          .upload(filePath, imageFile);
+      // FIXED: Upload via Cloudflare Worker → R2 instead of direct Supabase
+      final imageBytes = await imageFile.readAsBytes();
+      final base64Image = base64Encode(imageBytes);
       
-      final publicUrl = _supabase.storage
-          .from('profile-pictures')
-          .getPublicUrl(filePath);
+      final response = await http.post(
+        Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/storage'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'upload',
+          'bucket': 'profile-pictures',
+          'path': filePath,
+          'data': base64Image,
+          'contentType': 'image/jpeg',
+        }),
+      );
+      
+      if (response.statusCode != 200) {
+        throw Exception('Storage upload failed: ${response.body}');
+      }
+      
+      final uploadResult = jsonDecode(response.body);
+      final publicUrl = uploadResult['url'] ?? uploadResult['publicUrl'];
+      
+      if (publicUrl == null) {
+        throw Exception('Upload succeeded but no URL returned');
+      }
       
       final profile = await getCurrentUserProfile();
       final currentPictures = profile?['pictures'];
