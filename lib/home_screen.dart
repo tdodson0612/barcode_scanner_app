@@ -1,4 +1,4 @@
-// lib/home_screen.dart - Complete architectural rebuild with proper error handling
+// lib/home_screen.dart - COMPLETE FILE with Cloudflare Worker integration
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -17,81 +17,46 @@ import '../models/favorite_recipe.dart';
 import '../pages/search_users_page.dart';
 import '../widgets/app_drawer.dart';
 import '../config/app_config.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/menu_icon_with_badge.dart';
 
-// Add this class right after your imports in home_screen.dart
 class IngredientKeywordExtractor {
-  // Words to remove from product names
   static final List<String> _removeWords = [
-    // Measurements
     'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds', 'kg', 'kilogram', 'kilograms',
     'gram', 'grams', 'g', 'ml', 'milliliter', 'milliliters', 'liter', 'liters', 'l',
     'gallon', 'gallons', 'quart', 'quarts', 'pint', 'pints', 'cup', 'cups', 'tbsp', 'tsp',
     'tablespoon', 'tablespoons', 'teaspoon', 'teaspoons', 'fl', 'fluid',
-    
-    // Packaging
     'can', 'canned', 'jar', 'bottle', 'bottled', 'box', 'boxed', 'bag', 'bagged',
     'pack', 'package', 'packaged', 'carton', 'container', 'pouch', 'tube', 'tin',
-    
-    // Common prefixes/descriptors
     'organic', 'natural', 'fresh', 'frozen', 'dried', 'raw', 'cooked', 'prepared',
     'whole', 'sliced', 'diced', 'chopped', 'minced', 'crushed', 'ground',
     'reduced', 'low', 'high', 'fat', 'free', 'sodium', 'sugar', 'calorie', 'diet',
     'light', 'lite', 'extra', 'pure', 'premium', 'grade', 'quality',
-    
-    // Colors (often not essential for recipes)
     'red', 'green', 'yellow', 'white', 'black', 'brown',
-    
-    // Brand/style descriptors
     'style', 'flavored', 'flavour', 'seasoned', 'unseasoned', 'salted', 'unsalted',
     'sweetened', 'unsweetened', 'plain', 'original',
-    
-    // Common food preparation states
     'peeled', 'unpeeled', 'pitted', 'unpitted', 'seeded', 'unseeded',
     'bone-in', 'boneless', 'skin-on', 'skinless', 'roasted',
   ];
 
-  /// Extract the main ingredient keyword from a product name
-  /// Example: "12 oz can red roasted tomatoes" -> "tomatoes"
   static String extract(String productName) {
     if (productName.trim().isEmpty) return productName;
-
-    // Convert to lowercase for processing
     String processed = productName.toLowerCase().trim();
-    
-    // Remove special characters but keep spaces and hyphens
     processed = processed.replaceAll(RegExp(r'[^\w\s-]'), ' ');
-    
-    // Remove numbers and measurements (e.g., "12", "12oz")
     processed = processed.replaceAll(RegExp(r'\b\d+\.?\d*\s*(oz|lb|g|kg|ml|l)?\b'), '');
     processed = processed.replaceAll(RegExp(r'\d+'), '');
-    
-    // Split into words
     List<String> words = processed.split(RegExp(r'\s+'))
         .where((word) => word.isNotEmpty)
         .toList();
-    
-    // Remove common filler words
     words = words.where((word) {
-      // Keep the word if it's not in the remove list
       return !_removeWords.contains(word.toLowerCase());
     }).toList();
-    
-    // If nothing left, return original
     if (words.isEmpty) {
       return productName.trim();
     }
-    
-    // Return the last remaining word (usually the main ingredient)
-    // For "roasted tomatoes" it will return "tomatoes"
-    // For "chicken breast" it will return "chicken"
     return words.last;
   }
 }
 
-
-/// --- NutritionInfo Data Model ---
 class NutritionInfo {
   final String productName;
   final double fat;
@@ -126,7 +91,6 @@ class NutritionInfo {
   }
 }
 
-/// --- Recipe Data Model ---
 class Recipe {
   final String title;
   final String description;
@@ -155,7 +119,6 @@ class Recipe {
   );
 }
 
-/// --- Liver Health Score Calculator ---
 class LiverHealthCalculator {
   static const double fatMax = 20.0;
   static const double sodiumMax = 500.0;
@@ -182,9 +145,8 @@ class LiverHealthCalculator {
   }
 }
 
-/// --- Recipe Generator ---
+// MODIFIED: Routes recipe queries through Cloudflare Worker
 class RecipeGenerator {
-  // MODIFIED: Route through Cloudflare Worker instead of direct Supabase
   static Future<List<Recipe>> generateSuggestionsFromProduct(String productName) async {
     final keyword = IngredientKeywordExtractor.extract(productName);
     AppConfig.debugPrint('Product: $productName -> Keyword: $keyword');
@@ -198,8 +160,7 @@ class RecipeGenerator {
           'action': 'select',
           'table': 'recipes',
           'columns': ['*'],
-          // Note: Worker needs to handle case-insensitive LIKE queries
-          'filters': {'ingredients_contains': keyword}, // Worker should do ILIKE
+          'filters': {'ingredients_contains': keyword},
           'limit': 5,
         }),
       );
@@ -209,18 +170,14 @@ class RecipeGenerator {
       }
 
       final data = jsonDecode(response.body);
-      
-      // Convert response to Recipe objects
       final recipes = (data as List)
           .map((json) => Recipe.fromJson(json))
           .toList();
       
       AppConfig.debugPrint('Found ${recipes.length} recipes for keyword: $keyword');
-      
       return recipes.isEmpty ? _getHealthyRecipes() : recipes;
     } catch (e) {
       AppConfig.debugPrint('Error fetching recipes from Worker: $e');
-      // Fallback to default recipes on error
       return _getHealthyRecipes();
     }
   }
@@ -281,14 +238,11 @@ class RecipeGenerator {
   ];
 }
 
-/// --- Nutrition API Service with Enhanced Error Handling ---
 class NutritionApiService {
-  // FIXED: Use Environment base URL instead of hardcoded
   static String get baseUrl => AppConfig.openFoodFactsUrl;
 
   static Future<NutritionInfo?> fetchNutritionInfo(String barcode) async {
     if (barcode.isEmpty) return null;
-
     final url = "$baseUrl/$barcode.json";
 
     try {
@@ -313,17 +267,14 @@ class NutritionApiService {
   }
 }
 
-/// --- Barcode Scanner Service with Enhanced Error Handling ---
 class BarcodeScannerService {
   static Future<String?> scanBarcode(String imagePath) async {
     if (imagePath.isEmpty) return null;
-
     final inputImage = InputImage.fromFilePath(imagePath);
     final barcodeScanner = BarcodeScanner();
 
     try {
       final barcodes = await barcodeScanner.processImage(inputImage);
-      
       if (barcodes.isNotEmpty) {
         return barcodes.first.rawValue;
       }
@@ -339,15 +290,12 @@ class BarcodeScannerService {
   static Future<NutritionInfo?> scanAndLookup(String imagePath) async {
     final barcode = await scanBarcode(imagePath);
     if (barcode == null) return null;
-    
     return await NutritionApiService.fetchNutritionInfo(barcode);
   }
 }
 
-/// --- FIXED: HomePage with proper architecture ---
 class HomePage extends StatefulWidget {
   final bool isPremium;
-
   const HomePage({super.key, this.isPremium = false});
 
   @override
@@ -355,11 +303,8 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
-  // Premium scanning state
   bool _isScanning = false;
   List<Map<String, String>> _scannedRecipes = [];
-  
-  // Nutrition scanner state
   File? _imageFile;
   String _nutritionText = '';
   int? _liverHealthScore;
@@ -369,22 +314,16 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
   List<FavoriteRecipe> _favoriteRecipes = [];
   bool _showInitialView = true;
   NutritionInfo? _currentNutrition;
-
-  // FIXED: Premium state management without AnimatedBuilder performance issues
   late final PremiumGateController _premiumController;
   StreamSubscription? _premiumSubscription;
   bool _isPremium = false;
   int _remainingScans = 3;
   bool _hasUsedAllFreeScans = false;
-
-  // FIXED: Proper ad management with disposal tracking
   InterstitialAd? _interstitialAd;
   bool _isAdReady = false;
   RewardedAd? _rewardedAd;
   bool _isRewardedAdReady = false;
   bool _isDisposed = false;
-
-  // Image picker
   final ImagePicker _picker = ImagePicker();
 
   @override
@@ -406,11 +345,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     super.dispose();
   }
 
-  // FIXED: Proper premium controller management
   void _initializePremiumController() {
     _premiumController = PremiumGateController();
-    
-    // Listen to premium state changes efficiently
     _premiumSubscription = _premiumController.addListener(() {
       if (mounted && !_isDisposed) {
         setState(() {
@@ -420,8 +356,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
         });
       }
     }) as StreamSubscription?;
-
-    // Initialize current state
     setState(() {
       _isPremium = _premiumController.isPremium;
       _remainingScans = _premiumController.remainingScans;
@@ -429,7 +363,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     });
   }
 
-  // FIXED: Async initialization with proper error handling
   Future<void> _initializeAsync() async {
     try {
       await _premiumController.refresh();
@@ -449,72 +382,62 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     }
   }
 
-  /// FIXED: Load interstitial ad with proper error handling
   void _loadInterstitialAd() {
-  if (_isDisposed) return;
+    if (_isDisposed) return;
+    final adUnitId = AppConfig.interstitialAdId;
+    InterstitialAd.load(
+      adUnitId: adUnitId,
+      request: AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          if (!_isDisposed) {
+            _interstitialAd = ad;
+            _isAdReady = true;
+            ad.setImmersiveMode(true);
+          } else {
+            ad.dispose();
+          }
+        },
+        onAdFailedToLoad: (error) {
+          if (AppConfig.enableDebugPrints) {
+            print('InterstitialAd failed to load: $error');
+          }
+          _isAdReady = false;
+        },
+      ),
+    );
+  }
 
-  // FIXED: Use Environment system instead of hardcoded IDs
-  final adUnitId = AppConfig.interstitialAdId;
-  InterstitialAd.load(
-    adUnitId: adUnitId,
-    request: AdRequest(),
-    adLoadCallback: InterstitialAdLoadCallback(
-      onAdLoaded: (ad) {
-        if (!_isDisposed) {
-          _interstitialAd = ad;
-          _isAdReady = true;
-          ad.setImmersiveMode(true);
-        } else {
-          ad.dispose();
-        }
-      },
-      onAdFailedToLoad: (error) {
-        if (AppConfig.enableDebugPrints) {
-          print('InterstitialAd failed to load: $error');
-        }
-        _isAdReady = false;
-      },
-    ),
-  );
-}
+  void _loadRewardedAd() {
+    if (_isDisposed) return;
+    final adUnitId = AppConfig.rewardedAdId;
+    RewardedAd.load(
+      adUnitId: adUnitId,
+      request: AdRequest(),
+      rewardedAdLoadCallback: RewardedAdLoadCallback(
+        onAdLoaded: (ad) {
+          if (!_isDisposed) {
+            _rewardedAd = ad;
+            _isRewardedAdReady = true;
+          } else {
+            ad.dispose();
+          }
+        },
+        onAdFailedToLoad: (error) {
+          if (AppConfig.enableDebugPrints) {
+            print('RewardedAd failed to load: $error');
+          }
+          _isRewardedAdReady = false;
+        },
+      ),
+    );
+  }
 
-
-  /// FIXED: Load rewarded ad with proper error handling
-void _loadRewardedAd() {
-  if (_isDisposed) return;
-
-  // FIXED: Use Environment system instead of hardcoded IDs
-  final adUnitId = AppConfig.rewardedAdId;
-
-  RewardedAd.load(
-    adUnitId: adUnitId,
-    request: AdRequest(),
-    rewardedAdLoadCallback: RewardedAdLoadCallback(
-      onAdLoaded: (ad) {
-        if (!_isDisposed) {
-          _rewardedAd = ad;
-          _isRewardedAdReady = true;
-        } else {
-          ad.dispose();
-        }
-      },
-      onAdFailedToLoad: (error) {
-        if (AppConfig.enableDebugPrints) {
-          print('RewardedAd failed to load: $error');
-        }
-        _isRewardedAdReady = false;
-      },
-    ),
-  );
-}
-
-  /// FIXED: Show interstitial ad with proper disposal checks
   void _showInterstitialAd(VoidCallback onAdClosed) {
     if (_isDisposed || !_isAdReady || _interstitialAd == null) {
       onAdClosed();
       return;
     }
-
     _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
       onAdShowedFullScreenContent: (ad) {
         print('Interstitial ad showed full screen content');
@@ -536,15 +459,12 @@ void _loadRewardedAd() {
         onAdClosed();
       },
     );
-    
     _interstitialAd!.show();
     _isAdReady = false;
   }
 
-  /// FIXED: Show rewarded ad with proper error handling
   void _showRewardedAd() {
     if (_isDisposed) return;
-
     if (_isRewardedAdReady && _rewardedAd != null) {
       _rewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
         onAdShowedFullScreenContent: (ad) {
@@ -565,13 +485,11 @@ void _loadRewardedAd() {
           }
         },
       );
-      
       _rewardedAd!.show(
         onUserEarnedReward: (ad, reward) {
           if (!_isDisposed) {
             print('User earned reward: ${reward.amount} ${reward.type}');
             _premiumController.addBonusScans(1);
-            
             if (mounted) {
               ErrorHandlingService.showSuccess(
                 context,
@@ -592,12 +510,10 @@ void _loadRewardedAd() {
     }
   }
 
-  /// FIXED: Load favorite recipes with proper error handling
   Future<void> _loadFavoriteRecipes() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
-      
       if (mounted && !_isDisposed) {
         setState(() {
           _favoriteRecipes = favoriteRecipesJson
@@ -627,35 +543,28 @@ void _loadRewardedAd() {
     }
   }
 
-  /// FIXED: Toggle favorite recipe with enhanced error handling
   Future<void> _toggleFavoriteRecipe(Recipe recipe) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final currentUserId = AuthService.currentUserId;
-      
       if (currentUserId == null) {
         if (mounted) {
           ErrorHandlingService.showSimpleError(context, 'Please log in to save recipes');
         }
         return;
       }
-
       final existingIndex = _favoriteRecipes.indexWhere((fav) => fav.recipeName == recipe.title);
-      
       if (existingIndex >= 0) {
-        // Remove from favorites
         if (mounted && !_isDisposed) {
           setState(() {
             _favoriteRecipes.removeAt(existingIndex);
           });
-          
           ErrorHandlingService.showSuccess(
             context,
             'Removed "${recipe.title}" from favorites'
           );
         }
       } else {
-        // Add to favorites
         final favoriteRecipe = FavoriteRecipe(
           userId: currentUserId,
           recipeName: recipe.title,
@@ -663,25 +572,20 @@ void _loadRewardedAd() {
           directions: recipe.instructions,
           createdAt: DateTime.now(),
         );
-        
         if (mounted && !_isDisposed) {
           setState(() {
             _favoriteRecipes.add(favoriteRecipe);
           });
-          
           ErrorHandlingService.showSuccess(
             context,
             'Added "${recipe.title}" to favorites!'
           );
         }
       }
-      
-      // Save to SharedPreferences
       final favoriteRecipesJson = _favoriteRecipes
           .map((recipe) => json.encode(recipe.toJson()))
           .toList();
       await prefs.setStringList('favorite_recipes_detailed', favoriteRecipesJson);
-      
     } catch (e) {
       if (mounted) {
         await ErrorHandlingService.handleError(
@@ -714,14 +618,12 @@ void _loadRewardedAd() {
     }
   }
 
-  /// FIXED: Premium scan with proper error handling
   Future<void> _performScan() async {
     try {
       if (!_premiumController.canAccessFeature(PremiumFeature.scan)) {
         Navigator.pushNamed(context, '/purchase');
         return;
       }
-
       if (!_isPremium) {
         _showInterstitialAd(() => _executePerformScan());
       } else {
@@ -741,22 +643,16 @@ void _loadRewardedAd() {
 
   Future<void> _executePerformScan() async {
     if (_isDisposed) return;
-
     try {
       setState(() {
         _isScanning = true;
       });
-
       final success = await _premiumController.useScan();
-      
       if (!success) {
         Navigator.pushNamed(context, '/purchase');
         return;
       }
-
-      // Simulate scanning delay
       await Future.delayed(Duration(seconds: 2));
-
       if (mounted && !_isDisposed) {
         setState(() {
           _scannedRecipes = [
@@ -772,7 +668,6 @@ void _loadRewardedAd() {
             },
           ];
         });
-
         ErrorHandlingService.showSuccess(
           context,
           'Scan successful! ${_premiumController.remainingScans} scans remaining today.'
@@ -796,14 +691,12 @@ void _loadRewardedAd() {
     }
   }
 
-  /// FIXED: Take photo with proper error handling
   Future<void> _takePhoto() async {
     try {
       if (!_premiumController.canAccessFeature(PremiumFeature.scan)) {
         Navigator.pushNamed(context, '/purchase');
         return;
       }
-
       if (!_isPremium) {
         _showInterstitialAd(() => _executeTakePhoto());
       } else {
@@ -823,7 +716,6 @@ void _loadRewardedAd() {
 
   Future<void> _executeTakePhoto() async {
     if (_isDisposed) return;
-
     try {
       if (mounted) {
         setState(() {
@@ -836,14 +728,12 @@ void _loadRewardedAd() {
           _scannedRecipes = [];
         });
       }
-
       final pickedFile = await _picker.pickImage(
         source: ImageSource.camera,
         imageQuality: 85,
         maxWidth: 1024,
         maxHeight: 1024,
       );
-
       if (pickedFile != null && mounted && !_isDisposed) {
         setState(() {
           _imageFile = File(pickedFile.path);
@@ -861,17 +751,14 @@ void _loadRewardedAd() {
     }
   }
 
-  /// FIXED: Submit photo with comprehensive error handling
   Future<void> _submitPhoto() async {
     if (_imageFile == null || _isDisposed) return;
-
     try {
       final success = await _premiumController.useScan();
       if (!success) {
         Navigator.pushNamed(context, '/purchase');
         return;
       }
-
       if (mounted) {
         setState(() {
           _isLoading = true;
@@ -880,9 +767,7 @@ void _loadRewardedAd() {
           _recipeSuggestions = [];
         });
       }
-
       final nutrition = await BarcodeScannerService.scanAndLookup(_imageFile!.path);
-
       if (nutrition == null) {
         if (mounted && !_isDisposed) {
           setState(() {
@@ -893,16 +778,13 @@ void _loadRewardedAd() {
         }
         return;
       }
-
       final score = LiverHealthCalculator.calculate(
         fat: nutrition.fat,
         sodium: nutrition.sodium,
         sugar: nutrition.sugar,
         calories: nutrition.calories,
       );
-
       final suggestions = await RecipeGenerator.generateSuggestionsFromProduct(nutrition.productName);
-      
       if (mounted && !_isDisposed) {
         setState(() {
           _nutritionText = _buildNutritionDisplay(nutrition);
@@ -912,7 +794,6 @@ void _loadRewardedAd() {
           _recipeSuggestions = suggestions;
           _currentNutrition = nutrition;
         });
-
         ErrorHandlingService.showSuccess(
           context,
           'Analysis successful! ${_premiumController.remainingScans} scans remaining today.'
@@ -925,7 +806,6 @@ void _loadRewardedAd() {
           _showLiverBar = false;
           _isLoading = false;
         });
-        
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -945,161 +825,147 @@ void _loadRewardedAd() {
            "Sodium: ${nutrition.sodium.toStringAsFixed(1)} mg/100g";
   }
 
-  /// FIXED: Search users with proper error handling
-  /// UPDATED: Search users with proper error handling
-Future<void> _searchUsers(String query) async {
-  if (query.trim().isEmpty) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Please enter a search term'),
-          backgroundColor: Colors.orange,
+  Future<void> _searchUsers(String query) async {
+    if (query.trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Please enter a search term'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+    try {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SearchUsersPage(initialQuery: query),
         ),
       );
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.navigationError,
+          customMessage: 'Error opening user search',
+        );
+      }
     }
-    return;
   }
-  
-  try {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => SearchUsersPage(initialQuery: query),
+
+  Widget _buildSearchBar() {
+    final TextEditingController searchController = TextEditingController();
+    return Container(
+      margin: EdgeInsets.only(bottom: 20),
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha((0.95 * 255).toInt()),
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(Icons.people, color: Colors.blue.shade700, size: 24),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Find Friends & Share Recipes',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue.shade800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 4),
+          Text(
+            'Search by name, username, or email',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade600,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+          SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Try "John Smith" or "jsmith"...',
+                    hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                    prefixIcon: Icon(Icons.person_search, color: Colors.grey.shade600),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(25),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(25),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(25),
+                      borderSide: BorderSide(color: Colors.blue, width: 2),
+                    ),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    filled: true,
+                    fillColor: Colors.grey.shade50,
+                  ),
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (value) => _searchUsers(value),
+                ),
+              ),
+              SizedBox(width: 12),
+              ElevatedButton(
+                onPressed: () => _searchUsers(searchController.text),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  shape: CircleBorder(),
+                  padding: EdgeInsets.all(14),
+                  elevation: 3,
+                ),
+                child: Icon(Icons.search, size: 24),
+              ),
+            ],
+          ),
+          SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.check_circle, size: 14, color: Colors.green),
+              SizedBox(width: 4),
+              Text(
+                'Search by Name, Username or Email!',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.green.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
-  } catch (e) {
-    if (mounted) {
-      await ErrorHandlingService.handleError(
-        context: context,
-        error: e,
-        category: ErrorHandlingService.navigationError,
-        customMessage: 'Error opening user search',
-      );
-    }
   }
-}
-Widget _buildSearchBar() {
-  final TextEditingController searchController = TextEditingController();
-  
-  return Container(
-    margin: EdgeInsets.only(bottom: 20),
-    padding: EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white.withAlpha((0.95 * 255).toInt()),
-      borderRadius: BorderRadius.circular(15),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.1),
-          blurRadius: 8,
-          offset: Offset(0, 2),
-        ),
-      ],
-    ),
-    child: Column(
-      children: [
-        Row(
-          children: [
-            Icon(
-              Icons.people,
-              color: Colors.blue.shade700,
-              size: 24,
-            ),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'Find Friends & Share Recipes',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue.shade800,
-                ),
-              ),
-            ),
-          ],
-        ),
-        SizedBox(height: 4),
-        Text(
-          'Search by name, username, or email',
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey.shade600,
-            fontStyle: FontStyle.italic,
-          ),
-        ),
-        SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: searchController,
-                decoration: InputDecoration(
-                  hintText: 'Try "John Smith" or "jsmith"...',
-                  hintStyle: TextStyle(
-                    color: Colors.grey.shade400,
-                    fontSize: 14,
-                  ),
-                  prefixIcon: Icon(Icons.person_search, color: Colors.grey.shade600),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(25),
-                    borderSide: BorderSide(color: Colors.grey.shade300),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(25),
-                    borderSide: BorderSide(color: Colors.grey.shade300),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(25),
-                    borderSide: BorderSide(color: Colors.blue, width: 2),
-                  ),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey.shade50,
-                ),
-                textInputAction: TextInputAction.search,
-                onSubmitted: (value) => _searchUsers(value),
-              ),
-            ),
-            SizedBox(width: 12),
-            ElevatedButton(
-              onPressed: () => _searchUsers(searchController.text),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-                shape: CircleBorder(),
-                padding: EdgeInsets.all(14),
-                elevation: 3,
-              ),
-              child: Icon(Icons.search, size: 24),
-            ),
-          ],
-        ),
-        SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.check_circle, size: 14, color: Colors.green),
-            SizedBox(width: 4),
-            Text(
-              'Search by Name, Username or Email!',
-              style: TextStyle(
-                fontSize: 11,
-                color: Colors.green.shade600,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-      ],
-    ),
-  );
-}
-  /// Build recipe suggestions for nutrition analysis
+
   Widget _buildNutritionRecipeSuggestions() {
     if (_recipeSuggestions.isEmpty) return const SizedBox.shrink();
-
     return PremiumGate(
       feature: PremiumFeature.viewRecipes,
       featureName: 'Recipe Details',
@@ -1137,10 +1003,8 @@ Widget _buildSearchBar() {
     );
   }
 
-  /// Build collapsible recipe card for nutrition results
   Widget _buildNutritionRecipeCard(Recipe recipe) {
     final isFavorite = _isRecipeFavorited(recipe.title);
-    
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -1184,26 +1048,17 @@ Widget _buildSearchBar() {
               children: [
                 Text(
                   recipe.description,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.white70,
-                  ),
+                  style: const TextStyle(fontSize: 14, color: Colors.white70),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   'Ingredients: ${recipe.ingredients.join(', ')}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.white60,
-                  ),
+                  style: const TextStyle(fontSize: 12, color: Colors.white60),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   'Instructions: ${recipe.instructions}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.white60,
-                  ),
+                  style: const TextStyle(fontSize: 12, color: Colors.white60),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -1253,11 +1108,9 @@ Widget _buildSearchBar() {
     );
   }
 
-  /// Build initial welcome view - FIXED: No more AnimatedBuilder
   Widget _buildInitialView() {
     return Stack(
       children: [
-        // Background
         Positioned.fill(
           child: Image.asset(
             'assets/background.png',
@@ -1266,26 +1119,17 @@ Widget _buildSearchBar() {
               return Container(
                 color: Colors.green.shade50,
                 child: Center(
-                  child: Icon(
-                    Icons.image_not_supported,
-                    size: 50,
-                    color: Colors.grey,
-                  ),
+                  child: Icon(Icons.image_not_supported, size: 50, color: Colors.grey),
                 ),
               );
             },
           ),
         ),
-        
-        // Content
         SingleChildScrollView(
           padding: EdgeInsets.all(16),
           child: Column(
             children: [
-              // Search Bar
               _buildSearchBar(),
-              
-              // Welcome Section
               Container(
                 padding: EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -1294,11 +1138,7 @@ Widget _buildSearchBar() {
                 ),
                 child: Column(
                   children: [
-                    Icon(
-                      Icons.scanner,
-                      size: 48,
-                      color: Colors.green,
-                    ),
+                    Icon(Icons.scanner, size: 48, color: Colors.green),
                     SizedBox(height: 12),
                     Text(
                       'Welcome to Liver Food Scanner',
@@ -1311,23 +1151,16 @@ Widget _buildSearchBar() {
                     SizedBox(height: 8),
                     Text(
                       'Scan products to discover amazing recipes and get nutrition insights!',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey.shade600,
-                      ),
+                      style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
                       textAlign: TextAlign.center,
                     ),
                   ],
                 ),
               ),
-              
               SizedBox(height: 30),
-              
-              // FIXED: Scan Button Section with direct state management
               Center(
                 child: Column(
                   children: [
-                    // Main Scan Button
                     GestureDetector(
                       onTap: _isScanning ? null : _takePhoto,
                       child: Container(
@@ -1391,10 +1224,7 @@ Widget _buildSearchBar() {
                         ),
                       ),
                     ),
-                    
                     SizedBox(height: 20),
-                    
-                    // Scan Status
                     Container(
                       padding: EdgeInsets.all(16),
                       decoration: BoxDecoration(
@@ -1443,7 +1273,6 @@ Widget _buildSearchBar() {
                                 foregroundColor: Colors.white,
                               ),
                             ),
-                            
                             SizedBox(height: 8),
                             ElevatedButton.icon(
                               onPressed: _showRewardedAd,
@@ -1474,7 +1303,6 @@ Widget _buildSearchBar() {
                         ],
                       ),
                     ),
-                    
                     SizedBox(height: 20),
                     ElevatedButton.icon(
                       onPressed: _performScan,
@@ -1488,10 +1316,7 @@ Widget _buildSearchBar() {
                   ],
                 ),
               ),
-              
               SizedBox(height: 30),
-              
-              // Recipe Results from Demo Scan
               if (_scannedRecipes.isNotEmpty) ...[
                 PremiumGate(
                   feature: PremiumFeature.viewRecipes,
@@ -1520,9 +1345,7 @@ Widget _buildSearchBar() {
                           ],
                         ),
                       ),
-                      
                       SizedBox(height: 16),
-                      
                       ..._scannedRecipes.map((recipe) => _buildScannedRecipeCard(recipe)),
                     ],
                   ),
@@ -1535,10 +1358,8 @@ Widget _buildSearchBar() {
     );
   }
 
-  /// Build scanned recipe card
   Widget _buildScannedRecipeCard(Map<String, String> recipe) {
     final isFavorite = _isRecipeFavorited(recipe['name']!);
-    
     return Container(
       margin: EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -1553,10 +1374,7 @@ Widget _buildSearchBar() {
             Expanded(
               child: Text(
                 recipe['name']!,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -1593,30 +1411,14 @@ Widget _buildSearchBar() {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Ingredients:',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
+                Text('Ingredients:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 SizedBox(height: 8),
                 Text(recipe['ingredients']!),
-                
                 SizedBox(height: 16),
-                
-                Text(
-                  'Directions:',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
+                Text('Directions:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 SizedBox(height: 8),
                 Text(recipe['directions']!),
-                
                 SizedBox(height: 16),
-                
                 Row(
                   children: [
                     Expanded(
@@ -1672,7 +1474,6 @@ Widget _buildSearchBar() {
     );
   }
 
-  /// Build scanning view with results
   Widget _buildScanningView() {
     return Container(
       decoration: const BoxDecoration(
@@ -1686,8 +1487,6 @@ Widget _buildSearchBar() {
         child: Column(
           children: [
             const SizedBox(height: 20),
-
-            // Image preview
             if (_imageFile != null)
               Container(
                 decoration: BoxDecoration(
@@ -1715,20 +1514,13 @@ Widget _buildSearchBar() {
                           color: Colors.grey.shade300,
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Icon(
-                          Icons.error,
-                          size: 50,
-                          color: Colors.red,
-                        ),
+                        child: Icon(Icons.error, size: 50, color: Colors.red),
                       );
                     },
                   ),
                 ),
               ),
-
             const SizedBox(height: 20),
-
-            // Action buttons
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
@@ -1762,10 +1554,7 @@ Widget _buildSearchBar() {
                 ),
               ],
             ),
-
             const SizedBox(height: 20),
-
-            // Loading indicator
             if (_isLoading)
               Container(
                 padding: const EdgeInsets.all(16),
@@ -1779,16 +1568,11 @@ Widget _buildSearchBar() {
                     SizedBox(height: 16),
                     Text(
                       'Analyzing nutrition information...',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
                     ),
                   ],
                 ),
               ),
-
-            // Nutrition information
             if (_nutritionText.isNotEmpty)
               Container(
                 padding: const EdgeInsets.all(16),
@@ -1834,19 +1618,13 @@ Widget _buildSearchBar() {
                   ],
                 ),
               ),
-
             const SizedBox(height: 20),
-
-            // Liver health bar
             if (_showLiverBar && _liverHealthScore != null)
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 4),
                 child: LiverHealthBar(healthScore: _liverHealthScore!),
               ),
-
             const SizedBox(height: 20),
-
-            // Recipe suggestions from nutrition analysis
             _buildNutritionRecipeSuggestions(),
           ],
         ),
@@ -1856,8 +1634,7 @@ Widget _buildSearchBar() {
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Required for AutomaticKeepAliveClientMixin
-    
+    super.build(context);
     return Scaffold(
       appBar: AppBar(
         leading: Builder(
@@ -1870,7 +1647,6 @@ Widget _buildSearchBar() {
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
         actions: [
-          // FIXED: Show purchase button for non-premium users without AnimatedBuilder
           if (!_isPremium)
             IconButton(
               icon: const Icon(Icons.shopping_cart),
