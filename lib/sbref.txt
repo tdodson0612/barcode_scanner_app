@@ -1,1 +1,78 @@
 
+done: premium gate/app config/ fave recipes/groc item/ submit recipe/ chat/ 
+fave rec page/ edit rec/ prem page/ db serv/ 
+homepage
+
+Perfect! You only need to replace ONE method in your home_screen.dart file:
+📝 Find and Replace This Method:
+Find this method:
+dartstatic Future<List<Recipe>> generateSuggestionsFromProduct(String productName) async {
+  final keyword = IngredientKeywordExtractor.extract(productName);
+  AppConfig.debugPrint('Product: $productName -> Keyword: $keyword');
+  
+  try {
+    // Query Supabase for recipes containing the keyword in ingredients
+    final response = await Supabase.instance.client
+      .from('recipes')
+      .select()
+      .ilike('ingredients', '%$keyword%')
+      .limit(5);
+    
+    // Convert response to Recipe objects
+    final recipes = (response as List)
+        .map((json) => Recipe.fromJson(json))
+        .toList();
+    
+    AppConfig.debugPrint('Found ${recipes.length} recipes for keyword: $keyword');
+    
+    return recipes.isEmpty ? _getHealthyRecipes() : recipes;
+  } catch (e) {
+    AppConfig.debugPrint('Error fetching recipes from Supabase: $e');
+    // Fallback to default recipes on error
+    return _getHealthyRecipes();
+  }
+}
+Replace with:
+dartstatic Future<List<Recipe>> generateSuggestionsFromProduct(String productName) async {
+  final keyword = IngredientKeywordExtractor.extract(productName);
+  AppConfig.debugPrint('Product: $productName -> Keyword: $keyword');
+  
+  try {
+    // MODIFIED: Fetch recipes via Worker instead of direct Supabase
+    final response = await http.post(
+      Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'action': 'select',
+        'table': 'recipes',
+        'columns': ['*'],
+        // Note: Worker needs to handle case-insensitive LIKE/ILIKE queries
+        'filters': {'ingredients_contains': keyword},
+        'limit': 5,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Worker query failed: ${response.body}');
+    }
+
+    final data = jsonDecode(response.body);
+    
+    // Convert response to Recipe objects
+    final recipes = (data as List)
+        .map((json) => Recipe.fromJson(json))
+        .toList();
+    
+    AppConfig.debugPrint('Found ${recipes.length} recipes for keyword: $keyword');
+    
+    return recipes.isEmpty ? _getHealthyRecipes() : recipes;
+  } catch (e) {
+    AppConfig.debugPrint('Error fetching recipes from Worker: $e');
+    // Fallback to default recipes on error
+    return _getHealthyRecipes();
+  }
+}
+⚠️ Don't forget to remove this import at the top:
+dartimport 'package:supabase_flutter/supabase_flutter.dart'; // REMOVE THIS LINE
+
+That's it! Just this one method change. The rest of your home_screen.dart stays exactly the same. ✅
