@@ -1,8 +1,10 @@
-// lib/login.dart - Group B Changes: Remember Me + Autofill
+// lib/login.dart - Group B Changes: Remember Me + Autofill + FIXED: No Supabase Egress
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'services/auth_service.dart';
 import 'services/error_handling_service.dart';
 import 'config/app_config.dart';
@@ -29,15 +31,14 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
-  bool _rememberMe = true; // NEW: Default to checked
+  bool _rememberMe = true;
 
   @override
   void initState() {
     super.initState();
     _setupAuthListener();
-    _loadSavedCredentials(); // NEW: Load saved preferences
+    _loadSavedCredentials();
     
-    // Pre-fill controllers with saved values
     _emailController.text = _email;
     _passwordController.text = _password;
     _confirmPasswordController.text = _confirmPassword;
@@ -52,7 +53,6 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  // NEW: Load saved remember me preference and email
   Future<void> _loadSavedCredentials() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -71,7 +71,6 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  // NEW: Save remember me preference and email
   Future<void> _saveCredentials() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -134,7 +133,6 @@ class _LoginPageState extends State<LoginPage> {
       
       AppConfig.debugPrint('Attempting login for: $trimmedEmail');
       
-      // NEW: Save credentials before login attempt
       await _saveCredentials();
       
       final response = await AuthService.signIn(
@@ -179,9 +177,10 @@ class _LoginPageState extends State<LoginPage> {
         AppConfig.debugPrint('Sign up successful: ${response.user?.email}');
 
         await Future.delayed(const Duration(milliseconds: 1000));
-        await _createUserProfile(response.user!);
+        
+        // FIXED: Route user profile creation through Cloudflare Worker instead of direct Supabase
+        await _createUserProfileViaWorker(response.user!);
 
-        // NEW: Save credentials after successful signup
         await _saveCredentials();
 
         if (mounted) {
@@ -204,21 +203,34 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  Future<void> _createUserProfile(User user) async {
+  // FIXED: Create user profile via Cloudflare Worker (no Supabase egress)
+  Future<void> _createUserProfileViaWorker(User user) async {
     try {
-      await Supabase.instance.client.from('user_profiles').insert({
-        'id': user.id,
-        'email': user.email,
-        'daily_scans_used': 0,
-        'last_scan_date': DateTime.now().toIso8601String().split('T').first,
-        'username': user.email?.split('@')[0] ?? 'user',
-        'created_at': DateTime.now().toIso8601String(),
-        'friends_list_visible': true,
-      });
+      final response = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'insert',
+          'table': 'user_profiles',
+          'data': {
+            'id': user.id,
+            'email': user.email,
+            'daily_scans_used': 0,
+            'last_scan_date': DateTime.now().toIso8601String().split('T')[0],
+            'username': user.email?.split('@')[0] ?? 'user',
+            'created_at': DateTime.now().toIso8601String(),
+            'friends_list_visible': true,
+          },
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Worker profile creation failed: ${response.body}');
+      }
       
-      AppConfig.debugPrint('User profile created for ${user.email}');
+      AppConfig.debugPrint('User profile created for ${user.email} via Worker');
     } catch (e) {
-      AppConfig.debugPrint('Error creating user profile: $e');
+      AppConfig.debugPrint('Error creating user profile via Worker: $e');
       
       if (mounted) {
         await ErrorHandlingService.handleError(
@@ -414,7 +426,7 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(24),
-                  child: AutofillGroup( // NEW: Wrap form in AutofillGroup for password manager support
+                  child: AutofillGroup(
                     child: Form(
                       key: _formKey,
                       child: Column(
@@ -473,7 +485,7 @@ class _LoginPageState extends State<LoginPage> {
                             onSaved: (val) => _email = val?.trim() ?? '',
                             autocorrect: false,
                             enableSuggestions: false,
-                            autofillHints: [AutofillHints.email], // NEW: Enable autofill
+                            autofillHints: [AutofillHints.email],
                           ),
                           
                           SizedBox(height: 16),
@@ -501,8 +513,8 @@ class _LoginPageState extends State<LoginPage> {
                             autocorrect: false,
                             enableSuggestions: false,
                             autofillHints: _isLogin 
-                                ? [AutofillHints.password] // NEW: Login autofill
-                                : [AutofillHints.newPassword], // NEW: Signup autofill
+                                ? [AutofillHints.password]
+                                : [AutofillHints.newPassword],
                           ),
 
                           // Confirm Password Field (Sign Up only)
@@ -529,11 +541,11 @@ class _LoginPageState extends State<LoginPage> {
                               onSaved: (val) => _confirmPassword = val ?? '',
                               autocorrect: false,
                               enableSuggestions: false,
-                              autofillHints: [AutofillHints.newPassword], // NEW: Confirm password autofill
+                              autofillHints: [AutofillHints.newPassword],
                             ),
                           ],
 
-                          // NEW: Remember Me Checkbox (Login only)
+                          // Remember Me Checkbox (Login only)
                           if (_isLogin) ...[
                             SizedBox(height: 16),
                             Row(
