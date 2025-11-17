@@ -467,7 +467,7 @@ class _AppDrawerState extends State<AppDrawer> {
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 10,
-                          fontWeight: bold,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
