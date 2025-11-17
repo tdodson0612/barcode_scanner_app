@@ -1,3 +1,5 @@
+//lib/user_manager.dart
+
 class UserManager {
   static bool _hasPurchased = false;
   static bool _isMonetized = false;
