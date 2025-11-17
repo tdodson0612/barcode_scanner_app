@@ -2062,4 +2062,306 @@ Shared from Recipe Scanner App
       throw Exception('Debug test failed: $e');
     }
   }
+
+
+// ==================================================
+// RECIPE COMMENTS & RATINGS (NEW)
+// ==================================================
+
+/// Fetch all comments for a recipe with user info
+  static Future<List<Map<String, dynamic>>> getRecipeComments(int recipeId) async {
+    try {
+      // Fetch comments via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'recipe_comments',
+        columns: ['*'],
+        filters: {'recipe_id': recipeId},
+        orderBy: 'created_at',
+        ascending: false,
+      );
+
+      final comments = <Map<String, dynamic>>[];
+      
+      // Fetch user info for each comment
+      for (var comment in response as List) {
+        final userId = comment['user_id'];
+        
+        // Fetch user profile via Worker
+        final userProfile = await _workerQuery(
+          action: 'select',
+          table: 'user_profiles',
+          columns: ['id', 'username', 'avatar_url', 'first_name', 'last_name'],
+          filters: {'id': userId},
+          limit: 1,
+        );
+        
+        if (userProfile != null && (userProfile as List).isNotEmpty) {
+          comments.add({
+            ...comment,
+            'user': userProfile[0],
+          });
+        }
+      }
+      
+      return comments;
+    } catch (e) {
+      throw Exception('Failed to get recipe comments: $e');
+    }
+  }
+
+  /// Add a comment to a recipe
+  static Future<void> addComment({
+    required int recipeId,
+    required String commentText,
+    String? parentCommentId,
+  }) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _workerQuery(
+        action: 'insert',
+        table: 'recipe_comments',
+        data: {
+          'recipe_id': recipeId,
+          'user_id': currentUserId!,
+          'comment_text': commentText,
+          'parent_comment_id': parentCommentId,
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
+    } catch (e) {
+      throw Exception('Failed to add comment: $e');
+    }
+  }
+
+  /// Check if current user has liked a comment/post
+  static Future<bool> hasUserLikedPost(String postId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'comment_likes',
+        columns: ['id'],
+        filters: {
+          'comment_id': postId,
+          'user_id': currentUserId!,
+        },
+        limit: 1,
+      );
+      
+      return response != null && (response as List).isNotEmpty;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Like a comment
+  static Future<void> likeComment(String commentId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      // Check if already liked
+      final alreadyLiked = await hasUserLikedPost(commentId);
+      
+      if (!alreadyLiked) {
+        await _workerQuery(
+          action: 'insert',
+          table: 'comment_likes',
+          data: {
+            'comment_id': commentId,
+            'user_id': currentUserId!,
+            'created_at': DateTime.now().toIso8601String(),
+          },
+        );
+      }
+    } catch (e) {
+      throw Exception('Failed to like comment: $e');
+    }
+  }
+
+  /// Unlike a comment
+  static Future<void> unlikeComment(String commentId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _workerQuery(
+        action: 'delete',
+        table: 'comment_likes',
+        filters: {
+          'comment_id': commentId,
+          'user_id': currentUserId!,
+        },
+      );
+    } catch (e) {
+      throw Exception('Failed to unlike comment: $e');
+    }
+  }
+
+  /// Delete a comment (owner or admin only)
+  static Future<void> deleteComment(String commentId) async {
+    ensureUserAuthenticated();
+    
+    try {
+      // Check ownership via Worker
+      final commentData = await _workerQuery(
+        action: 'select',
+        table: 'recipe_comments',
+        columns: ['user_id'],
+        filters: {'id': commentId},
+        limit: 1,
+      );
+      
+      if (commentData == null || (commentData as List).isEmpty) {
+        throw Exception('Comment not found');
+      }
+      
+      if (commentData[0]['user_id'] != currentUserId) {
+        throw Exception('You can only delete your own comments');
+      }
+      
+      // Delete via Worker
+      await _workerQuery(
+        action: 'delete',
+        table: 'recipe_comments',
+        filters: {'id': commentId},
+      );
+    } catch (e) {
+      throw Exception('Failed to delete comment: $e');
+    }
+  }
+
+  /// Report a comment for moderation
+  static Future<void> reportComment(String commentId, String reason) async {
+    ensureUserAuthenticated();
+    
+    try {
+      await _workerQuery(
+        action: 'insert',
+        table: 'comment_reports',
+        data: {
+          'comment_id': commentId,
+          'reporter_id': currentUserId!,
+          'reason': reason,
+          'created_at': DateTime.now().toIso8601String(),
+          'status': 'pending',
+        },
+      );
+    } catch (e) {
+      throw Exception('Failed to report comment: $e');
+    }
+  }
+
+  // ==================================================
+  // RECIPE RATINGS (NEW)
+  // ==================================================
+
+  /// Get average rating and count for a recipe
+  static Future<Map<String, dynamic>> getRecipeAverageRating(int recipeId) async {
+    try {
+      // Fetch all ratings for this recipe via Worker
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'recipe_ratings',
+        columns: ['rating'],
+        filters: {'recipe_id': recipeId},
+      );
+      
+      if (response == null || (response as List).isEmpty) {
+        return {'average': 0.0, 'count': 0};
+      }
+      
+      final ratings = (response as List).map((r) => r['rating'] as int).toList();
+      final count = ratings.length;
+      final average = ratings.reduce((a, b) => a + b) / count;
+      
+      return {
+        'average': double.parse(average.toStringAsFixed(1)),
+        'count': count,
+      };
+    } catch (e) {
+      return {'average': 0.0, 'count': 0};
+    }
+  }
+
+  /// Get current user's rating for a recipe
+  static Future<int?> getUserRecipeRating(int recipeId) async {
+    if (currentUserId == null) return null;
+    
+    try {
+      final response = await _workerQuery(
+        action: 'select',
+        table: 'recipe_ratings',
+        columns: ['rating'],
+        filters: {
+          'recipe_id': recipeId,
+          'user_id': currentUserId!,
+        },
+        limit: 1,
+      );
+      
+      if (response == null || (response as List).isEmpty) {
+        return null;
+      }
+      
+      return response[0]['rating'] as int?;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Rate a recipe (add or update rating)
+  static Future<void> rateRecipe(int recipeId, int rating) async {
+    ensureUserAuthenticated();
+    
+    if (rating < 1 || rating > 5) {
+      throw Exception('Rating must be between 1 and 5');
+    }
+    
+    try {
+      // Check if user owns the recipe
+      final recipeData = await getRecipeById(recipeId);
+      if (recipeData == null) {
+        throw Exception('Recipe not found');
+      }
+      
+      if (recipeData['user_id'] == currentUserId) {
+        throw Exception('Cannot rate your own recipe');
+      }
+      
+      // Check if user already rated this recipe
+      final existingRating = await getUserRecipeRating(recipeId);
+      
+      if (existingRating != null) {
+        // Update existing rating
+        await _workerQuery(
+          action: 'update',
+          table: 'recipe_ratings',
+          data: {
+            'rating': rating,
+            'updated_at': DateTime.now().toIso8601String(),
+          },
+          filters: {
+            'recipe_id': recipeId,
+            'user_id': currentUserId!,
+          },
+        );
+      } else {
+        // Create new rating
+        await _workerQuery(
+          action: 'insert',
+          table: 'recipe_ratings',
+          data: {
+            'recipe_id': recipeId,
+            'user_id': currentUserId!,
+            'rating': rating,
+            'created_at': DateTime.now().toIso8601String(),
+          },
+        );
+      }
+    } catch (e) {
+      throw Exception('Failed to rate recipe: $e');
+    }
+  }
 }
