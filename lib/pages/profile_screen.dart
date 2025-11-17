@@ -1,4 +1,4 @@
-// lib/pages/profile_screen.dart - OPTIMIZED: Aggressive caching for recipes, pictures, friends, and profile
+// lib/pages/profile_screen.dart - FIXED: Method moved inside class
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -254,7 +254,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     });
 
     try {
-      // Try cache first unless force refresh
       if (!forceRefresh) {
         final cachedRecipes = await _getCachedRecipes();
         
@@ -269,10 +268,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
         }
       }
 
-      // Cache miss or force refresh, fetch from database
       final recipes = await DatabaseService.getSubmittedRecipes();
-      
-      // Cache the results
       await _cacheRecipes(recipes);
       
       if (mounted) {
@@ -284,7 +280,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     } catch (e) {
       print('Error loading recipes: $e');
       
-      // Try to use stale cache on error
       if (!forceRefresh) {
         final staleRecipes = await _getCachedRecipes();
         if (staleRecipes != null && mounted) {
@@ -312,8 +307,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
     try {
       await DatabaseService.deleteSubmittedRecipe(recipeId);
-      
-      // Invalidate cache after deletion
       await _invalidateRecipesCache();
       
       if (mounted) {
@@ -348,7 +341,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
 
     if (result == true) {
-      // Invalidate cache after edit
       await _invalidateRecipesCache();
       await _loadSubmittedRecipes(forceRefresh: true);
     }
@@ -362,7 +354,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     });
 
     try {
-      // Try cache first unless force refresh
       if (!forceRefresh) {
         final cachedPictures = await _getCachedPictures();
         
@@ -377,10 +368,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
         }
       }
 
-      // Cache miss or force refresh, fetch from database
       final pictures = await DatabaseService.getCurrentUserPictures();
-      
-      // Cache the results
       await _cachePictures(pictures);
       
       if (mounted) {
@@ -392,7 +380,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     } catch (e) {
       print('Error loading pictures: $e');
       
-      // Try to use stale cache on error
       if (!forceRefresh) {
         final stalePictures = await _getCachedPictures();
         if (stalePictures != null && mounted) {
@@ -438,8 +425,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
         final imageFile = File(pickedFile.path);
         await DatabaseService.uploadPicture(imageFile);
-        
-        // Invalidate cache after upload
         await _invalidatePicturesCache();
         await _loadPictures(forceRefresh: true);
         
@@ -493,8 +478,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
       try {
         await DatabaseService.deletePicture(pictureUrl);
-        
-        // Invalidate cache after deletion
         await _invalidatePicturesCache();
         await _loadPictures(forceRefresh: true);
         
@@ -691,7 +674,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
         return;
       }
 
-      // Try cache first unless force refresh
       if (!forceRefresh) {
         final cachedFriends = await _getCachedFriends();
         
@@ -709,11 +691,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
         }
       }
 
-      // Cache miss or force refresh, fetch from database
       final friends = await DatabaseService.getUserFriends(currentUserId);
       final visibility = await DatabaseService.getFriendsListVisibility();
-      
-      // Cache the results
       await _cacheFriends(friends);
       
       if (mounted) {
@@ -726,7 +705,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     } catch (e) {
       print('Error loading friends: $e');
       
-      // Try to use stale cache on error
       if (!forceRefresh) {
         final staleFriends = await _getCachedFriends();
         if (staleFriends != null && mounted) {
@@ -957,13 +935,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     }
   }
 
-  Future<void> _saveUserEmail() async{
+  Future<void> _saveUserEmail() async {
     if (_emailController.text.trim().isEmpty) {
       ErrorHandlingService.showSimpleError(context, 'Email cannot be empty');
       return;
     }
 
-    if (!RegExp(r'^[\w\.-]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(_emailController.text.trim())) {
+    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(_emailController.text.trim())) {
       ErrorHandlingService.showSimpleError(context, 'Please enter a valid email address');
       return;
     }
@@ -1015,7 +993,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
       child: child,
     );
   }
-
 
   void _toggleEditName() {
     setState(() {
@@ -1124,156 +1101,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 
-  Widget _buildPicturesSection() {
-    return _sectionContainer(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'My Pictures (${_pictures.length}/$_maxPictures)',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              IconButton(
-                icon: Icon(Icons.add_photo_alternate, color: Colors.blue),
-                onPressed: _showPictureUploadDialog,
-                tooltip: 'Add Picture',
-              ),
-            ],
-          ),
-          SizedBox(height: 12),
-          if (_isLoadingPictures) ...[
-            Center(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: CircularProgressIndicator(),
-              ),
-            ),
-          ] else if (_pictures.isEmpty) ...[
-            Center(
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.photo_library,
-                    size: 50,
-                    color: Colors.grey.shade400,
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'No pictures yet',
-                    style: TextStyle(
-                      color: Colors.grey.shade600,
-                      fontSize: 14,
-                    ),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Upload photos to your profile!',
-                    style: TextStyle(
-                      color: Colors.grey.shade500,
-                      fontSize: 12,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  SizedBox(height: 12),
-                  ElevatedButton.icon(
-                    onPressed: _showPictureUploadDialog,
-                    icon: Icon(Icons.photo_camera),
-                    label: Text('Upload Picture'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ] else ...[
-            GridView.builder(
-              shrinkWrap: true,
-              physics: NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                childAspectRatio: 1,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-              ),
-              itemCount: _pictures.length,
-              itemBuilder: (context, index) {
-                final pictureUrl = _pictures[index];
-                return GestureDetector(
-                  onTap: () => _showFullScreenImage(pictureUrl, index),
-                  onLongPress: () => _showPictureOptionsDialog(pictureUrl),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Image.network(
-                          pictureUrl,
-                          fit: BoxFit.cover,
-                          loadingBuilder: (context, child, loadingProgress) {
-                            if (loadingProgress == null) return child;
-                            return Container(
-                              color: Colors.grey.shade200,
-                              child: Center(
-                                child: CircularProgressIndicator(
-                                  value: loadingProgress.expectedTotalBytes != null
-                                      ? loadingProgress.cumulativeBytesLoaded /
-                                          loadingProgress.expectedTotalBytes!
-                                      : null,
-                                ),
-                              ),
-                            );
-                          },
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: Colors.grey.shade300,
-                              child: Center(
-                                child: Icon(
-                                  Icons.broken_image,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                        Positioned(
-                          top: 4,
-                          right: 4,
-                          child: GestureDetector(
-                            onTap: () => _deletePicture(pictureUrl),
-                            child: Container(
-                              padding: EdgeInsets.all(4),
-                              decoration: BoxDecoration(
-                                color: Colors.red,
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                Icons.close,
-                                color: Colors.white,
-                                size: 16,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   void _navigateToUserProfile(String userId) {
     try {
       Navigator.push(
@@ -1282,7 +1109,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
           builder: (context) => UserProfilePage(userId: userId),
         ),
       ).then((_) {
-        // Refresh friends list when returning (might have unfriended)
         _invalidateFriendsCache();
         _loadFriends(forceRefresh: true);
       });
@@ -1447,6 +1273,246 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     );
   }
 
+  Widget _buildPicturesSection() {
+    return _sectionContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Pictures (${_pictures.length}/$_maxPictures)',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              if (_pictures.length < _maxPictures)
+                IconButton(
+                  icon: Icon(Icons.add_photo_alternate, color: Colors.blue),
+                  onPressed: _showPictureUploadDialog,
+                  tooltip: 'Add Picture',
+                ),
+            ],
+          ),
+          SizedBox(height: 12),
+          
+          if (_isLoadingPictures) ...[
+            Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: CircularProgressIndicator(),
+              ),
+            ),
+          ] else if (_pictures.isEmpty) ...[
+            Center(
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.photo_library,
+                    size: 50,
+                    color: Colors.grey.shade400,
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'No pictures yet',
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: _showPictureUploadDialog,
+                    icon: Icon(Icons.add_photo_alternate),
+                    label: Text('Add Your First Picture'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            GridView.builder(
+              shrinkWrap: true,
+              physics: NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+                childAspectRatio: 1,
+              ),
+              itemCount: _pictures.length,
+              itemBuilder: (context, index) {
+                final pictureUrl = _pictures[index];
+                return GestureDetector(
+                  onTap: () => _showFullScreenImage(pictureUrl, index),
+                  onLongPress: () => _showPictureOptionsDialog(pictureUrl),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        pictureUrl,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              value: loadingProgress.expectedTotalBytes != null
+                                  ? loadingProgress.cumulativeBytesLoaded /
+                                      loadingProgress.expectedTotalBytes!
+                                  : null,
+                            ),
+                          );
+                        },
+                        errorBuilder: (context, error, stackTrace) {
+                          return Center(
+                            child: Icon(
+                              Icons.broken_image,
+                              color: Colors.grey.shade400,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSubmittedRecipesSection() {
+    return _sectionContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'My Submitted Recipes (${_submittedRecipes.length})',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              IconButton(
+                icon: Icon(Icons.add_circle, color: Colors.green),
+                onPressed: () async {
+                  try {
+                    final result = await Navigator.pushNamed(context, '/submit-recipe');
+                    if (result == true) {
+                      await _invalidateRecipesCache();
+                      await _loadSubmittedRecipes(forceRefresh: true);
+                    }
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Recipe page unavailable')),
+                    );
+                  }
+                },
+                tooltip: 'Submit New Recipe',
+              ),
+            ],
+          ),
+          SizedBox(height: 12),
+          
+          if (_isLoadingRecipes) ...[
+            Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: CircularProgressIndicator(),
+              ),
+            ),
+          ] else if (_submittedRecipes.isEmpty) ...[
+            Center(
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.restaurant_menu,
+                    size: 50,
+                    color: Colors.grey.shade400,
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'No recipes submitted yet',
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Share your favorite recipes with the community!',
+                    style: TextStyle(
+                      color: Colors.grey.shade500,
+                      fontSize: 12,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      try {
+                        final result = await Navigator.pushNamed(context, '/submit-recipe');
+                        if (result == true) {
+                          await _invalidateRecipesCache();
+                          await _loadSubmittedRecipes(forceRefresh: true);
+                        }
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Recipe page unavailable')),
+                        );
+                      }
+                    },
+                    icon: Icon(Icons.add),
+                    label: Text('Submit Your First Recipe'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            ListView.builder(
+              shrinkWrap: true,
+              physics: NeverScrollableScrollPhysics(),
+              itemCount: _submittedRecipes.length,
+              itemBuilder: (context, index) {
+                final recipe = _submittedRecipes[index];
+                
+                if (recipe.id == null) {
+                  return SizedBox.shrink();
+                }
+                
+                return RecipeCard(
+                  recipe: recipe,
+                  onDelete: () => _deleteRecipe(recipe.id!),
+                  onEdit: () => _editRecipe(recipe),
+                  onRatingChanged: () => _loadSubmittedRecipes(forceRefresh: true),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -1522,7 +1588,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
           
           RefreshIndicator(
             onRefresh: () async {
-              // Pull to refresh - invalidate all caches and reload
               await _invalidateRecipesCache();
               await _invalidatePicturesCache();
               await _invalidateFriendsCache();
@@ -1646,9 +1711,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                         ] else ...[
                           Text(
                             _userName.isEmpty ? 'No username set' : _userName,
-                            style: const TextStyle(
-                              fontSize: 16,
-                            ),
+                            style: const TextStyle(fontSize: 16),
                           ),
                         ],
                       ],
@@ -1723,9 +1786,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                         ] else ...[
                           Text(
                             _userEmail.isEmpty ? 'No email set' : _userEmail,
-                            style: const TextStyle(
-                              fontSize: 16,
-                            ),
+                            style: const TextStyle(fontSize: 16),
                           ),
                         ],
                       ],
@@ -1987,126 +2048,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-  // Move this method inside the _ProfileScreenState class
-  Widget _buildSubmittedRecipesSection() {
-    return _sectionContainer(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'My Submitted Recipes (${_submittedRecipes.length})',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              IconButton(
-                icon: Icon(Icons.add_circle, color: Colors.green),
-                onPressed: () async {
-                  try {
-                    final result = await Navigator.pushNamed(context, '/submit-recipe');
-                    if (result == true) {
-                      await _invalidateRecipesCache();
-                      await _loadSubmittedRecipes(forceRefresh: true);
-                    }
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Recipe page unavailable')),
-                    );
-                  }
-                },
-                tooltip: 'Submit New Recipe',
-              ),
-            ],
-          ),
-          SizedBox(height: 12),
-          
-          if (_isLoadingRecipes) ...[
-            Center(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: CircularProgressIndicator(),
-              ),
-            ),
-          ] else if (_submittedRecipes.isEmpty) ...[
-            Center(
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.restaurant_menu,
-                    size: 50,
-                    color: Colors.grey.shade400,
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'No recipes submitted yet',
-                    style: TextStyle(
-                      color: Colors.grey.shade600,
-                      fontSize: 14,
-                    ),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Share your favorite recipes with the community!',
-                    style: TextStyle(
-                      color: Colors.grey.shade500,
-                      fontSize: 12,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  SizedBox(height: 12),
-                  ElevatedButton.icon(
-                    onPressed: () async {
-                      try {
-                        final result = await Navigator.pushNamed(context, '/submit-recipe');
-                        if (result == true) {
-                          await _invalidateRecipesCache();
-                          await _loadSubmittedRecipes(forceRefresh: true);
-                        }
-                      } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Recipe page unavailable')),
-                        );
-                      }
-                    },
-                    icon: Icon(Icons.add),
-                    label: Text('Submit Your First Recipe'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ] else ...[
-            ListView.builder(
-              shrinkWrap: true,
-              physics: NeverScrollableScrollPhysics(),
-              itemCount: _submittedRecipes.length,
-              itemBuilder: (context, index) {
-                final recipe = _submittedRecipes[index];
-                
-                if (recipe.id == null) {
-                  return SizedBox.shrink();
-                }
-                
-                return RecipeCard(
-                  recipe: recipe,
-                  onDelete: () => _deleteRecipe(recipe.id!),
-                  onEdit: () => _editRecipe(recipe),
-                  onRatingChanged: () => _loadSubmittedRecipes(forceRefresh: true),
-                );
-              },
-            ),
-          ],
         ],
       ),
     );
