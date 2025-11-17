@@ -1,3 +1,4 @@
+//lib/models/grocery_item.dart
 class GroceryItem {
   final int? id;
   final String userId;

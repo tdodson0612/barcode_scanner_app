@@ -1,8 +1,4 @@
-
-done: premium gate/app config/ fave recipes/groc item/ submit recipe/ chat/ 
-fave rec page/ edit rec/ prem page/ db serv/ 
-homepage/ login
-
+all but pages/recdetpage, down
 
 
 // CHANGES NEEDED FOR suggested_recipes_page.dart
