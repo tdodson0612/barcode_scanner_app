@@ -957,13 +957,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     }
   }
 
-  Future<void> _saveUserEmail() async {
+  Future<void> _saveUserEmail() async{
     if (_emailController.text.trim().isEmpty) {
       ErrorHandlingService.showSimpleError(context, 'Email cannot be empty');
       return;
     }
 
-    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}).hasMatch(_emailController.text.trim())) {
+    if (!RegExp(r'^[\w\.-]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(_emailController.text.trim())) {
       ErrorHandlingService.showSimpleError(context, 'Please enter a valid email address');
       return;
     }
@@ -1015,6 +1015,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
       child: child,
     );
   }
+
 
   void _toggleEditName() {
     setState(() {
@@ -1120,6 +1121,156 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
           ),
         );
       },
+    );
+  }
+
+  Widget _buildPicturesSection() {
+    return _sectionContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'My Pictures (${_pictures.length}/$_maxPictures)',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              IconButton(
+                icon: Icon(Icons.add_photo_alternate, color: Colors.blue),
+                onPressed: _showPictureUploadDialog,
+                tooltip: 'Add Picture',
+              ),
+            ],
+          ),
+          SizedBox(height: 12),
+          if (_isLoadingPictures) ...[
+            Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
+                child: CircularProgressIndicator(),
+              ),
+            ),
+          ] else if (_pictures.isEmpty) ...[
+            Center(
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.photo_library,
+                    size: 50,
+                    color: Colors.grey.shade400,
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'No pictures yet',
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Upload photos to your profile!',
+                    style: TextStyle(
+                      color: Colors.grey.shade500,
+                      fontSize: 12,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: _showPictureUploadDialog,
+                    icon: Icon(Icons.photo_camera),
+                    label: Text('Upload Picture'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            GridView.builder(
+              shrinkWrap: true,
+              physics: NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                childAspectRatio: 1,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemCount: _pictures.length,
+              itemBuilder: (context, index) {
+                final pictureUrl = _pictures[index];
+                return GestureDetector(
+                  onTap: () => _showFullScreenImage(pictureUrl, index),
+                  onLongPress: () => _showPictureOptionsDialog(pictureUrl),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.network(
+                          pictureUrl,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            return Container(
+                              color: Colors.grey.shade200,
+                              child: Center(
+                                child: CircularProgressIndicator(
+                                  value: loadingProgress.expectedTotalBytes != null
+                                      ? loadingProgress.cumulativeBytesLoaded /
+                                          loadingProgress.expectedTotalBytes!
+                                      : null,
+                                ),
+                              ),
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              color: Colors.grey.shade300,
+                              child: Center(
+                                child: Icon(
+                                  Icons.broken_image,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: GestureDetector(
+                            onTap: () => _deletePicture(pictureUrl),
+                            child: Container(
+                              padding: EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.close,
+                                color: Colors.white,
+                                size: 16,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -1289,126 +1440,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                   padding: EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPicturesSection() {
-    return _sectionContainer(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Pictures (${_pictures.length}/$_maxPictures)',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              if (_pictures.length < _maxPictures)
-                IconButton(
-                  icon: Icon(Icons.add_photo_alternate, color: Colors.blue),
-                  onPressed: _showPictureUploadDialog,
-                  tooltip: 'Add Picture',
-                ),
-            ],
-          ),
-          SizedBox(height: 12),
-          
-          if (_isLoadingPictures) ...[
-            Center(
-              child: Padding(
-                padding: EdgeInsets.all(20),
-                child: CircularProgressIndicator(),
-              ),
-            ),
-          ] else if (_pictures.isEmpty) ...[
-            Center(
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.photo_library,
-                    size: 50,
-                    color: Colors.grey.shade400,
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'No pictures yet',
-                    style: TextStyle(
-                      color: Colors.grey.shade600,
-                      fontSize: 14,
-                    ),
-                  ),
-                  SizedBox(height: 12),
-                  ElevatedButton.icon(
-                    onPressed: _showPictureUploadDialog,
-                    icon: Icon(Icons.add_photo_alternate),
-                    label: Text('Add Your First Picture'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ] else ...[
-            GridView.builder(
-              shrinkWrap: true,
-              physics: NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 1,
-              ),
-              itemCount: _pictures.length,
-              itemBuilder: (context, index) {
-                final pictureUrl = _pictures[index];
-                return GestureDetector(
-                  onTap: () => _showFullScreenImage(pictureUrl, index),
-                  onLongPress: () => _showPictureOptionsDialog(pictureUrl),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        pictureUrl,
-                        fit: BoxFit.cover,
-                        loadingBuilder: (context, child, loadingProgress) {
-                          if (loadingProgress == null) return child;
-                          return Center(
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              value: loadingProgress.expectedTotalBytes != null
-                                  ? loadingProgress.cumulativeBytesLoaded /
-                                      loadingProgress.expectedTotalBytes!
-                                  : null,
-                            ),
-                          );
-                        },
-                        errorBuilder: (context, error, stackTrace) {
-                          return Center(
-                            child: Icon(
-                              Icons.broken_image,
-                              color: Colors.grey.shade400,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                );
-              },
             ),
           ],
         ],
@@ -1960,8 +1991,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
       ),
     );
   }
-}
-
+  // Move this method inside the _ProfileScreenState class
   Widget _buildSubmittedRecipesSection() {
     return _sectionContainer(
       child: Column(
@@ -2081,3 +2111,4 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
       ),
     );
   }
+}

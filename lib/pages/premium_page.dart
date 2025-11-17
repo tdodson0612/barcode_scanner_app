@@ -111,17 +111,15 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   }
 
   /// Check if cached data is still valid
-  bool _isCacheValid(String timestampKey, Duration expiry) {
+  Future<bool> _isCacheValid(String timestampKey, Duration expiry) async {
     try {
-      final prefs = SharedPreferences.getInstance();
-      return prefs.then((p) {
-        final timestampStr = p.getString(timestampKey);
-        if (timestampStr == null) return false;
-        
-        final timestamp = DateTime.parse(timestampStr);
-        final age = DateTime.now().difference(timestamp);
-        return age < expiry;
-      });
+      final prefs = await SharedPreferences.getInstance();
+      final timestampStr = prefs.getString(timestampKey);
+      if (timestampStr == null) return false;
+      
+      final timestamp = DateTime.parse(timestampStr);
+      final age = DateTime.now().difference(timestamp);
+      return age < expiry;
     } catch (e) {
       return false;
     }
