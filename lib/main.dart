@@ -1,4 +1,4 @@
-// main.dart – Unified version with Supabase, App Links, and MainNavigation bottom bar
+// main.dart – Unified version with Supabase, App Links (MainNavigation removed)
 
 import 'package:flutter/material.dart';
 import 'package:app_links/app_links.dart';
@@ -17,10 +17,10 @@ import 'pages/profile_screen.dart';
 import 'pages/favorite_recipes_page.dart';
 import 'models/favorite_recipe.dart';
 import 'contact_screen.dart';
-import 'pages/discovery_feed_page.dart';
-import 'pages/create_post_page.dart';
+// import 'pages/discovery_feed_page.dart';  // ✅ Commented out
+// import 'pages/create_post_page.dart';     // ✅ Commented out
 import 'home_screen.dart';
-import 'pages/main_navigation.dart';
+// import 'pages/main_navigation.dart';      // ✅ Commented out
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -169,7 +169,7 @@ class _MyAppState extends State<MyApp> {
       initialRoute: _getInitialRoute(supabase),
       routes: {
         '/login': (context) => const LoginPage(),
-        '/home': (context) => const HomePage(), // ✅ Changed back to HomeScreen
+        '/home': (context) => const HomePage(),
         '/profile': (context) => ProfileScreen(favoriteRecipes: const []),
         '/purchase': (context) => const PremiumPage(),
         '/grocery-list': (context) => const GroceryListPage(),
@@ -178,6 +178,7 @@ class _MyAppState extends State<MyApp> {
         '/search-users': (context) => const SearchUsersPage(),
         '/favorite-recipes': (context) => FavoriteRecipesPage(favoriteRecipes: const []),
         '/contact': (context) => const ContactScreen(),
+        // ✅ Feed and Create Post routes commented out since pages are not implemented yet
         // '/create-post': (context) => const CreatePostPage(),
         // '/feed': (context) => const DiscoveryFeedPage(),
       },
