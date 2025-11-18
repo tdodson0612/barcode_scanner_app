@@ -1,4 +1,4 @@
-// lib/services/database_service.dart - REFACTORED: Routes all data operations through Cloudflare Worker
+// lib/services/database_service.dart - FULLY REFACTORED: All operations through Cloudflare Worker
 import 'dart:convert';
 import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -68,8 +68,69 @@ class DatabaseService {
     }
   }
 
+  /// Upload file to R2 storage via Cloudflare Worker
+  static Future<String> _workerStorageUpload({
+    required String bucket,
+    required String path,
+    required String base64Data,
+    required String contentType,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/storage'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'upload',
+          'bucket': bucket,
+          'path': path,
+          'data': base64Data,
+          'contentType': contentType,
+        }),
+      );
+      
+      if (response.statusCode != 200) {
+        throw Exception('Storage upload failed: ${response.body}');
+      }
+      
+      final uploadResult = jsonDecode(response.body);
+      final publicUrl = uploadResult['url'] ?? uploadResult['publicUrl'];
+      
+      if (publicUrl == null) {
+        throw Exception('Upload succeeded but no URL returned');
+      }
+      
+      return publicUrl;
+    } catch (e) {
+      throw Exception('Failed to upload to storage: $e');
+    }
+  }
+
+  /// Delete file from R2 storage via Cloudflare Worker
+  static Future<void> _workerStorageDelete({
+    required String bucket,
+    required String path,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/storage'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'delete',
+          'bucket': bucket,
+          'path': path,
+        }),
+      );
+      
+      if (response.statusCode != 200) {
+        throw Exception('Storage delete failed: ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Failed to delete from storage: $e');
+    }
+  }
+
   // ==================================================
-  // CACHE HELPER METHODS (Unchanged - local only)
+  // CACHE HELPER METHODS (Local only - no Worker needed)
   // ==================================================
   
   static Future<SharedPreferences> _getPrefs() async {
@@ -106,7 +167,7 @@ class DatabaseService {
   }
 
   // ==================================================
-  // CURRENT USER ID & AUTH CHECK (Unchanged - uses Supabase auth)
+  // CURRENT USER ID & AUTH CHECK (Uses Supabase auth only)
   // ==================================================
   static String? get currentUserId => _supabase.auth.currentUser?.id;
 
@@ -134,7 +195,6 @@ class DatabaseService {
       int newLevel = _calculateLevel(newXP);
       bool leveledUp = newLevel > currentLevel;
       
-      // MODIFIED: Update via Worker instead of direct Supabase
       await _workerQuery(
         action: 'update',
         table: 'user_profiles',
@@ -191,7 +251,7 @@ class DatabaseService {
   }
 
   // ==================================================
-  // ACHIEVEMENTS & BADGES (CACHED - Static data)
+  // ACHIEVEMENTS & BADGES (CACHED)
   // ==================================================
 
   static Future<List<Map<String, dynamic>>> getAllBadges() async {
@@ -202,7 +262,6 @@ class DatabaseService {
         return List<Map<String, dynamic>>.from(decoded);
       }
       
-      // MODIFIED: Fetch via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'badges',
@@ -229,8 +288,6 @@ class DatabaseService {
         return List<Map<String, dynamic>>.from(decoded);
       }
       
-      // MODIFIED: Fetch via Worker
-      // Note: Worker needs to handle joins. For now, fetch user_achievements
       final response = await _workerQuery(
         action: 'select',
         table: 'user_achievements',
@@ -253,7 +310,6 @@ class DatabaseService {
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Check via Worker
       final existing = await _workerQuery(
         action: 'select',
         table: 'user_achievements',
@@ -269,7 +325,6 @@ class DatabaseService {
         return false;
       }
       
-      // MODIFIED: Insert via Worker
       await _workerQuery(
         action: 'insert',
         table: 'user_achievements',
@@ -282,7 +337,6 @@ class DatabaseService {
       
       await _clearCache('$_CACHE_USER_BADGES$currentUserId');
       
-      // MODIFIED: Fetch badge via Worker
       final badgeData = await _workerQuery(
         action: 'select',
         table: 'badges',
@@ -331,7 +385,6 @@ class DatabaseService {
     {bool isPremium = false}
   ) async {
     try {
-      // MODIFIED: Insert via Worker
       await _workerQuery(
         action: 'insert',
         table: 'user_profiles',
@@ -364,7 +417,6 @@ class DatabaseService {
       final cachedTimestamp = await _getCachedData(timestampKey);
       
       if (cached != null && cachedTimestamp != null) {
-        // MODIFIED: Check timestamp via Worker
         final serverProfileData = await _workerQuery(
           action: 'select',
           table: 'user_profiles',
@@ -383,7 +435,6 @@ class DatabaseService {
         }
       }
       
-      // MODIFIED: Fetch via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'user_profiles',
@@ -431,7 +482,6 @@ class DatabaseService {
         return decoded.map((recipe) => SubmittedRecipe.fromJson(recipe)).toList();
       }
       
-      // MODIFIED: Fetch via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'submitted_recipes',
@@ -458,7 +508,6 @@ class DatabaseService {
     ensureUserAuthenticated();
 
     try {
-      // MODIFIED: Insert via Worker
       await _workerQuery(
         action: 'insert',
         table: 'submitted_recipes',
@@ -488,7 +537,6 @@ class DatabaseService {
     ensureUserAuthenticated();
 
     try {
-      // MODIFIED: Check ownership via Worker
       final recipeData = await _workerQuery(
         action: 'select',
         table: 'submitted_recipes',
@@ -505,7 +553,6 @@ class DatabaseService {
         throw Exception('You can only edit your own recipes');
       }
 
-      // MODIFIED: Update via Worker
       await _workerQuery(
         action: 'update',
         table: 'submitted_recipes',
@@ -528,7 +575,6 @@ class DatabaseService {
     ensureUserAuthenticated();
 
     try {
-      // MODIFIED: Delete via Worker
       await _workerQuery(
         action: 'delete',
         table: 'submitted_recipes',
@@ -543,7 +589,6 @@ class DatabaseService {
 
   static Future<Map<String, dynamic>?> getRecipeById(int recipeId) async {
     try {
-      // MODIFIED: Fetch via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'submitted_recipes',
@@ -595,7 +640,6 @@ Shared from Recipe Scanner App
       final lastScanDate = profile?['last_scan_date'] ?? '';
 
       if (lastScanDate != today) {
-        // MODIFIED: Update via Worker
         await _workerQuery(
           action: 'update',
           table: 'user_profiles',
@@ -635,7 +679,6 @@ Shared from Recipe Scanner App
 
       final currentCount = await getDailyScanCount();
       
-      // MODIFIED: Update via Worker
       await _workerQuery(
         action: 'update',
         table: 'user_profiles',
@@ -659,12 +702,11 @@ Shared from Recipe Scanner App
 
   static Future<bool> isUsernameAvailable(String username) async {
     try {
-      // MODIFIED: Check via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'user_profiles',
         columns: ['id'],
-        filters: {'username': username}, // Note: Worker needs to handle case-insensitive
+        filters: {'username': username},
         limit: 1,
       );
       
@@ -696,7 +738,6 @@ Shared from Recipe Scanner App
       if (avatarUrl != null) updates['avatar_url'] = avatarUrl;
       if (profilePicture != null) updates['profile_picture'] = profilePicture;
 
-      // MODIFIED: Update via Worker
       await _workerQuery(
         action: 'update',
         table: 'user_profiles',
@@ -720,7 +761,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Update via Worker
       await _workerQuery(
         action: 'update',
         table: 'user_profiles',
@@ -751,8 +791,7 @@ Shared from Recipe Scanner App
   }
 
   // ==================================================
-  // PROFILE PICTURES MANAGEMENT
-  // FIXED: Storage uploads routed through Cloudflare Worker → R2
+  // PROFILE PICTURES MANAGEMENT (via Worker → R2)
   // ==================================================
 
   static Future<String> uploadPicture(File imageFile) async {
@@ -764,32 +803,15 @@ Shared from Recipe Scanner App
       final fileName = 'picture_$timestamp.jpg';
       final filePath = '$userId/$fileName';
       
-      // FIXED: Upload via Cloudflare Worker → R2 instead of direct Supabase
       final imageBytes = await imageFile.readAsBytes();
       final base64Image = base64Encode(imageBytes);
       
-      final response = await http.post(
-        Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/storage'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'upload',
-          'bucket': 'profile-pictures',
-          'path': filePath,
-          'data': base64Image,
-          'contentType': 'image/jpeg',
-        }),
+      final publicUrl = await _workerStorageUpload(
+        bucket: 'profile-pictures',
+        path: filePath,
+        base64Data: base64Image,
+        contentType: 'image/jpeg',
       );
-      
-      if (response.statusCode != 200) {
-        throw Exception('Storage upload failed: ${response.body}');
-      }
-      
-      final uploadResult = jsonDecode(response.body);
-      final publicUrl = uploadResult['url'] ?? uploadResult['publicUrl'];
-      
-      if (publicUrl == null) {
-        throw Exception('Upload succeeded but no URL returned');
-      }
       
       final profile = await getCurrentUserProfile();
       final currentPictures = profile?['pictures'];
@@ -805,7 +827,6 @@ Shared from Recipe Scanner App
       
       picturesList.add(publicUrl);
       
-      // MODIFIED: Update via Worker
       await _workerQuery(
         action: 'update',
         table: 'user_profiles',
@@ -864,10 +885,10 @@ Shared from Recipe Scanner App
       if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
         final filePath = pathSegments.sublist(bucketIndex + 1).join('/');
         
-        // Delete from storage stays direct
-        await _supabase.storage
-            .from('profile-pictures')
-            .remove([filePath]);
+        await _workerStorageDelete(
+          bucket: 'profile-pictures',
+          path: filePath,
+        );
       }
       
       final profile = await getCurrentUserProfile();
@@ -877,7 +898,6 @@ Shared from Recipe Scanner App
         List<String> picturesList = List<String>.from(jsonDecode(currentPictures));
         picturesList.remove(pictureUrl);
         
-        // MODIFIED: Update via Worker
         await _workerQuery(
           action: 'update',
           table: 'user_profiles',
@@ -900,7 +920,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Update via Worker
       await _workerQuery(
         action: 'update',
         table: 'user_profiles',
@@ -934,9 +953,6 @@ Shared from Recipe Scanner App
   
   static Future<List<Map<String, dynamic>>> getUserFriends(String userId) async {
     try {
-      // MODIFIED: Fetch via Worker
-      // Note: This requires Worker to handle the complex OR query with joins
-      // For now, we'll fetch friend_requests and process client-side
       final response = await _workerQuery(
         action: 'select',
         table: 'friend_requests',
@@ -946,11 +962,9 @@ Shared from Recipe Scanner App
 
       final friends = <Map<String, dynamic>>[];
       for (var row in response as List) {
-        // We need sender and receiver data - Worker should return these
         if (row['sender'] == userId || row['receiver'] == userId) {
           final friendId = row['sender'] == userId ? row['receiver'] : row['sender'];
           
-          // Fetch friend profile via Worker
           final friendProfile = await _workerQuery(
             action: 'select',
             table: 'user_profiles',
@@ -985,7 +999,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Update via Worker
       await _workerQuery(
         action: 'update',
         table: 'user_profiles',
@@ -1013,7 +1026,6 @@ Shared from Recipe Scanner App
     required String message,
   }) async {
     try {
-      // MODIFIED: Insert via Worker
       await _workerQuery(
         action: 'insert',
         table: 'contact_messages',
@@ -1044,7 +1056,6 @@ Shared from Recipe Scanner App
         return decoded.map((recipe) => FavoriteRecipe.fromJson(recipe)).toList();
       }
       
-      // MODIFIED: Fetch via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'favorite_recipes',
@@ -1071,7 +1082,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
 
     try {
-      // MODIFIED: Insert via Worker
       await _workerQuery(
         action: 'insert',
         table: 'favorite_recipes',
@@ -1094,7 +1104,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
 
     try {
-      // MODIFIED: Delete via Worker
       await _workerQuery(
         action: 'delete',
         table: 'favorite_recipes',
@@ -1111,7 +1120,6 @@ Shared from Recipe Scanner App
     if (currentUserId == null) return false;
 
     try {
-      // MODIFIED: Check via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'favorite_recipes',
@@ -1137,7 +1145,6 @@ Shared from Recipe Scanner App
     if (currentUserId == null) return [];
 
     try {
-      // MODIFIED: Fetch via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'grocery_items',
@@ -1159,7 +1166,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
 
     try {
-      // MODIFIED: Delete via Worker
       await _workerQuery(
         action: 'delete',
         table: 'grocery_items',
@@ -1174,7 +1180,6 @@ Shared from Recipe Scanner App
               'created_at': DateTime.now().toIso8601String(),
             }).toList();
 
-        // MODIFIED: Insert via Worker (bulk insert)
         for (final item in groceryItems) {
           await _workerQuery(
             action: 'insert',
@@ -1192,7 +1197,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
 
     try {
-      // MODIFIED: Delete via Worker
       await _workerQuery(
         action: 'delete',
         table: 'grocery_items',
@@ -1238,7 +1242,6 @@ Shared from Recipe Scanner App
           ? '$quantity x $item' 
           : item;
 
-      // MODIFIED: Insert via Worker
       await _workerQuery(
         action: 'insert',
         table: 'grocery_items',
@@ -1369,7 +1372,6 @@ Shared from Recipe Scanner App
         return List<Map<String, dynamic>>.from(decoded);
       }
       
-      // MODIFIED: Fetch via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'friend_requests',
@@ -1408,7 +1410,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Fetch via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'friend_requests',
@@ -1452,7 +1453,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Fetch via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'friend_requests',
@@ -1500,14 +1500,12 @@ Shared from Recipe Scanner App
     }
     
     try {
-      // MODIFIED: Check existing via Worker
       final existing = await _workerQuery(
         action: 'select',
         table: 'friend_requests',
         columns: ['id', 'status', 'sender', 'receiver'],
       );
 
-      // Check if request already exists
       for (var row in existing as List) {
         if ((row['sender'] == currentUserId && row['receiver'] == receiverId) ||
             (row['sender'] == receiverId && row['receiver'] == currentUserId)) {
@@ -1522,7 +1520,6 @@ Shared from Recipe Scanner App
         }
       }
 
-      // MODIFIED: Insert via Worker
       final response = await _workerQuery(
         action: 'insert',
         table: 'friend_requests',
@@ -1534,7 +1531,6 @@ Shared from Recipe Scanner App
         },
       );
 
-      // Response should contain the inserted row with ID
       if (response is List && response.isNotEmpty) {
         return response[0]['id'].toString();
       }
@@ -1551,7 +1547,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Fetch request via Worker
       final requestData = await _workerQuery(
         action: 'select',
         table: 'friend_requests',
@@ -1574,7 +1569,6 @@ Shared from Recipe Scanner App
         throw Exception('This friend request has already been ${request['status']}');
       }
 
-      // MODIFIED: Update via Worker
       await _workerQuery(
         action: 'update',
         table: 'friend_requests',
@@ -1595,7 +1589,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Delete via Worker
       await _workerQuery(
         action: 'delete',
         table: 'friend_requests',
@@ -1610,7 +1603,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Check via Worker
       final requestData = await _workerQuery(
         action: 'select',
         table: 'friend_requests',
@@ -1627,7 +1619,6 @@ Shared from Recipe Scanner App
         throw Exception('You cannot cancel this friend request');
       }
 
-      // MODIFIED: Delete via Worker
       await _workerQuery(
         action: 'delete',
         table: 'friend_requests',
@@ -1642,7 +1633,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Delete via Worker
       await _workerQuery(
         action: 'delete',
         table: 'friend_requests',
@@ -1660,8 +1650,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Complex OR delete needs to be handled
-      // Fetch all accepted friend requests involving these users
       final allRequests = await _workerQuery(
         action: 'select',
         table: 'friend_requests',
@@ -1669,7 +1657,6 @@ Shared from Recipe Scanner App
         filters: {'status': 'accepted'},
       );
       
-      // Find and delete the matching request
       for (var row in allRequests as List) {
         if ((row['sender'] == currentUserId && row['receiver'] == friendId) ||
             (row['sender'] == friendId && row['receiver'] == currentUserId)) {
@@ -1701,14 +1688,12 @@ Shared from Recipe Scanner App
     }
     
     try {
-      // MODIFIED: Check via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'friend_requests',
         columns: ['id', 'status', 'sender', 'receiver', 'created_at'],
       );
 
-      // Find matching request
       for (var row in response as List) {
         if ((row['sender'] == currentUserId && row['receiver'] == userId) ||
             (row['sender'] == userId && row['receiver'] == currentUserId)) {
@@ -1783,8 +1768,6 @@ Shared from Recipe Scanner App
           final List<dynamic> cachedList = jsonDecode(cached);
           final cachedMessages = List<Map<String, dynamic>>.from(cachedList);
           
-          // MODIFIED: Fetch new messages via Worker
-          // Note: Worker needs to support "greater than" filters
           final allMessages = await _workerQuery(
             action: 'select',
             table: 'messages',
@@ -1816,7 +1799,6 @@ Shared from Recipe Scanner App
         }
       }
       
-      // MODIFIED: Fetch all messages via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'messages',
@@ -1846,7 +1828,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Insert via Worker
       await _workerQuery(
         action: 'insert',
         table: 'messages',
@@ -1870,7 +1851,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Fetch via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'messages',
@@ -1892,7 +1872,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Update via Worker
       await _workerQuery(
         action: 'update',
         table: 'messages',
@@ -1908,8 +1887,6 @@ Shared from Recipe Scanner App
     ensureUserAuthenticated();
     
     try {
-      // MODIFIED: Update via Worker
-      // Note: This needs to update multiple messages, so we fetch first then update
       final messages = await _workerQuery(
         action: 'select',
         table: 'messages',
@@ -1941,7 +1918,6 @@ Shared from Recipe Scanner App
       final friends = await getFriends();
       final chats = <Map<String, dynamic>>[];
 
-      // MODIFIED: Fetch all messages via Worker
       final allMessages = await _workerQuery(
         action: 'select',
         table: 'messages',
@@ -1953,13 +1929,12 @@ Shared from Recipe Scanner App
       for (final friend in friends) {
         final friendId = friend['id'];
         
-        // Find last message with this friend
         Map<String, dynamic>? lastMessage;
         for (var msg in allMessages as List) {
           if ((msg['sender'] == currentUserId && msg['receiver'] == friendId) ||
               (msg['sender'] == friendId && msg['receiver'] == currentUserId)) {
             lastMessage = msg;
-            break; // Already sorted by created_at desc
+            break;
           }
         }
 
@@ -1969,7 +1944,6 @@ Shared from Recipe Scanner App
         });
       }
 
-      // Sort by last message time
       chats.sort((a, b) {
         final aTime = a['lastMessage']?['created_at'];
         final bTime = b['lastMessage']?['created_at'];
@@ -1996,8 +1970,6 @@ Shared from Recipe Scanner App
       final searchQuery = query.trim();
       if (searchQuery.isEmpty) return [];
 
-      // MODIFIED: Search via Worker
-      // Note: Worker should handle case-insensitive search
       final response = await _workerQuery(
         action: 'select',
         table: 'user_profiles',
@@ -2005,7 +1977,6 @@ Shared from Recipe Scanner App
         limit: 50,
       );
 
-      // Filter client-side for case-insensitive search
       final results = <Map<String, dynamic>>[];
       final lowerQuery = searchQuery.toLowerCase();
       
@@ -2063,15 +2034,12 @@ Shared from Recipe Scanner App
     }
   }
 
+  // ==================================================
+  // RECIPE COMMENTS & RATINGS
+  // ==================================================
 
-// ==================================================
-// RECIPE COMMENTS & RATINGS (NEW)
-// ==================================================
-
-/// Fetch all comments for a recipe with user info
   static Future<List<Map<String, dynamic>>> getRecipeComments(int recipeId) async {
     try {
-      // Fetch comments via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'recipe_comments',
@@ -2083,11 +2051,9 @@ Shared from Recipe Scanner App
 
       final comments = <Map<String, dynamic>>[];
       
-      // Fetch user info for each comment
       for (var comment in response as List) {
         final userId = comment['user_id'];
         
-        // Fetch user profile via Worker
         final userProfile = await _workerQuery(
           action: 'select',
           table: 'user_profiles',
@@ -2110,7 +2076,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Add a comment to a recipe
   static Future<void> addComment({
     required int recipeId,
     required String commentText,
@@ -2135,7 +2100,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Check if current user has liked a comment/post
   static Future<bool> hasUserLikedPost(String postId) async {
     ensureUserAuthenticated();
     
@@ -2157,12 +2121,10 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Like a comment
   static Future<void> likeComment(String commentId) async {
     ensureUserAuthenticated();
     
     try {
-      // Check if already liked
       final alreadyLiked = await hasUserLikedPost(commentId);
       
       if (!alreadyLiked) {
@@ -2181,7 +2143,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Unlike a comment
   static Future<void> unlikeComment(String commentId) async {
     ensureUserAuthenticated();
     
@@ -2199,12 +2160,10 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Delete a comment (owner or admin only)
   static Future<void> deleteComment(String commentId) async {
     ensureUserAuthenticated();
     
     try {
-      // Check ownership via Worker
       final commentData = await _workerQuery(
         action: 'select',
         table: 'recipe_comments',
@@ -2221,7 +2180,6 @@ Shared from Recipe Scanner App
         throw Exception('You can only delete your own comments');
       }
       
-      // Delete via Worker
       await _workerQuery(
         action: 'delete',
         table: 'recipe_comments',
@@ -2232,7 +2190,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Report a comment for moderation
   static Future<void> reportComment(String commentId, String reason) async {
     ensureUserAuthenticated();
     
@@ -2254,13 +2211,11 @@ Shared from Recipe Scanner App
   }
 
   // ==================================================
-  // RECIPE RATINGS (NEW)
+  // RECIPE RATINGS
   // ==================================================
 
-  /// Get average rating and count for a recipe
   static Future<Map<String, dynamic>> getRecipeAverageRating(int recipeId) async {
     try {
-      // Fetch all ratings for this recipe via Worker
       final response = await _workerQuery(
         action: 'select',
         table: 'recipe_ratings',
@@ -2285,7 +2240,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Get current user's rating for a recipe
   static Future<int?> getUserRecipeRating(int recipeId) async {
     if (currentUserId == null) return null;
     
@@ -2311,7 +2265,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  /// Rate a recipe (add or update rating)
   static Future<void> rateRecipe(int recipeId, int rating) async {
     ensureUserAuthenticated();
     
@@ -2320,7 +2273,6 @@ Shared from Recipe Scanner App
     }
     
     try {
-      // Check if user owns the recipe
       final recipeData = await getRecipeById(recipeId);
       if (recipeData == null) {
         throw Exception('Recipe not found');
@@ -2330,11 +2282,9 @@ Shared from Recipe Scanner App
         throw Exception('Cannot rate your own recipe');
       }
       
-      // Check if user already rated this recipe
       final existingRating = await getUserRecipeRating(recipeId);
       
       if (existingRating != null) {
-        // Update existing rating
         await _workerQuery(
           action: 'update',
           table: 'recipe_ratings',
@@ -2348,7 +2298,6 @@ Shared from Recipe Scanner App
           },
         );
       } else {
-        // Create new rating
         await _workerQuery(
           action: 'insert',
           table: 'recipe_ratings',

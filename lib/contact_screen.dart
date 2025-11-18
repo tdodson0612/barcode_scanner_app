@@ -1,6 +1,7 @@
+// lib/contact_screen.dart - FIXED: Routes through DatabaseService → Worker
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'widgets/app_drawer.dart';
+import 'services/database_service.dart';
 
 class ContactScreen extends StatefulWidget {
   const ContactScreen({super.key});
@@ -23,14 +24,12 @@ class _ContactScreenState extends State<ContactScreen> {
           const SnackBar(content: Text('Sending message...')),
         );
 
-        // Send to Supabase
-        await Supabase.instance.client
-            .from('contact_messages')
-            .insert({
-          'name': _nameController.text,
-          'email': _emailController.text,
-          'message': _messageController.text,
-        });
+        // FIXED: Route through DatabaseService → Worker instead of direct Supabase
+        await DatabaseService.submitContactMessage(
+          name: _nameController.text,
+          email: _emailController.text,
+          message: _messageController.text,
+        );
 
         // Success message
         if (mounted) {

@@ -1,4 +1,4 @@
-// lib/pages/suggested_recipes_page.dart - OPTIMIZED: Cache recipes, favorite status, and premium checks
+// lib/pages/suggested_recipes_page.dart - FIXED: Use dedicated Worker search endpoint
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -71,7 +71,7 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
   Map<String, bool> _favoriteStatusCache = {};
   
   // Cache durations
-  static const Duration _recipeCacheDuration = Duration(hours: 1); // Recipes rarely change
+  static const Duration _recipeCacheDuration = Duration(hours: 1);
   static const Duration _favoriteCacheDuration = Duration(minutes: 2);
 
   @override
@@ -94,7 +94,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
   }
 
   String _getRecipeCacheKey() {
-    // Create cache key based on ingredients (sorted for consistency)
     final sortedIngredients = List<String>.from(widget.productIngredients)..sort();
     return 'recipes_${sortedIngredients.join('_')}';
   }
@@ -142,7 +141,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
   }
 
   Future<bool> _getCachedFavoriteStatus(String recipeName) async {
-    // Check in-memory cache first
     if (_favoriteStatusCache.containsKey(recipeName)) {
       return _favoriteStatusCache[recipeName]!;
     }
@@ -162,7 +160,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
       final age = DateTime.now().millisecondsSinceEpoch - timestamp;
       if (age > _favoriteCacheDuration.inMilliseconds) return false;
       
-      // Update in-memory cache
       _favoriteStatusCache[recipeName] = isFavorite;
       return isFavorite;
     } catch (e) {
@@ -172,10 +169,8 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
 
   Future<void> _cacheFavoriteStatus(String recipeName, bool isFavorite) async {
     try {
-      // Update in-memory cache immediately
       _favoriteStatusCache[recipeName] = isFavorite;
       
-      // Persist to disk
       final prefs = await SharedPreferences.getInstance();
       final cacheData = {
         'is_favorite': isFavorite,
@@ -195,7 +190,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
     });
 
     try {
-      // Try to load from cache first
       final cachedRecipes = await _getCachedRecipes();
       
       if (cachedRecipes != null && cachedRecipes.isNotEmpty) {
@@ -211,7 +205,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
         return;
       }
 
-      // Cache miss, check if ingredients exist
       bool hasMatchingIngredients = await _checkIngredientsExist();
       
       if (!hasMatchingIngredients) {
@@ -227,40 +220,28 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
         return;
       }
 
-      // MODIFIED: Fetch recipes via Worker instead of direct Supabase
+      // FIXED: Use dedicated Worker search endpoint
       final response = await http.post(
-        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/recipes/search'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'action': 'select',
-          'table': 'recipes',
-          'columns': ['*'],
-          'filters': {'ingredients_contains_any': widget.productIngredients},
+          'ingredients': widget.productIngredients,
           'orderBy': 'health_score',
-          'ascending': false,
           'limit': 2,
           'offset': _currentPage * 2,
         }),
       );
 
       if (response.statusCode != 200) {
-        throw Exception('Worker query failed: ${response.body}');
+        throw Exception('Recipe search failed: ${response.body}');
       }
 
       final data = jsonDecode(response.body);
       
-      List<Recipe> newRecipes = (data as List).map<Recipe>((recipeData) {
-        return Recipe(
-          id: recipeData['id']?.toString() ?? '',
-          title: recipeData['title'] ?? 'Unknown Recipe',
-          description: recipeData['description'] ?? 'No description available',
-          ingredients: List<String>.from(recipeData['ingredients'] ?? []),
-          instructions: recipeData['instructions'] ?? 'No instructions available',
-          healthScore: recipeData['health_score'],
-        );
+      List<Recipe> newRecipes = (data['recipes'] as List).map<Recipe>((recipeData) {
+        return Recipe.fromJson(recipeData);
       }).toList();
 
-      // Cache the results
       if (newRecipes.isNotEmpty) {
         await _cacheRecipes(newRecipes);
       }
@@ -298,22 +279,18 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
   Future<bool> _checkIngredientsExist() async {
     try {
       for (String ingredient in widget.productIngredients) {
-        // MODIFIED: Check via Worker
+        // FIXED: Use dedicated Worker endpoint
         final response = await http.post(
-          Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+          Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/recipes/check-ingredient'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
-            'action': 'select',
-            'table': 'recipes',
-            'columns': ['id'],
-            'filters': {'ingredients_contains': ingredient},
-            'limit': 1,
+            'ingredient': ingredient,
           }),
         );
         
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
-          if (data is List && data.isNotEmpty) {
+          if (data['exists'] == true) {
             return true;
           }
         }
@@ -334,37 +311,26 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
     });
 
     try {
-      // MODIFIED: Fetch via Worker
+      // FIXED: Use dedicated Worker search endpoint
       final response = await http.post(
-        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/recipes/search'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'action': 'select',
-          'table': 'recipes',
-          'columns': ['*'],
-          'filters': {'ingredients_contains_any': widget.productIngredients},
+          'ingredients': widget.productIngredients,
           'orderBy': 'health_score',
-          'ascending': false,
           'limit': 2,
           'offset': _currentPage * 2,
         }),
       );
 
       if (response.statusCode != 200) {
-        throw Exception('Worker query failed: ${response.body}');
+        throw Exception('Recipe search failed: ${response.body}');
       }
 
       final data = jsonDecode(response.body);
 
-      List<Recipe> newRecipes = (data as List).map<Recipe>((recipeData) {
-        return Recipe(
-          id: recipeData['id']?.toString() ?? '',
-          title: recipeData['title'] ?? 'Unknown Recipe',
-          description: recipeData['description'] ?? 'No description available',
-          ingredients: List<String>.from(recipeData['ingredients'] ?? []),
-          instructions: recipeData['instructions'] ?? 'No instructions available',
-          healthScore: recipeData['health_score'],
-        );
+      List<Recipe> newRecipes = (data['recipes'] as List).map<Recipe>((recipeData) {
+        return Recipe.fromJson(recipeData);
       }).toList();
 
       if (mounted) {
@@ -375,7 +341,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           _isLoading = false;
         });
         
-        // Update cache with all recipes
         await _cacheRecipes(_allRecipes);
       }
 
@@ -410,7 +375,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
         _ingredientsExist = true;
       });
       
-      // Cache fallback recipes too
       _cacheRecipes(fallbackRecipes);
     }
   }
@@ -505,7 +469,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
 
   Future<void> _toggleFavorite(Recipe recipe) async {
     try {
-      // Check cache first
       bool isFavorited = await _getCachedFavoriteStatus(recipe.title);
       
       if (isFavorited) {
@@ -516,12 +479,10 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
         
         if (favoriteRecipe.id != null) {
           await DatabaseService.removeFavoriteRecipe(favoriteRecipe.id!);
-          
-          // Update cache
           await _cacheFavoriteStatus(recipe.title, false);
           
           if (mounted) {
-            setState(() {}); // Trigger rebuild
+            setState(() {});
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Recipe removed from favorites'),
@@ -537,11 +498,10 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           recipe.instructions,
         );
         
-        // Update cache
         await _cacheFavoriteStatus(recipe.title, true);
         
         if (mounted) {
-          setState(() {}); // Trigger rebuild
+          setState(() {});
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Recipe added to favorites!'),
@@ -642,16 +602,9 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'We couldn\'t find any recipes matching the ingredients from your scanned product. This might be because:',
+                'We couldn\'t find any recipes matching the ingredients from your scanned product.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 16),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                '• The product ingredients are not commonly used in healthy recipes\n'
-                '• Our recipe database doesn\'t have matching recipes yet\n'
-                '• The scanned product may be highly processed',
-                style: TextStyle(fontSize: 14),
               ),
               const SizedBox(height: 20),
               ElevatedButton.icon(
@@ -671,7 +624,6 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
 
     return RefreshIndicator(
       onRefresh: () async {
-        // Clear cache and reload
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove(_getRecipeCacheKey());
         _currentPage = 0;
