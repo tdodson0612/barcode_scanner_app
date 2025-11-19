@@ -1,4 +1,4 @@
-// lib/login.dart - Group B Changes: Remember Me + Autofill + FIXED: No Supabase Egress
+// lib/login.dart - UPDATED: Integrated new background images
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'services/auth_service.dart';
 import 'services/error_handling_service.dart';
 import 'config/app_config.dart';
+import 'utils/screen_utils.dart'; // For responsive design
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -21,9 +22,8 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-
-  late final StreamSubscription _authSub;
-
+  StreamSubscription? _authSub;
+  
   String _email = '';
   String _password = '';
   String _confirmPassword = '';
@@ -38,15 +38,11 @@ class _LoginPageState extends State<LoginPage> {
     super.initState();
     _setupAuthListener();
     _loadSavedCredentials();
-    
-    _emailController.text = _email;
-    _passwordController.text = _password;
-    _confirmPasswordController.text = _confirmPassword;
   }
 
   @override
   void dispose() {
-    _authSub.cancel();
+    _authSub?.cancel();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
@@ -59,15 +55,18 @@ class _LoginPageState extends State<LoginPage> {
       final rememberMe = prefs.getBool('remember_me') ?? true;
       final savedEmail = prefs.getString('saved_email') ?? '';
       
-      setState(() {
-        _rememberMe = rememberMe;
-        if (rememberMe && savedEmail.isNotEmpty) {
-          _email = savedEmail;
-          _emailController.text = savedEmail;
-        }
-      });
+      if (mounted) {
+        setState(() {
+          _rememberMe = rememberMe;
+          if (rememberMe && savedEmail.isNotEmpty) {
+            _email = savedEmail;
+            _emailController.text = savedEmail;
+          }
+        });
+      }
     } catch (e) {
       AppConfig.debugPrint('Error loading saved credentials: $e');
+      // Silent fail - not critical
     }
   }
 
@@ -83,14 +82,20 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       AppConfig.debugPrint('Error saving credentials: $e');
+      // Silent fail - not critical
     }
   }
 
   Future<void> _submitForm() async {
+    // Dismiss keyboard
+    FocusScope.of(context).unfocus();
+    
     if (!_formKey.currentState!.validate()) return;
-
+    
     _formKey.currentState!.save();
-
+    
+    if (!mounted) return;
+    
     setState(() => _isLoading = true);
 
     try {
@@ -101,24 +106,89 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       if (mounted) {
-        String errorMessage = e.toString();
-        AppConfig.debugPrint('Auth error details: $errorMessage');
-        
-        if (errorMessage.contains('Invalid login credentials')) {
-          errorMessage = 'Invalid email or password. Please check your credentials and try again.';
-        } else if (errorMessage.contains('Email not confirmed')) {
-          errorMessage = 'Please verify your email address before signing in. Check your inbox for the confirmation link.';
-        }
-        
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.authError,
-          showSnackBar: true,
-          customMessage: errorMessage,
-          onRetry: _submitForm,
-        );
+        setState(() => _isLoading = false);
+        _handleAuthError(e);
       }
+    }
+  }
+
+  void _handleAuthError(dynamic error) {
+    String errorMessage = error.toString();
+    String userFriendlyMessage;
+    
+    // Convert technical errors to user-friendly messages
+    if (errorMessage.contains('Invalid login credentials') || 
+        errorMessage.contains('Invalid email or password')) {
+      userFriendlyMessage = 'Incorrect email or password. Please try again.';
+    } else if (errorMessage.contains('Email not confirmed')) {
+      userFriendlyMessage = 'Please verify your email first. Check your inbox for the confirmation link.';
+    } else if (errorMessage.contains('User already registered')) {
+      userFriendlyMessage = 'This email is already registered. Try signing in instead.';
+    } else if (errorMessage.contains('Password should be at least 6 characters')) {
+      userFriendlyMessage = 'Password must be at least 6 characters long.';
+    } else if (errorMessage.contains('timeout') || errorMessage.contains('network')) {
+      userFriendlyMessage = 'Connection timed out. Please check your internet and try again.';
+    } else if (errorMessage.contains('Passwords do not match')) {
+      userFriendlyMessage = 'The passwords you entered don\'t match.';
+    } else {
+      userFriendlyMessage = 'Unable to sign in right now. Please try again.';
+    }
+    
+    ErrorHandlingService.handleError(
+      context: context,
+      error: error,
+      category: ErrorHandlingService.authError,
+      showSnackBar: true,
+      customMessage: userFriendlyMessage,
+      onRetry: _submitForm,
+    );
+  }
+
+  Future<void> _handleLogin() async {
+    try {
+      final trimmedEmail = _email.trim().toLowerCase();
+      
+      if (trimmedEmail.isEmpty) {
+        throw Exception('Please enter your email address');
+      }
+      
+      AppConfig.debugPrint('Login attempt for: $trimmedEmail');
+      
+      // Save credentials if remember me is checked
+      if (_rememberMe) {
+        await _saveCredentials();
+      }
+      
+      // Attempt sign in with timeout
+      final response = await AuthService.signIn(
+        email: trimmedEmail,
+        password: _password,
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          throw Exception('Connection timed out. Please try again.');
+        },
+      );
+      
+      if (response.user != null && response.session != null) {
+        AppConfig.debugPrint('✅ Login successful: ${response.user?.email}');
+        
+        if (mounted) {
+          ErrorHandlingService.showSuccess(context, 'Welcome back!');
+          
+          // Small delay for success message
+          await Future.delayed(const Duration(milliseconds: 500));
+          
+          if (mounted) {
+            Navigator.pushReplacementNamed(context, '/home');
+          }
+        }
+      } else {
+        throw Exception('Login failed. Please try again.');
+      }
+    } catch (e) {
+      AppConfig.debugPrint('❌ Login error: $e');
+      rethrow;
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -126,84 +196,82 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  Future<void> _handleLogin() async {
-    try {
-      final trimmedEmail = _email.trim();
-      final trimmedPassword = _password;
-      
-      AppConfig.debugPrint('Attempting login for: $trimmedEmail');
-      
-      await _saveCredentials();
-      
-      final response = await AuthService.signIn(
-        email: trimmedEmail,
-        password: trimmedPassword,
-      );
-
-      if (response.user != null) {
-        AppConfig.debugPrint('Login successful: ${response.user?.email}');
-        
-        if (mounted) {
-          ErrorHandlingService.showSuccess(context, 'Welcome back!');
-          Navigator.pushReplacementNamed(context, '/home');
-        }
-      } else {
-        throw Exception('Login failed - no user returned');
-      }
-    } catch (e) {
-      AppConfig.debugPrint('Login error: $e');
-      rethrow;
-    }
-  }
-
   Future<void> _handleSignUp() async {
+    // Validate passwords match
     if (_password != _confirmPassword) {
-      throw Exception('Passwords do not match!');
+      throw Exception('Passwords do not match');
     }
-
+    
     if (_password.length < 6) {
-      throw Exception('Password must be at least 6 characters long');
+      throw Exception('Password should be at least 6 characters');
     }
 
     try {
-      final trimmedEmail = _email.trim();
+      final trimmedEmail = _email.trim().toLowerCase();
       
+      AppConfig.debugPrint('Sign up attempt for: $trimmedEmail');
+      
+      // Attempt sign up with timeout
       final response = await AuthService.signUp(
         email: trimmedEmail,
         password: _password,
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          throw Exception('Connection timed out. Please try again.');
+        },
       );
-
+      
       if (response.user != null) {
-        AppConfig.debugPrint('Sign up successful: ${response.user?.email}');
-
-        await Future.delayed(const Duration(milliseconds: 1000));
+        AppConfig.debugPrint('✅ Sign up successful: ${response.user?.email}');
         
-        // FIXED: Route user profile creation through Cloudflare Worker instead of direct Supabase
+        // Create user profile
         await _createUserProfileViaWorker(response.user!);
-
-        await _saveCredentials();
-
+        
+        // Save credentials if remember me is checked
+        if (_rememberMe) {
+          await _saveCredentials();
+        }
+        
         if (mounted) {
           if (response.session == null) {
+            // Email confirmation required
             ErrorHandlingService.showSuccess(
               context,
               'Account created! Please check your email to confirm your account.'
             );
+            
+            // Switch to login mode
+            await Future.delayed(const Duration(seconds: 2));
+            if (mounted) {
+              setState(() {
+                _isLogin = true;
+                _isLoading = false;
+              });
+            }
           } else {
-            ErrorHandlingService.showSuccess(context, 'Account created successfully!');
-            Navigator.pushReplacementNamed(context, '/home');
+            // Auto-login successful
+            ErrorHandlingService.showSuccess(context, 'Welcome to Liver Food Scanner!');
+            
+            await Future.delayed(const Duration(milliseconds: 500));
+            if (mounted) {
+              Navigator.pushReplacementNamed(context, '/home');
+            }
           }
         }
       } else {
-        throw Exception('Sign up failed - no user returned');
+        throw Exception('Sign up failed. Please try again.');
       }
     } catch (e) {
-      AppConfig.debugPrint('Sign up error: $e');
+      AppConfig.debugPrint('❌ Sign up error: $e');
       rethrow;
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
-  // FIXED: Create user profile via Cloudflare Worker (no Supabase egress)
   Future<void> _createUserProfileViaWorker(User user) async {
     try {
       final response = await http.post(
@@ -222,30 +290,32 @@ class _LoginPageState extends State<LoginPage> {
             'friends_list_visible': true,
           },
         }),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception('Profile creation timed out');
+        },
       );
 
-      if (response.statusCode != 200) {
-        throw Exception('Worker profile creation failed: ${response.body}');
+      if (response.statusCode == 200) {
+        AppConfig.debugPrint('✅ User profile created via Worker');
+      } else {
+        throw Exception('Profile creation failed: ${response.statusCode}');
       }
-      
-      AppConfig.debugPrint('User profile created for ${user.email} via Worker');
     } catch (e) {
-      AppConfig.debugPrint('Error creating user profile via Worker: $e');
-      
+      AppConfig.debugPrint('⚠️ Error creating user profile: $e');
+      // Don't block login for profile creation failure
       if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.databaseError,
-          showSnackBar: true,
-          customMessage: 'Account created but profile setup failed. You can complete this in settings.',
+        ErrorHandlingService.showSimpleError(
+          context, 
+          'Account created but profile setup incomplete. You can complete this later.'
         );
       }
     }
   }
 
   Future<void> _sendPasswordResetEmail() async {
-    String resetEmail = _emailController.text.trim();
+    String resetEmail = _emailController.text.trim().toLowerCase();
     
     if (resetEmail.isEmpty) {
       resetEmail = await _showEmailInputDialog() ?? '';
@@ -255,19 +325,24 @@ class _LoginPageState extends State<LoginPage> {
       ErrorHandlingService.showSimpleError(context, 'Please enter your email address');
       return;
     }
-
-    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(resetEmail)) {
+    
+    if (!_isValidEmail(resetEmail)) {
       ErrorHandlingService.showSimpleError(context, 'Please enter a valid email address');
       return;
     }
 
     try {
-      await AuthService.resetPassword(resetEmail);
+      await AuthService.resetPassword(resetEmail).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception('Request timed out. Please try again.');
+        },
+      );
       
       if (mounted) {
         ErrorHandlingService.showSuccess(
           context,
-          'Password reset email sent to $resetEmail. Check your inbox and spam folder.'
+          'Password reset link sent! Check your email and spam folder.'
         );
       }
     } catch (e) {
@@ -276,7 +351,7 @@ class _LoginPageState extends State<LoginPage> {
           context: context,
           error: e,
           category: ErrorHandlingService.authError,
-          customMessage: 'Failed to send password reset email',
+          customMessage: 'Unable to send password reset email. Please try again.',
           onRetry: _sendPasswordResetEmail,
         );
       }
@@ -288,33 +363,55 @@ class _LoginPageState extends State<LoginPage> {
     
     return showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Reset Password'),
+      barrierDismissible: true,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.lock_reset, color: Colors.blue),
+            SizedBox(width: 12),
+            Text('Reset Password'),
+          ],
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Enter your email address to receive a password reset link:'),
-            SizedBox(height: 16),
+            const Text(
+              'Enter your email address to receive a password reset link:',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 16),
             TextField(
               controller: controller,
               decoration: InputDecoration(
-                labelText: 'Email',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.email),
+                labelText: 'Email Address',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                prefixIcon: const Icon(Icons.email_outlined),
               ),
               keyboardType: TextInputType.emailAddress,
               autofocus: true,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (value) => Navigator.pop(dialogContext, value.trim()),
             ),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: Text('Send Reset Email'),
+            onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Send Link'),
           ),
         ],
       ),
@@ -325,16 +422,18 @@ class _LoginPageState extends State<LoginPage> {
     _authSub = AuthService.authStateChanges.listen((data) {
       final event = data.event;
       final session = data.session;
-
+      
+      if (!mounted) return;
+      
       switch (event) {
         case AuthChangeEvent.signedIn:
-          AppConfig.debugPrint('User signed in: ${session?.user.email}');
+          AppConfig.debugPrint('🔐 User signed in: ${session?.user.email}');
           break;
         case AuthChangeEvent.signedOut:
-          AppConfig.debugPrint('User signed out');
+          AppConfig.debugPrint('🔓 User signed out');
           break;
         case AuthChangeEvent.passwordRecovery:
-          AppConfig.debugPrint('Password recovery initiated');
+          AppConfig.debugPrint('🔑 Password recovery initiated');
           break;
         default:
           break;
@@ -346,24 +445,35 @@ class _LoginPageState extends State<LoginPage> {
     setState(() {
       _isLogin = !_isLogin;
       _formKey.currentState?.reset();
+      
+      // Keep email but clear passwords
+      final savedEmail = _emailController.text;
       _emailController.clear();
       _passwordController.clear();
       _confirmPasswordController.clear();
-      _email = '';
+      
+      // Restore email if it was valid
+      if (savedEmail.isNotEmpty && _isValidEmail(savedEmail)) {
+        _emailController.text = savedEmail;
+        _email = savedEmail;
+      }
+      
       _password = '';
       _confirmPassword = '';
     });
+  }
+
+  bool _isValidEmail(String email) {
+    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email.trim());
   }
 
   String? _validateEmail(String? value) {
     if (value == null || value.trim().isEmpty) {
       return 'Email is required';
     }
-    
-    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value.trim())) {
+    if (!_isValidEmail(value)) {
       return 'Please enter a valid email address';
     }
-    
     return null;
   }
 
@@ -371,13 +481,9 @@ class _LoginPageState extends State<LoginPage> {
     if (value == null || value.isEmpty) {
       return 'Password is required';
     }
-    
-    if (!_isLogin) {
-      if (value.length < 6) {
-        return 'Password must be at least 6 characters';
-      }
+    if (!_isLogin && value.length < 6) {
+      return 'Password must be at least 6 characters';
     }
-    
     return null;
   }
 
@@ -386,219 +492,243 @@ class _LoginPageState extends State<LoginPage> {
       if (value == null || value.isEmpty) {
         return 'Please confirm your password';
       }
-      
       if (value != _passwordController.text) {
         return 'Passwords do not match';
       }
     }
-    
     return null;
   }
 
   @override
   Widget build(BuildContext context) {
+    // Get screen dimensions for responsive layout
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isTablet = screenWidth > 600;
+    final maxWidth = isTablet ? 500.0 : screenWidth;
+    
     return Scaffold(
       appBar: AppBar(
         title: Text(_isLogin ? 'Sign In' : 'Create Account'),
         centerTitle: true,
-        backgroundColor: Colors.blue,
+        backgroundColor: Colors.green,
         foregroundColor: Colors.white,
+        elevation: 0,
       ),
       body: Container(
+        // ✅ NEW: Use custom background image
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Colors.blue.shade50,
-              Colors.white,
-            ],
+          image: DecorationImage(
+            image: AssetImage(
+              ScreenUtils.getBackgroundImage(context, type: 'login'),
+            ),
+            fit: BoxFit.cover,
+            // Optional: Slight darkening for better text contrast
+            colorFilter: ColorFilter.mode(
+              Colors.black.withOpacity(0.1),
+              BlendMode.darken,
+            ),
           ),
         ),
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Card(
-                elevation: 8,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: AutofillGroup(
-                    child: Form(
-                      key: _formKey,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // App Logo/Icon
-                          Icon(
-                            Icons.restaurant_menu,
-                            size: 64,
-                            color: Colors.blue.shade600,
-                          ),
-                          SizedBox(height: 16),
-                          
-                          // Title
-                          Text(
-                            _isLogin ? 'Welcome Back!' : 'Create Your Account',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.grey.shade800,
+              padding: EdgeInsets.all(ScreenUtils.getResponsivePadding(context)),
+              child: Container(
+                constraints: BoxConstraints(maxWidth: maxWidth),
+                child: Card(
+                  elevation: 8,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  // Semi-transparent card for better background visibility
+                  color: Colors.white.withOpacity(0.95),
+                  child: Padding(
+                    padding: EdgeInsets.all(ScreenUtils.getResponsivePadding(context)),
+                    child: AutofillGroup(
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // App Logo/Icon
+                            Icon(
+                              Icons.restaurant_menu,
+                              size: ScreenUtils.getIconSize(context, baseSize: 64),
+                              color: Colors.green.shade600,
                             ),
-                            textAlign: TextAlign.center,
-                          ),
-                          
-                          SizedBox(height: 8),
-                          
-                          Text(
-                            _isLogin 
-                                ? 'Sign in to access your recipes and scan history'
-                                : 'Join Liver Food Scanner to unlock premium features',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey.shade600,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          
-                          SizedBox(height: 32),
-
-                          // Email Field with Autofill
-                          TextFormField(
-                            controller: _emailController,
-                            decoration: InputDecoration(
-                              labelText: "Email Address",
-                              prefixIcon: Icon(Icons.email_outlined),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
+                            SizedBox(height: isTablet ? 24 : 16),
+                            
+                            // Title
+                            Text(
+                              _isLogin ? 'Welcome Back!' : 'Create Your Account',
+                              style: TextStyle(
+                                fontSize: (isTablet ? 28 : 24) * ScreenUtils.getFontSizeMultiplier(context),
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey.shade800,
                               ),
-                              filled: true,
-                              fillColor: Colors.grey.shade50,
+                              textAlign: TextAlign.center,
                             ),
-                            keyboardType: TextInputType.emailAddress,
-                            textInputAction: TextInputAction.next,
-                            validator: _validateEmail,
-                            onSaved: (val) => _email = val?.trim() ?? '',
-                            autocorrect: false,
-                            enableSuggestions: false,
-                            autofillHints: [AutofillHints.email],
-                          ),
-                          
-                          SizedBox(height: 16),
-
-                          // Password Field with Autofill
-                          TextFormField(
-                            controller: _passwordController,
-                            decoration: InputDecoration(
-                              labelText: "Password",
-                              prefixIcon: Icon(Icons.lock_outline),
-                              suffixIcon: IconButton(
-                                icon: Icon(_obscurePassword ? Icons.visibility : Icons.visibility_off),
-                                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                            SizedBox(height: 8),
+                            Text(
+                              _isLogin 
+                                ? 'Sign in to access your recipes'
+                                : 'Join to unlock all features',
+                              style: TextStyle(
+                                fontSize: (isTablet ? 16 : 14) * ScreenUtils.getFontSizeMultiplier(context),
+                                color: Colors.grey.shade600,
                               ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              filled: true,
-                              fillColor: Colors.grey.shade50,
+                              textAlign: TextAlign.center,
                             ),
-                            obscureText: _obscurePassword,
-                            textInputAction: _isLogin ? TextInputAction.done : TextInputAction.next,
-                            validator: _validatePassword,
-                            onSaved: (val) => _password = val ?? '',
-                            autocorrect: false,
-                            enableSuggestions: false,
-                            autofillHints: _isLogin 
-                                ? [AutofillHints.password]
-                                : [AutofillHints.newPassword],
-                          ),
-
-                          // Confirm Password Field (Sign Up only)
-                          if (!_isLogin) ...[
-                            SizedBox(height: 16),
+                            SizedBox(height: isTablet ? 40 : 32),
+                            
+                            // Email Field
                             TextFormField(
-                              controller: _confirmPasswordController,
+                              controller: _emailController,
                               decoration: InputDecoration(
-                                labelText: "Confirm Password",
-                                prefixIcon: Icon(Icons.lock_outline),
+                                labelText: "Email Address",
+                                prefixIcon: const Icon(Icons.email_outlined),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                filled: true,
+                                fillColor: Colors.white,
+                              ),
+                              keyboardType: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              validator: _validateEmail,
+                              onSaved: (val) => _email = val?.trim() ?? '',
+                              autocorrect: false,
+                              enableSuggestions: false,
+                              autofillHints: const [AutofillHints.email],
+                            ),
+                            const SizedBox(height: 16),
+                            
+                            // Password Field
+                            TextFormField(
+                              controller: _passwordController,
+                              decoration: InputDecoration(
+                                labelText: "Password",
+                                prefixIcon: const Icon(Icons.lock_outline),
                                 suffixIcon: IconButton(
-                                  icon: Icon(_obscureConfirmPassword ? Icons.visibility : Icons.visibility_off),
-                                  onPressed: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
+                                  icon: Icon(_obscurePassword 
+                                    ? Icons.visibility_outlined 
+                                    : Icons.visibility_off_outlined
+                                  ),
+                                  onPressed: () => setState(() => 
+                                    _obscurePassword = !_obscurePassword
+                                  ),
                                 ),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 filled: true,
-                                fillColor: Colors.grey.shade50,
+                                fillColor: Colors.white,
                               ),
-                              obscureText: _obscureConfirmPassword,
-                              textInputAction: TextInputAction.done,
-                              validator: _validateConfirmPassword,
-                              onSaved: (val) => _confirmPassword = val ?? '',
+                              obscureText: _obscurePassword,
+                              textInputAction: _isLogin 
+                                ? TextInputAction.done 
+                                : TextInputAction.next,
+                              validator: _validatePassword,
+                              onSaved: (val) => _password = val ?? '',
                               autocorrect: false,
                               enableSuggestions: false,
-                              autofillHints: [AutofillHints.newPassword],
+                              autofillHints: _isLogin 
+                                ? const [AutofillHints.password]
+                                : const [AutofillHints.newPassword],
+                              onFieldSubmitted: _isLogin 
+                                ? (_) => _submitForm() 
+                                : null,
                             ),
-                          ],
-
-                          // Remember Me Checkbox (Login only)
-                          if (_isLogin) ...[
-                            SizedBox(height: 16),
-                            Row(
-                              children: [
-                                Checkbox(
-                                  value: _rememberMe,
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _rememberMe = value ?? true;
-                                    });
-                                  },
-                                  activeColor: Colors.blue.shade600,
-                                ),
-                                Expanded(
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        _rememberMe = !_rememberMe;
-                                      });
-                                    },
-                                    child: Text(
-                                      'Remember me on this device',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.grey.shade700,
-                                      ),
+                            
+                            // Confirm Password (Sign Up only)
+                            if (!_isLogin) ...[
+                              const SizedBox(height: 16),
+                              TextFormField(
+                                controller: _confirmPasswordController,
+                                decoration: InputDecoration(
+                                  labelText: "Confirm Password",
+                                  prefixIcon: const Icon(Icons.lock_outline),
+                                  suffixIcon: IconButton(
+                                    icon: Icon(_obscureConfirmPassword 
+                                      ? Icons.visibility_outlined 
+                                      : Icons.visibility_off_outlined
+                                    ),
+                                    onPressed: () => setState(() => 
+                                      _obscureConfirmPassword = !_obscureConfirmPassword
                                     ),
                                   ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  filled: true,
+                                  fillColor: Colors.white,
                                 ),
-                              ],
-                            ),
-                          ],
-
-                          SizedBox(height: 24),
-
-                          // Submit Button
-                          SizedBox(
-                            height: 50,
-                            child: ElevatedButton(
-                              onPressed: _isLoading ? null : _submitForm,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue.shade600,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                elevation: 2,
+                                obscureText: _obscureConfirmPassword,
+                                textInputAction: TextInputAction.done,
+                                validator: _validateConfirmPassword,
+                                onSaved: (val) => _confirmPassword = val ?? '',
+                                autocorrect: false,
+                                enableSuggestions: false,
+                                autofillHints: const [AutofillHints.newPassword],
+                                onFieldSubmitted: (_) => _submitForm(),
                               ),
-                              child: _isLoading 
+                            ],
+                            
+                            // Remember Me (Login only)
+                            if (_isLogin) ...[
+                              const SizedBox(height: 16),
+                              InkWell(
+                                onTap: () => setState(() => _rememberMe = !_rememberMe),
+                                borderRadius: BorderRadius.circular(8),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 4),
+                                  child: Row(
+                                    children: [
+                                      Checkbox(
+                                        value: _rememberMe,
+                                        onChanged: (value) => setState(() => 
+                                          _rememberMe = value ?? true
+                                        ),
+                                        activeColor: Colors.green.shade600,
+                                      ),
+                                      Expanded(
+                                        child: Text(
+                                          'Remember me',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            color: Colors.grey.shade800,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                            
+                            SizedBox(height: isTablet ? 32 : 24),
+                            
+                            // Submit Button
+                            SizedBox(
+                              height: ScreenUtils.getButtonHeight(context),
+                              child: ElevatedButton(
+                                onPressed: _isLoading ? null : _submitForm,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green.shade600,
+                                  foregroundColor: Colors.white,
+                                  disabledBackgroundColor: Colors.grey.shade300,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  elevation: 2,
+                                ),
+                                child: _isLoading 
                                   ? Row(
                                       mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
-                                        SizedBox(
+                                        const SizedBox(
                                           width: 20,
                                           height: 20,
                                           child: CircularProgressIndicator(
@@ -606,81 +736,93 @@ class _LoginPageState extends State<LoginPage> {
                                             strokeWidth: 2,
                                           ),
                                         ),
-                                        SizedBox(width: 12),
+                                        const SizedBox(width: 12),
                                         Text(
                                           _isLogin ? 'Signing In...' : 'Creating Account...',
-                                          style: TextStyle(fontSize: 16),
+                                          style: TextStyle(
+                                            fontSize: (isTablet ? 18 : 16) * ScreenUtils.getFontSizeMultiplier(context),
+                                          ),
                                         ),
                                       ],
                                     )
                                   : Text(
                                       _isLogin ? 'Sign In' : 'Create Account',
                                       style: TextStyle(
-                                        fontSize: 16,
+                                        fontSize: (isTablet ? 18 : 16) * ScreenUtils.getFontSizeMultiplier(context),
                                         fontWeight: FontWeight.w600,
                                       ),
                                     ),
-                            ),
-                          ),
-
-                          // Forgot Password (Login only)
-                          if (_isLogin) ...[
-                            SizedBox(height: 16),
-                            TextButton(
-                              onPressed: _sendPasswordResetEmail,
-                              child: Text(
-                                "Forgot your password?",
-                                style: TextStyle(color: Colors.blue.shade600),
                               ),
                             ),
-                          ],
-
-                          SizedBox(height: 24),
-
-                          // Divider
-                          Row(
-                            children: [
-                              Expanded(child: Divider()),
-                              Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 16),
+                            
+                            // Forgot Password (Login only)
+                            if (_isLogin) ...[
+                              const SizedBox(height: 16),
+                              TextButton(
+                                onPressed: _isLoading ? null : _sendPasswordResetEmail,
                                 child: Text(
-                                  'OR',
+                                  "Forgot your password?",
                                   style: TextStyle(
-                                    color: Colors.grey.shade600,
-                                    fontWeight: FontWeight.w500,
+                                    color: Colors.green.shade600,
+                                    fontSize: (isTablet ? 16 : 14) * ScreenUtils.getFontSizeMultiplier(context),
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ),
-                              Expanded(child: Divider()),
                             ],
-                          ),
-
-                          SizedBox(height: 24),
-
-                          // Toggle Mode Button
-                          TextButton(
-                            onPressed: _toggleMode,
-                            child: RichText(
-                              text: TextSpan(
-                                style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
-                                children: [
-                                  TextSpan(
-                                    text: _isLogin 
-                                        ? "Don't have an account? "
-                                        : "Already have an account? ",
-                                  ),
-                                  TextSpan(
-                                    text: _isLogin ? 'Create one' : 'Sign in',
+                            
+                            SizedBox(height: isTablet ? 32 : 24),
+                            
+                            // Divider
+                            Row(
+                              children: [
+                                const Expanded(child: Divider()),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  child: Text(
+                                    'OR',
                                     style: TextStyle(
-                                      color: Colors.blue.shade600,
-                                      fontWeight: FontWeight.w600,
+                                      color: Colors.grey.shade600,
+                                      fontWeight: FontWeight.w500,
+                                      fontSize: isTablet ? 14 : 12,
                                     ),
                                   ),
-                                ],
+                                ),
+                                const Expanded(child: Divider()),
+                              ],
+                            ),
+                            
+                            SizedBox(height: isTablet ? 32 : 24),
+                            
+                            // Toggle Mode Button
+                            TextButton(
+                              onPressed: _isLoading ? null : _toggleMode,
+                              child: RichText(
+                                textAlign: TextAlign.center,
+                                text: TextSpan(
+                                  style: TextStyle(
+                                    fontSize: (isTablet ? 16 : 14) * ScreenUtils.getFontSizeMultiplier(context),
+                                    color: Colors.grey.shade800,
+                                  ),
+                                  children: [
+                                    TextSpan(
+                                      text: _isLogin 
+                                        ? "Don't have an account? "
+                                        : "Already have an account? ",
+                                    ),
+                                    TextSpan(
+                                      text: _isLogin ? 'Create one' : 'Sign in',
+                                      style: TextStyle(
+                                        color: Colors.green.shade600,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),

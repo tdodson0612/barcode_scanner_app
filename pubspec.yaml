@@ -1,49 +1,145 @@
 name: liver_wise
-description: A Flutter app to scan food barcodes and show nutrition info.
+description: A Flutter app to scan food barcodes, show nutrition info, and discover healthy recipes for liver health.
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+# App version - increment for each App Store submission
+# Format: MAJOR.MINOR.PATCH+BUILD_NUMBER
 version: 1.0.3+16
 
+# Flutter SDK constraints
 environment:
   sdk: ">=3.1.0 <4.0.0"
+  flutter: ">=3.13.0"
 
-  
+# Core dependencies
 dependencies:
   flutter:
     sdk: flutter
-  shared_preferences: ^2.2.3 
+  
+  # State management & storage
+  shared_preferences: ^2.2.3
+  
+  # Logging & debugging
   logger: ^2.0.2
+  
+  # Media handling
   video_player: ^2.8.2
-  image_picker: ^1.0.7  
+  image_picker: ^1.0.7
   video_thumbnail: ^0.5.3
+  
+  # Barcode scanning
   google_mlkit_barcode_scanning: ^0.14.1
+  
+  # Networking
   http: ^1.2.1
+  
+  # File system
   path_provider: ^2.1.1
+  
+  # Backend & authentication
   supabase_flutter: ^2.3.4
+  
+  # Monetization
   google_mobile_ads: ^6.0.0
   in_app_purchase: ^3.1.13
+  
+  # Utilities
   intl: ^0.19.0
-  change_app_package_name: ^1.2.0
   app_links: ^6.3.2
-  share_plus: ^7.0.0  # For sharing recipes
+  share_plus: ^7.0.0
+  
+  # Cloud storage
   amplify_storage_s3_dart: ^0.4.11
 
-
-  
-
-
+# Development dependencies
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  
+  # Linting & code quality
   flutter_lints: ^6.0.0
+  
+  # Icon generation
   flutter_launcher_icons: ^0.13.1
+  
+  # Splash screen generation
+  flutter_native_splash: ^2.3.9
+  
+  # Package name modification
+  change_app_package_name: ^1.2.0
 
+# Flutter configuration
 flutter:
   uses-material-design: true
-
+  
+  # Asset configuration
   assets:
+    # Legacy background (can be removed after migration)
     - assets/background.png
-    - assets/icon/liverlogo.png  # Add this since it's referenced in flutter_launcher_icons
+    
+    # New organized backgrounds
+    - assets/backgrounds/splash_screen.png
+    - assets/backgrounds/login_background.png
+    - assets/backgrounds/home_background.png
+    - assets/backgrounds/ipad_background.png
+    
+    # App icon (for launcher icons generation)
+    - assets/icon/liverlogo.png
+    
+    # Additional assets (add as needed)
+    # - assets/images/
+    # - assets/fonts/
 
+# App launcher icons configuration
 flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/icon/liverlogo.png"
+  
+  # iOS-specific configuration
+  ios_config:
+    # Generate all required iOS icon sizes
+    generate: true
+    image_path: "assets/icon/liverlogo.png"
+  
+  # Android-specific configuration  
+  android_config:
+    # Generate adaptive icons for Android
+    generate: true
+    image_path: "assets/icon/liverlogo.png"
+    # Optional: Add adaptive icon background
+    # adaptive_icon_background: "#4CAF50"
+    # adaptive_icon_foreground: "assets/icon/liverlogo_foreground.png"
+  
+  # Remove old Flutter logo
+  remove_alpha_ios: true
+
+# Native splash screen configuration
+flutter_native_splash:
+  # Background color (dark green to match brand)
+  color: "#1B5E20"
+  
+  # Splash screen image
+  image: assets/backgrounds/splash_screen.png
+  
+  # Platform-specific settings
+  android: true
+  ios: true
+  web: false
+  
+  # iOS-specific settings
+  ios_content_mode: scaleAspectFit
+  
+  # Android-specific settings
+  android_gravity: center
+  android_12:
+    # Android 12+ splash screen
+    image: assets/backgrounds/splash_screen.png
+    color: "#1B5E20"
+  
+  # Fullscreen splash
+  fullscreen: true
+  
+  # Info.plist modifications for iOS
+  info_plist_files:
+    - 'ios/Runner/Info.plist'

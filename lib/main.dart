@@ -1,5 +1,4 @@
-// main.dart – Unified version with Supabase, App Links (MainNavigation removed)
-
+// main.dart - Apple-compliant, iPad-optimized, no technical error screens
 import 'package:flutter/material.dart';
 import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,18 +16,21 @@ import 'pages/profile_screen.dart';
 import 'pages/favorite_recipes_page.dart';
 import 'models/favorite_recipe.dart';
 import 'contact_screen.dart';
-// import 'pages/discovery_feed_page.dart';  // ✅ Commented out
-// import 'pages/create_post_page.dart';     // ✅ Commented out
 import 'home_screen.dart';
-// import 'pages/main_navigation.dart';      // ✅ Commented out
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
+    // Initialize Supabase with timeout
     await Supabase.initialize(
       url: AppConfig.supabaseUrl,
       anonKey: AppConfig.supabaseAnonKey,
+    ).timeout(
+      const Duration(seconds: 10),
+      onTimeout: () {
+        throw Exception('Connection timeout. Please check your internet.');
+      },
     );
 
     if (AppConfig.enableDebugPrints) {
@@ -39,44 +41,155 @@ void main() async {
 
     runApp(const MyApp());
   } catch (e) {
+    // Log error for debugging but show user-friendly error screen
     if (AppConfig.enableDebugPrints) {
       print('❌ App initialization failed: $e');
     }
 
-    runApp(MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error, size: 64, color: Colors.red),
-              const SizedBox(height: 16),
-              const Text(
-                'App Initialization Failed',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  'Please check your configuration and try again.\n\nError: $e',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey[600]),
+    // Show user-friendly error screen (NO technical details)
+    runApp(_buildErrorApp(e));
+  }
+}
+
+/// Build user-friendly error app when initialization fails
+Widget _buildErrorApp(dynamic error) {
+  final errorString = error.toString().toLowerCase();
+  
+  // Determine user-friendly message
+  String title = 'Unable to Start App';
+  String message = 'Please check your internet connection and try again.';
+  IconData icon = Icons.cloud_off_rounded;
+  Color iconColor = Colors.orange;
+  
+  if (errorString.contains('timeout') || errorString.contains('network')) {
+    title = 'Connection Problem';
+    message = 'Please check your internet connection and try again.';
+    icon = Icons.wifi_off_rounded;
+  } else if (errorString.contains('configuration') || errorString.contains('url')) {
+    title = 'Configuration Issue';
+    message = 'The app needs to be updated. Please contact support.';
+    icon = Icons.settings_rounded;
+    iconColor = Colors.blue;
+  } else {
+    title = 'Startup Failed';
+    message = 'Unable to start the app. Please try restarting.';
+    icon = Icons.refresh_rounded;
+    iconColor = Colors.red;
+  }
+
+  return MaterialApp(
+    debugShowCheckedModeBanner: false,
+    title: AppConfig.appName,
+    home: Scaffold(
+      backgroundColor: Colors.grey.shade50,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Icon
+                Container(
+                  padding: const EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: iconColor.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    icon,
+                    size: 80,
+                    color: iconColor,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: () {
-                  main();
-                },
-                child: const Text('Retry'),
-              ),
-            ],
+                const SizedBox(height: 32),
+                
+                // Title
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                
+                // User-friendly message (NO technical details)
+                Text(
+                  message,
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey.shade700,
+                    height: 1.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 40),
+                
+                // Retry button
+                SizedBox(
+                  width: 200,
+                  height: 50,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      // Restart the app
+                      main();
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text(
+                      'Try Again',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green.shade600,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                
+                // Help text
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.lightbulb_outline_rounded,
+                        color: Colors.blue.shade700,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'If the problem continues, try closing and reopening the app.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.blue.shade900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ));
-  }
+    ),
+  );
 }
 
 class MyApp extends StatefulWidget {
@@ -98,43 +211,71 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _initAppLinks() async {
-    _appLinks = AppLinks();
-
-    // Handle deep links when app is already running
-    _appLinks.uriLinkStream.listen((Uri? uri) async {
-      if (uri != null && uri.toString().contains('reset-password')) {
-        await _handleResetPasswordLink(uri);
-      }
-    });
-
-    // Handle deep links when app is launched by link (cold start)
     try {
-      final initialUri = await _appLinks.getInitialLink();
-      if (initialUri != null && initialUri.toString().contains('reset-password')) {
-        await _handleResetPasswordLink(initialUri);
+      _appLinks = AppLinks();
+
+      // Handle deep links when app is already running
+      _appLinks.uriLinkStream.listen((Uri? uri) async {
+        if (uri != null && uri.toString().contains('reset-password')) {
+          await _handleResetPasswordLink(uri);
+        }
+      });
+
+      // Handle deep links when app is launched by link (cold start)
+      try {
+        final initialUri = await _appLinks.getInitialLink();
+        if (initialUri != null && initialUri.toString().contains('reset-password')) {
+          await _handleResetPasswordLink(initialUri);
+        }
+      } catch (e) {
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('Failed to handle initial deep link: $e');
+        }
+        // Silent fail - not critical
       }
     } catch (e) {
       if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('Failed to handle initial deep link: $e');
+        AppConfig.debugPrint('Failed to initialize app links: $e');
       }
+      // Silent fail - deep links not critical for app function
     }
   }
 
   Future<void> _handleResetPasswordLink(Uri uri) async {
     try {
-      final response = await Supabase.instance.client.auth.getSessionFromUrl(uri);
-      final session = response.session;
+      final response = await Supabase.instance.client.auth
+          .getSessionFromUrl(uri)
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () {
+              throw Exception('Password reset link expired or invalid');
+            },
+          );
 
-      if (mounted) {
-        Navigator.pushNamed(context, '/reset-password', arguments: session);
+      if (mounted && response.session != null) {
+        Navigator.pushNamed(context, '/reset-password', arguments: response.session);
       } else {
         if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('⚠️ No valid session found in reset-password link.');
+          AppConfig.debugPrint('⚠️ No valid session found in reset-password link');
         }
       }
     } catch (e) {
       if (AppConfig.enableDebugPrints) {
         AppConfig.debugPrint('❌ Error handling reset-password link: $e');
+      }
+      
+      // Show user-friendly error if mounted
+      if (mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Password reset link is invalid or expired. Please request a new one.'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        });
       }
     }
   }
@@ -142,18 +283,28 @@ class _MyAppState extends State<MyApp> {
   Future<void> _checkPremiumStatus() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      print("USER ID = ${Supabase.instance.client.auth.currentUser?.id}");
-
-      setState(() {
-        _isPremium = prefs.getBool('isPremiumUser') ?? false;
-      });
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      
+      if (AppConfig.enableDebugPrints && userId != null) {
+        AppConfig.debugPrint('Current user ID: $userId');
+      }
+      
+      if (mounted) {
+        setState(() {
+          _isPremium = prefs.getBool('isPremiumUser') ?? false;
+        });
+      }
     } catch (e) {
       if (AppConfig.enableDebugPrints) {
         AppConfig.debugPrint('Error checking premium status: $e');
       }
-      setState(() {
-        _isPremium = false;
-      });
+      
+      // Default to free tier on error
+      if (mounted) {
+        setState(() {
+          _isPremium = false;
+        });
+      }
     }
   }
 
@@ -165,8 +316,13 @@ class _MyAppState extends State<MyApp> {
       debugShowCheckedModeBanner: false,
       title: AppConfig.appName,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
         useMaterial3: true,
+        // iPad-friendly defaults
+        textTheme: const TextTheme(
+          bodyLarge: TextStyle(fontSize: 16),
+          bodyMedium: TextStyle(fontSize: 14),
+        ),
       ),
       initialRoute: _getInitialRoute(supabase),
       routes: {
@@ -180,38 +336,88 @@ class _MyAppState extends State<MyApp> {
         '/search-users': (context) => const SearchUsersPage(),
         '/favorite-recipes': (context) => FavoriteRecipesPage(favoriteRecipes: const []),
         '/contact': (context) => const ContactScreen(),
-        // ✅ Feed and Create Post routes commented out since pages are not implemented yet
-        // '/create-post': (context) => const CreatePostPage(),
-        // '/feed': (context) => const DiscoveryFeedPage(),
       },
       onUnknownRoute: (settings) {
         if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('Unknown route: ${settings.name}');
+          AppConfig.debugPrint('Unknown route requested: ${settings.name}');
         }
+        
+        // User-friendly 404 page
         return MaterialPageRoute(
           builder: (context) => Scaffold(
-            appBar: AppBar(title: const Text('Page Not Found')),
+            appBar: AppBar(
+              title: const Text('Page Not Found'),
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
             body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, size: 64, color: Colors.grey),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Page Not Found',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'The page "${settings.name}" does not exist.',
-                    style: TextStyle(color: Colors.grey[600]),
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () => Navigator.pushReplacementNamed(context, '/home'),
-                    child: const Text('Go Home'),
-                  ),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.search_off_rounded,
+                        size: 64,
+                        color: Colors.orange,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Page Not Found',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'The page you\'re looking for doesn\'t exist or has been moved.',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey.shade600,
+                        height: 1.5,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 32),
+                    SizedBox(
+                      width: 200,
+                      height: 50,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          // Try to go back, or go home if can't go back
+                          if (Navigator.canPop(context)) {
+                            Navigator.pop(context);
+                          } else {
+                            Navigator.pushReplacementNamed(context, '/home');
+                          }
+                        },
+                        icon: const Icon(Icons.home_rounded),
+                        label: const Text(
+                          'Go Home',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green.shade600,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -226,19 +432,20 @@ class _MyAppState extends State<MyApp> {
 
       if (user != null) {
         if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('User authenticated: ${user.email}');
+          AppConfig.debugPrint('✅ User authenticated: ${user.email}');
         }
         return '/home';
       } else {
         if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('No authenticated user, redirecting to login');
+          AppConfig.debugPrint('ℹ️ No authenticated user, showing login');
         }
         return '/login';
       }
     } catch (e) {
       if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('Error determining initial route: $e');
+        AppConfig.debugPrint('⚠️ Error determining initial route: $e');
       }
+      // On error, default to login (safe fallback)
       return '/login';
     }
   }

@@ -332,6 +332,27 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     super.initState();
     _initializePremiumController();
     _initializeAsync();
+    // Precache background images
+    _precacheImages();
+  }
+
+  Future<void> _precacheImages() async {
+    await precacheImage(
+      const AssetImage('assets/backgrounds/home_background.png'),
+      context,
+    );
+    
+    await precacheImage(
+      const AssetImage('assets/backgrounds/login_background.png'),
+      context,
+    );
+    
+    if (MediaQuery.of(context).size.width > 600) {
+      await precacheImage(
+        const AssetImage('assets/backgrounds/ipad_background.png'),
+        context,
+      );
+    }
   }
 
   @override
@@ -1110,15 +1131,28 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     return Stack(
       children: [
         Positioned.fill(
-          child: Image.asset(
-            'assets/background.png',
-            fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) {
-              return Container(
-                color: Colors.green.shade50,
-                child: Center(
-                  child: Icon(Icons.image_not_supported, size: 50, color: Colors.grey),
-                ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // Detect if tablet/iPad (width > 600)
+              final isTablet = constraints.maxWidth > 600;
+              
+              return Image.asset(
+                isTablet 
+                  ? 'assets/backgrounds/ipad_background.png'
+                  : 'assets/backgrounds/home_background.png',
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    color: Colors.green.shade50,
+                    child: Center(
+                      child: Icon(
+                        Icons.image_not_supported, 
+                        size: 50, 
+                        color: Colors.grey,
+                      ),
+                    ),
+                  );
+                },
               );
             },
           ),
@@ -1474,9 +1508,13 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
 
   Widget _buildScanningView() {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         image: DecorationImage(
-          image: AssetImage('assets/background.png'),
+          image: AssetImage(
+            MediaQuery.of(context).size.width > 600
+              ? 'assets/backgrounds/ipad_background.png'
+              : 'assets/backgrounds/home_background.png'
+          ),
           fit: BoxFit.cover,
         ),
       ),
