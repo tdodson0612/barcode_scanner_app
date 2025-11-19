@@ -326,7 +326,7 @@ class _AppDrawerState extends State<AppDrawer> {
               onTap: () {
                 Navigator.pop(context);
                 if (widget.currentPage != 'find_friends') {
-                  Navigator.pushNamed(context, '/messages');
+                  Navigator.pushNamed(context, '/search-users');
                 }
               },
             ),
