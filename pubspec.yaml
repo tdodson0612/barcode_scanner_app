@@ -74,9 +74,6 @@ flutter:
   
   # Asset configuration
   assets:
-    # Legacy background (can be removed after migration)
-    - assets/background.png
-    
     # New organized backgrounds
     - assets/backgrounds/splash_screen.png
     - assets/backgrounds/login_background.png
