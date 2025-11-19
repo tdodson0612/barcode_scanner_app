@@ -142,6 +142,8 @@ class _MyAppState extends State<MyApp> {
   Future<void> _checkPremiumStatus() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      print("USER ID = ${Supabase.instance.client.auth.currentUser?.id}");
+
       setState(() {
         _isPremium = prefs.getBool('isPremiumUser') ?? false;
       });
