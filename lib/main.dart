@@ -17,6 +17,7 @@ import 'pages/favorite_recipes_page.dart';
 import 'models/favorite_recipe.dart';
 import 'contact_screen.dart';
 import 'home_screen.dart';
+import 'pages/reset_password_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -336,6 +337,10 @@ class _MyAppState extends State<MyApp> {
         '/search-users': (context) => const SearchUsersPage(),
         '/favorite-recipes': (context) => FavoriteRecipesPage(favoriteRecipes: const []),
         '/contact': (context) => const ContactScreen(),
+        '/reset-password': (context) {
+          final session = ModalRoute.of(context)?.settings.arguments as Session?;
+          return ResetPasswordPage(session: session);
+        },
       },
       onUnknownRoute: (settings) {
         if (AppConfig.enableDebugPrints) {
