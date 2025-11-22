@@ -196,27 +196,27 @@ class _AppDrawerState extends State<AppDrawer> {
               },
             ),
             
-            ListTile(
-              leading: Icon(
-                Icons.explore,
-                color: widget.currentPage == 'feed' ? Colors.green : Colors.grey[700],
-              ),
-              title: Text(
-                'Discovery Feed',
-                style: TextStyle(
-                  color: widget.currentPage == 'feed' ? Colors.green : Colors.black,
-                  fontWeight: widget.currentPage == 'feed' ? FontWeight.bold : FontWeight.normal,
-                ),
-              ),
-              selected: widget.currentPage == 'feed',
-              selectedTileColor: Colors.green.withOpacity(0.1),
-              onTap: () {
-                Navigator.pop(context);
-                if (widget.currentPage != 'feed') {
-                  Navigator.pushReplacementNamed(context, '/feed');
-                }
-              },
-            ),
+            // ListTile(
+            //   leading: Icon(
+            //     Icons.explore,
+            //     color: widget.currentPage == 'feed' ? Colors.green : Colors.grey[700],
+            //   ),
+            //   title: Text(
+            //     'Discovery Feed',
+            //     style: TextStyle(
+            //       color: widget.currentPage == 'feed' ? Colors.green : Colors.black,
+            //       fontWeight: widget.currentPage == 'feed' ? FontWeight.bold : FontWeight.normal,
+            //     ),
+            //   ),
+            //   selected: widget.currentPage == 'feed',
+            //   selectedTileColor: Colors.green.withOpacity(0.1),
+            //   onTap: () {
+            //     Navigator.pop(context);
+            //     if (widget.currentPage != 'feed') {
+            //       Navigator.pushReplacementNamed(context, '/feed');
+            //     }
+            //   },
+            // ),
 
             ListTile(
               leading: Icon(
