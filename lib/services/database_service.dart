@@ -64,7 +64,7 @@ class DatabaseService {
         }),
       );
 
-      if (response.statusCode != 200) {
+      if (response.statusCode < 200 || response.statusCode > 299) {
         throw Exception('Worker query failed: ${response.body}');
       }
 
