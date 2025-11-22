@@ -1,4 +1,4 @@
-// lib/services/database_service.dart - FULLY REFACTORED: All operations through Cloudflare Worker
+// lib/services/database_service.dart - FULLY UPDATED: Auth token support for Worker
 import 'dart:convert';
 import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -28,10 +28,10 @@ class DatabaseService {
   static const String _CACHE_FAVORITE_RECIPES = 'cache_favorite_recipes';
 
   // ==================================================
-  // CLOUDFLARE WORKER HELPER METHODS
+  // CLOUDFLARE WORKER HELPER METHODS - WITH AUTH TOKEN
   // ==================================================
   
-  /// Send a query to the Cloudflare Worker (replaces direct Supabase calls)
+  /// Send a query to the Cloudflare Worker WITH authentication token
   static Future<dynamic> _workerQuery({
     required String action,
     required String table,
@@ -43,12 +43,18 @@ class DatabaseService {
     int? limit,
   }) async {
     try {
+      // ✅ GET THE USER'S AUTH TOKEN
+      final authToken = _supabase.auth.currentSession?.accessToken;
+      
+      AppConfig.debugPrint('🔐 Worker query ($action) with auth: ${authToken != null ? "YES" : "NO"}');
+      
       final response = await http.post(
         Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'action': action,
           'table': table,
+          'authToken': authToken, // ✅ PASS THE TOKEN
           if (columns != null) 'columns': columns,
           if (filters != null) 'filters': filters,
           if (data != null) 'data': data,
@@ -68,7 +74,7 @@ class DatabaseService {
     }
   }
 
-  /// Upload file to R2 storage via Cloudflare Worker
+  /// Upload file to R2 storage via Cloudflare Worker WITH auth token
   static Future<String> _workerStorageUpload({
     required String bucket,
     required String path,
@@ -76,6 +82,8 @@ class DatabaseService {
     required String contentType,
   }) async {
     try {
+      final authToken = _supabase.auth.currentSession?.accessToken;
+      
       final response = await http.post(
         Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/storage'),
         headers: {'Content-Type': 'application/json'},
@@ -85,6 +93,7 @@ class DatabaseService {
           'path': path,
           'data': base64Data,
           'contentType': contentType,
+          'authToken': authToken, // ✅ PASS THE TOKEN
         }),
       );
       
@@ -105,12 +114,14 @@ class DatabaseService {
     }
   }
 
-  /// Delete file from R2 storage via Cloudflare Worker
+  /// Delete file from R2 storage via Cloudflare Worker WITH auth token
   static Future<void> _workerStorageDelete({
     required String bucket,
     required String path,
   }) async {
     try {
+      final authToken = _supabase.auth.currentSession?.accessToken;
+      
       final response = await http.post(
         Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/storage'),
         headers: {'Content-Type': 'application/json'},
@@ -118,6 +129,7 @@ class DatabaseService {
           'action': 'delete',
           'bucket': bucket,
           'path': path,
+          'authToken': authToken, // ✅ PASS THE TOKEN
         }),
       );
       
@@ -1503,12 +1515,26 @@ Shared from Recipe Scanner App
       final existing = await _workerQuery(
         action: 'select',
         table: 'friend_requests',
-        columns: ['id', 'status', 'sender', 'receiver'],
+        columns: ['id', 'status', 'sender', 'receiver', 'created_at'],
+        filters: {
+          'or': [
+            {
+              'sender': currentUserId,
+              'receiver': receiverId,
+            },
+            {
+              'sender': receiverId,
+              'receiver': currentUserId,
+            },
+          ],
+        },
       );
+
 
       for (var row in existing as List) {
         if ((row['sender'] == currentUserId && row['receiver'] == receiverId) ||
             (row['sender'] == receiverId && row['receiver'] == currentUserId)) {
+          
           if (row['status'] == 'accepted') {
             throw Exception('You are already friends with this user');
           } else if (row['status'] == 'pending') {

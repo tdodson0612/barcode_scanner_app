@@ -1,14 +1,12 @@
-// lib/login.dart - UPDATED: Integrated new background images
+// lib/login.dart - COMPLETE: Direct Supabase for signup profile creation
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'services/auth_service.dart';
 import 'services/error_handling_service.dart';
 import 'config/app_config.dart';
-import 'utils/screen_utils.dart'; // For responsive design
+import 'utils/screen_utils.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -66,7 +64,6 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       AppConfig.debugPrint('Error loading saved credentials: $e');
-      // Silent fail - not critical
     }
   }
 
@@ -82,12 +79,10 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       AppConfig.debugPrint('Error saving credentials: $e');
-      // Silent fail - not critical
     }
   }
 
   Future<void> _submitForm() async {
-    // Dismiss keyboard
     FocusScope.of(context).unfocus();
     
     if (!_formKey.currentState!.validate()) return;
@@ -116,7 +111,6 @@ class _LoginPageState extends State<LoginPage> {
     String errorMessage = error.toString();
     String userFriendlyMessage;
     
-    // Convert technical errors to user-friendly messages
     if (errorMessage.contains('Invalid login credentials') || 
         errorMessage.contains('Invalid email or password')) {
       userFriendlyMessage = 'Incorrect email or password. Please try again.';
@@ -130,6 +124,8 @@ class _LoginPageState extends State<LoginPage> {
       userFriendlyMessage = 'Connection timed out. Please check your internet and try again.';
     } else if (errorMessage.contains('Passwords do not match')) {
       userFriendlyMessage = 'The passwords you entered don\'t match.';
+    } else if (errorMessage.contains('row-level security') || errorMessage.contains('RLS')) {
+      userFriendlyMessage = 'Account setup failed. Please contact support if this continues.';
     } else {
       userFriendlyMessage = 'Unable to sign in right now. Please try again.';
     }
@@ -154,12 +150,10 @@ class _LoginPageState extends State<LoginPage> {
       
       AppConfig.debugPrint('Login attempt for: $trimmedEmail');
       
-      // Save credentials if remember me is checked
       if (_rememberMe) {
         await _saveCredentials();
       }
       
-      // Attempt sign in with timeout
       final response = await AuthService.signIn(
         email: trimmedEmail,
         password: _password,
@@ -176,7 +170,6 @@ class _LoginPageState extends State<LoginPage> {
         if (mounted) {
           ErrorHandlingService.showSuccess(context, 'Welcome back!');
           
-          // Small delay for success message
           await Future.delayed(const Duration(milliseconds: 500));
           
           if (mounted) {
@@ -197,7 +190,6 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _handleSignUp() async {
-    // Validate passwords match
     if (_password != _confirmPassword) {
       throw Exception('Passwords do not match');
     }
@@ -211,7 +203,6 @@ class _LoginPageState extends State<LoginPage> {
       
       AppConfig.debugPrint('Sign up attempt for: $trimmedEmail');
       
-      // Attempt sign up with timeout
       final response = await AuthService.signUp(
         email: trimmedEmail,
         password: _password,
@@ -225,23 +216,20 @@ class _LoginPageState extends State<LoginPage> {
       if (response.user != null) {
         AppConfig.debugPrint('✅ Sign up successful: ${response.user?.email}');
         
-        // Create user profile
-        await _createUserProfileViaWorker(response.user!);
+        // ✅ Create user profile with direct Supabase (user has active session)
+        await _createUserProfile(response.user!);
         
-        // Save credentials if remember me is checked
         if (_rememberMe) {
           await _saveCredentials();
         }
         
         if (mounted) {
           if (response.session == null) {
-            // Email confirmation required
             ErrorHandlingService.showSuccess(
               context,
               'Account created! Please check your email to confirm your account.'
             );
             
-            // Switch to login mode
             await Future.delayed(const Duration(seconds: 2));
             if (mounted) {
               setState(() {
@@ -250,7 +238,6 @@ class _LoginPageState extends State<LoginPage> {
               });
             }
           } else {
-            // Auto-login successful
             ErrorHandlingService.showSuccess(context, 'Welcome to Liver Food Scanner!');
             
             await Future.delayed(const Duration(milliseconds: 500));
@@ -272,39 +259,36 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  Future<void> _createUserProfileViaWorker(User user) async {
+  /// ✅ FIXED: Use direct Supabase during signup (user has active session)
+  Future<void> _createUserProfile(User user) async {
     try {
-      final response = await http.post(
-        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'insert',
-          'table': 'user_profiles',
-          'data': {
+      AppConfig.debugPrint('Creating user profile for: ${user.email}');
+      
+      // Direct Supabase call - user has active session, RLS will pass
+      await Supabase.instance.client
+          .from('user_profiles')
+          .insert({
             'id': user.id,
-            'email': user.email,
+            'email': user.email ?? 'user',
+            'username': (user.email ?? 'user').split('@')[0],
+            'is_premium': false,
             'daily_scans_used': 0,
             'last_scan_date': DateTime.now().toIso8601String().split('T')[0],
-            'username': user.email?.split('@')[0] ?? 'user',
             'created_at': DateTime.now().toIso8601String(),
             'friends_list_visible': true,
-          },
-        }),
-      ).timeout(
-        const Duration(seconds: 10),
-        onTimeout: () {
-          throw Exception('Profile creation timed out');
-        },
-      );
-
-      if (response.statusCode == 200) {
-        AppConfig.debugPrint('✅ User profile created via Worker');
-      } else {
-        throw Exception('Profile creation failed: ${response.statusCode}');
-      }
+            'xp': 0,
+            'level': 1,
+          })
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () {
+              throw Exception('Profile creation timed out');
+            },
+          );
+      
+      AppConfig.debugPrint('✅ User profile created successfully');
     } catch (e) {
       AppConfig.debugPrint('⚠️ Error creating user profile: $e');
-      // Don't block login for profile creation failure
       if (mounted) {
         ErrorHandlingService.showSimpleError(
           context, 
@@ -446,13 +430,11 @@ class _LoginPageState extends State<LoginPage> {
       _isLogin = !_isLogin;
       _formKey.currentState?.reset();
       
-      // Keep email but clear passwords
       final savedEmail = _emailController.text;
       _emailController.clear();
       _passwordController.clear();
       _confirmPasswordController.clear();
       
-      // Restore email if it was valid
       if (savedEmail.isNotEmpty && _isValidEmail(savedEmail)) {
         _emailController.text = savedEmail;
         _email = savedEmail;
@@ -501,7 +483,6 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Get screen dimensions for responsive layout
     final screenWidth = MediaQuery.of(context).size.width;
     final isTablet = screenWidth > 600;
     final maxWidth = isTablet ? 500.0 : screenWidth;
@@ -515,14 +496,12 @@ class _LoginPageState extends State<LoginPage> {
         elevation: 0,
       ),
       body: Container(
-        // ✅ NEW: Use custom background image
         decoration: BoxDecoration(
           image: DecorationImage(
             image: AssetImage(
               ScreenUtils.getBackgroundImage(context, type: 'login'),
             ),
             fit: BoxFit.cover,
-            // Optional: Slight darkening for better text contrast
             colorFilter: ColorFilter.mode(
               Colors.black.withOpacity(0.1),
               BlendMode.darken,
@@ -540,7 +519,6 @@ class _LoginPageState extends State<LoginPage> {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  // Semi-transparent card for better background visibility
                   color: Colors.white.withOpacity(0.95),
                   child: Padding(
                     padding: EdgeInsets.all(ScreenUtils.getResponsivePadding(context)),
@@ -551,7 +529,6 @@ class _LoginPageState extends State<LoginPage> {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // App Logo/Icon
                             Icon(
                               Icons.restaurant_menu,
                               size: ScreenUtils.getIconSize(context, baseSize: 64),
@@ -559,7 +536,6 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                             SizedBox(height: isTablet ? 24 : 16),
                             
-                            // Title
                             Text(
                               _isLogin ? 'Welcome Back!' : 'Create Your Account',
                               style: TextStyle(
@@ -582,7 +558,6 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                             SizedBox(height: isTablet ? 40 : 32),
                             
-                            // Email Field
                             TextFormField(
                               controller: _emailController,
                               decoration: InputDecoration(
@@ -604,7 +579,6 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                             const SizedBox(height: 16),
                             
-                            // Password Field
                             TextFormField(
                               controller: _passwordController,
                               decoration: InputDecoration(
@@ -641,7 +615,6 @@ class _LoginPageState extends State<LoginPage> {
                                 : null,
                             ),
                             
-                            // Confirm Password (Sign Up only)
                             if (!_isLogin) ...[
                               const SizedBox(height: 16),
                               TextFormField(
@@ -675,7 +648,6 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ],
                             
-                            // Remember Me (Login only)
                             if (_isLogin) ...[
                               const SizedBox(height: 16),
                               InkWell(
@@ -710,7 +682,6 @@ class _LoginPageState extends State<LoginPage> {
                             
                             SizedBox(height: isTablet ? 32 : 24),
                             
-                            // Submit Button
                             SizedBox(
                               height: ScreenUtils.getButtonHeight(context),
                               child: ElevatedButton(
@@ -755,7 +726,6 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ),
                             
-                            // Forgot Password (Login only)
                             if (_isLogin) ...[
                               const SizedBox(height: 16),
                               TextButton(
@@ -773,7 +743,6 @@ class _LoginPageState extends State<LoginPage> {
                             
                             SizedBox(height: isTablet ? 32 : 24),
                             
-                            // Divider
                             Row(
                               children: [
                                 const Expanded(child: Divider()),
@@ -794,7 +763,6 @@ class _LoginPageState extends State<LoginPage> {
                             
                             SizedBox(height: isTablet ? 32 : 24),
                             
-                            // Toggle Mode Button
                             TextButton(
                               onPressed: _isLoading ? null : _toggleMode,
                               child: RichText(
