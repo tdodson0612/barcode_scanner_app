@@ -1504,8 +1504,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  // 1. Replace the sendFriendRequest method in database_service.dart (lib/services/database_service.dart)
-
   static Future<String?> sendFriendRequest(String receiverId) async {
     ensureUserAuthenticated();
     
@@ -1514,42 +1512,32 @@ Shared from Recipe Scanner App
     }
     
     try {
+      // Fetch ALL friend requests (no complex filters)
       final existing = await _workerQuery(
         action: 'select',
         table: 'friend_requests',
         columns: ['id', 'status', 'sender', 'receiver', 'created_at'],
-        filters: {
-          'or': [
-            {
-              'sender': currentUserId,
-              'receiver': receiverId,
-            },
-            {
-              'sender': receiverId,
-              'receiver': currentUserId,
-            },
-          ],
-        },
       );
 
-      // Check for existing requests BEFORE trying to insert
-      for (var row in existing as List) {
-        if ((row['sender'] == currentUserId && row['receiver'] == receiverId) ||
-            (row['sender'] == receiverId && row['receiver'] == currentUserId)) {
-          
-          if (row['status'] == 'accepted') {
-            throw Exception('You are already friends with this user');
-          } else if (row['status'] == 'pending') {
-            if (row['sender'] == receiverId) {
-              throw Exception('This user has already sent you a friend request. Check your pending requests!');
+      // Check them locally in Dart instead of using 'or' filters
+      if (existing is List) {
+        for (var row in existing) {
+          if ((row['sender'] == currentUserId && row['receiver'] == receiverId) ||
+              (row['sender'] == receiverId && row['receiver'] == currentUserId)) {
+            
+            if (row['status'] == 'accepted') {
+              throw Exception('You are already friends with this user');
+            } else if (row['status'] == 'pending') {
+              if (row['sender'] == receiverId) {
+                throw Exception('This user has already sent you a friend request. Check your pending requests!');
+              }
+              throw Exception('Friend request already sent');
             }
-            // This is the key change - throw a specific message for duplicate sent requests
-            throw Exception('Friend request already sent');
           }
         }
       }
 
-      // Only insert if no existing request found
+      // No existing request found, proceed with insert
       final response = await _workerQuery(
         action: 'insert',
         table: 'friend_requests',
@@ -1561,44 +1549,30 @@ Shared from Recipe Scanner App
         },
       );
 
-      // Handle the Worker's duplicate response gracefully
-      if (response is Map && response['status'] == 'duplicate') {
-        throw Exception('Friend request already sent');
+      // Handle response from Worker
+      if (response is Map<String, dynamic>) {
+        // Check if it's a duplicate response
+        if (response['status'] == 'duplicate') {
+          throw Exception('Friend request already sent');
+        }
+        // Single inserted row returned as Map
+        if (response['id'] != null) {
+          return response['id'].toString();
+        }
+        if (response['success'] == true) {
+          return null;
+        }
       }
 
+      // List of rows returned
       if (response is List && response.isNotEmpty) {
         return response[0]['id'].toString();
       }
+      
       return null;
     } catch (e) {
-      // Clean up error messages
-      String errorMsg = e.toString();
-      
-      // Remove "Exception: " prefix for cleaner display
-      if (errorMsg.startsWith('Exception: ')) {
-        errorMsg = errorMsg.substring('Exception: '.length);
-      }
-      
-      // Simplify duplicate error messages
-      if (isDuplicateError(errorMsg)) {
-        throw Exception('Friend request already sent');
-      }
-      
-      // Re-throw with cleaned message
-      throw Exception(errorMsg);
+      throw Exception('Failed to send friend request: $e');
     }
-  }
-
-// Helper method to detect duplicate errors
-  static bool isDuplicateError(String errorMsg) {
-    if (errorMsg.isEmpty) return false;
-    final msg = errorMsg.toLowerCase();
-    return msg.contains('duplicate') || 
-          msg.contains('unique') || 
-          msg.contains('constraint') ||
-          msg.contains('23505') ||
-          msg.contains('already sent') ||
-          msg.contains('already exists');
   }
 
   static Future<void> acceptFriendRequest(String requestId) async {
