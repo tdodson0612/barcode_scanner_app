@@ -1,4 +1,4 @@
-// lib/services/database_service.dart - FULLY UPDATED: Auth token support for Worker
+// lib/services/database_service.dart - FULLY UPDATED: Auth token support for Worker + improved storage & profile pictures
 import 'dart:convert';
 import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -83,7 +83,15 @@ class DatabaseService {
   }) async {
     try {
       final authToken = _supabase.auth.currentSession?.accessToken;
-      
+     
+      if (authToken == null) {
+        throw Exception('Authentication required. Please sign in again.');
+      }
+     
+      AppConfig.debugPrint('🔐 Storage upload with auth token');
+      AppConfig.debugPrint('📦 Bucket: $bucket, Path: $path');
+      AppConfig.debugPrint('📊 Data size: ${base64Data.length} chars (${(base64Data.length * 0.75 / 1024 / 1024).toStringAsFixed(2)} MB)');
+     
       final response = await http.post(
         Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/storage'),
         headers: {'Content-Type': 'application/json'},
@@ -93,24 +101,50 @@ class DatabaseService {
           'path': path,
           'data': base64Data,
           'contentType': contentType,
-          'authToken': authToken, // ✅ PASS THE TOKEN
+          'authToken': authToken,
         }),
+      ).timeout(
+        const Duration(seconds: 60),
+        onTimeout: () {
+          throw Exception('Upload timeout - connection too slow or server not responding. Please try again.');
+        },
       );
-      
-      if (response.statusCode != 200) {
-        throw Exception('Storage upload failed: ${response.body}');
+     
+      AppConfig.debugPrint('📡 Response status: ${response.statusCode}');
+     
+      if (response.statusCode == 401) {
+        throw Exception('Authentication failed. Please sign out and sign back in.');
       }
-      
+     
+      if (response.statusCode == 403) {
+        throw Exception('Permission denied. You can only upload to your own folder.');
+      }
+     
+      if (response.statusCode != 200) {
+        final errorBody = response.body;
+        AppConfig.debugPrint('❌ Upload failed: $errorBody');
+        throw Exception('Upload failed (${response.statusCode}): ${errorBody.length > 100 ? errorBody.substring(0, 100) : errorBody}');
+      }
+     
       final uploadResult = jsonDecode(response.body);
       final publicUrl = uploadResult['url'] ?? uploadResult['publicUrl'];
-      
+     
       if (publicUrl == null) {
-        throw Exception('Upload succeeded but no URL returned');
+        throw Exception('Upload succeeded but no URL returned. Response: ${response.body}');
       }
-      
+     
+      AppConfig.debugPrint('✅ Upload successful: $publicUrl');
       return publicUrl;
+    } on http.ClientException {
+      throw Exception('Network error: Unable to connect to server. Check your internet connection.');
+    } on FormatException {
+      throw Exception('Invalid response from server. Please try again.');
     } catch (e) {
-      throw Exception('Failed to upload to storage: $e');
+      AppConfig.debugPrint('❌ Storage upload error: $e');
+      if (e.toString().toLowerCase().contains('timeout')) {
+        throw Exception('Upload timeout. File may be too large or connection too slow.');
+      }
+      rethrow;
     }
   }
 
@@ -121,7 +155,14 @@ class DatabaseService {
   }) async {
     try {
       final authToken = _supabase.auth.currentSession?.accessToken;
-      
+     
+      if (authToken == null) {
+        throw Exception('Authentication required. Please sign in again.');
+      }
+     
+      AppConfig.debugPrint('🔐 Storage delete with auth token');
+      AppConfig.debugPrint('📦 Bucket: $bucket, Path: $path');
+     
       final response = await http.post(
         Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/storage'),
         headers: {'Content-Type': 'application/json'},
@@ -129,15 +170,31 @@ class DatabaseService {
           'action': 'delete',
           'bucket': bucket,
           'path': path,
-          'authToken': authToken, // ✅ PASS THE TOKEN
+          'authToken': authToken,
         }),
+      ).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          throw Exception('Delete timeout - server not responding');
+        },
       );
-      
-      if (response.statusCode != 200) {
-        throw Exception('Storage delete failed: ${response.body}');
+     
+      if (response.statusCode == 401) {
+        throw Exception('Authentication failed. Please sign out and sign back in.');
       }
+     
+      if (response.statusCode == 403) {
+        throw Exception('Permission denied. You can only delete your own files.');
+      }
+     
+      if (response.statusCode != 200) {
+        throw Exception('Delete failed (${response.statusCode}): ${response.body}');
+      }
+     
+      AppConfig.debugPrint('✅ Delete successful');
     } catch (e) {
-      throw Exception('Failed to delete from storage: $e');
+      AppConfig.debugPrint('❌ Storage delete error: $e');
+      rethrow;
     }
   }
 
@@ -808,37 +865,57 @@ Shared from Recipe Scanner App
 
   static Future<String> uploadPicture(File imageFile) async {
     ensureUserAuthenticated();
-    
+   
     try {
       final userId = currentUserId!;
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final fileName = 'picture_$timestamp.jpg';
       final filePath = '$userId/$fileName';
-      
+     
+      // CHECK FILE SIZE FIRST
+      final fileSize = await imageFile.length();
+      AppConfig.debugPrint('📸 Image file size: ${fileSize / 1024 / 1024} MB');
+     
+      // Limit to 10MB to avoid Worker payload limits
+      if (fileSize > 10 * 1024 * 1024) {
+        throw Exception('Image file too large. Please choose a smaller image (max 10MB).');
+      }
+     
+      // Read and encode image
       final imageBytes = await imageFile.readAsBytes();
       final base64Image = base64Encode(imageBytes);
-      
+     
+      AppConfig.debugPrint('📤 Uploading to R2: $filePath');
+     
+      // Upload to R2 via Worker
       final publicUrl = await _workerStorageUpload(
         bucket: 'profile-pictures',
         path: filePath,
         base64Data: base64Image,
         contentType: 'image/jpeg',
       );
-      
+     
+      AppConfig.debugPrint('✅ Upload successful: $publicUrl');
+     
+      // Get current pictures array
       final profile = await getCurrentUserProfile();
       final currentPictures = profile?['pictures'];
-      
+     
       List<String> picturesList = [];
       if (currentPictures != null && currentPictures.isNotEmpty) {
         try {
           picturesList = List<String>.from(jsonDecode(currentPictures));
         } catch (e) {
-          print('Error parsing pictures: $e');
+          AppConfig.debugPrint('⚠️ Error parsing existing pictures: $e');
+          picturesList = [];
         }
       }
-      
+     
       picturesList.add(publicUrl);
-      
+     
+      AppConfig.debugPrint('💾 Updating profile with ${picturesList.length} pictures');
+     
+      // Update profile with new pictures array
       await _workerQuery(
         action: 'update',
         table: 'user_profiles',
@@ -848,13 +925,37 @@ Shared from Recipe Scanner App
           'updated_at': DateTime.now().toIso8601String(),
         },
       );
-      
+     
+      // Clear cache
       await _clearCache('$_CACHE_USER_PROFILE$userId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
-      
+     
+      AppConfig.debugPrint('✅ Profile updated successfully');
+     
       return publicUrl;
+    } on FormatException {
+      throw Exception('Invalid image format. Please choose a valid image file.');
+    } on FileSystemException {
+      throw Exception('Unable to read image file. Please try another image.');
     } catch (e) {
-      throw Exception('Failed to upload picture: $e');
+      AppConfig.debugPrint('❌ Upload error: $e');
+     
+      // Provide user-friendly error messages
+      final errorMsg = e.toString().toLowerCase();
+     
+      if (errorMsg.contains('authentication') || errorMsg.contains('401')) {
+        throw Exception('Session expired. Please sign out and sign back in.');
+      } else if (errorMsg.contains('network') || errorMsg.contains('socket')) {
+        throw Exception('Network error. Please check your internet connection and try again.');
+      } else if (errorMsg.contains('timeout')) {
+        throw Exception('Upload timeout. Please check your connection and try again.');
+      } else if (errorMsg.contains('413') || errorMsg.contains('too large')) {
+        throw Exception('Image file too large. Please choose a smaller image.');
+      } else if (errorMsg.contains('permission') || errorMsg.contains('403')) {
+        throw Exception('Permission denied. Please try signing out and back in.');
+      }
+     
+      rethrow;
     }
   }
 
@@ -862,19 +963,19 @@ Shared from Recipe Scanner App
     try {
       final profile = await getUserProfile(userId);
       final picturesJson = profile?['pictures'];
-      
+     
       if (picturesJson == null || picturesJson.isEmpty) {
         return [];
       }
-      
+     
       try {
         return List<String>.from(jsonDecode(picturesJson));
       } catch (e) {
-        print('Error parsing pictures: $e');
+        AppConfig.debugPrint('Error parsing pictures: $e');
         return [];
       }
     } catch (e) {
-      print('Error getting pictures: $e');
+      AppConfig.debugPrint('Error getting pictures: $e');
       return [];
     }
   }
@@ -886,30 +987,38 @@ Shared from Recipe Scanner App
 
   static Future<void> deletePicture(String pictureUrl) async {
     ensureUserAuthenticated();
-    
+   
     try {
       final userId = currentUserId!;
-      
+     
+      // Extract the path from the URL
       final uri = Uri.parse(pictureUrl);
       final pathSegments = uri.pathSegments;
-      
+     
+      // Find 'profile-pictures' in the path and get everything after it
       final bucketIndex = pathSegments.indexOf('profile-pictures');
       if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
         final filePath = pathSegments.sublist(bucketIndex + 1).join('/');
-        
+       
+        AppConfig.debugPrint('🗑️ Deleting: profile-pictures/$filePath');
+       
+        // Delete from R2 storage
         await _workerStorageDelete(
           bucket: 'profile-pictures',
           path: filePath,
         );
+      } else {
+        AppConfig.debugPrint('⚠️ Could not extract file path from URL: $pictureUrl');
       }
-      
+     
+      // Remove from profile's pictures array
       final profile = await getCurrentUserProfile();
       final currentPictures = profile?['pictures'];
-      
+     
       if (currentPictures != null && currentPictures.isNotEmpty) {
         List<String> picturesList = List<String>.from(jsonDecode(currentPictures));
         picturesList.remove(pictureUrl);
-        
+       
         await _workerQuery(
           action: 'update',
           table: 'user_profiles',
@@ -919,18 +1028,21 @@ Shared from Recipe Scanner App
             'updated_at': DateTime.now().toIso8601String(),
           },
         );
-        
+       
         await _clearCache('$_CACHE_USER_PROFILE$userId');
         await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
+       
+        AppConfig.debugPrint('✅ Picture deleted successfully');
       }
     } catch (e) {
+      AppConfig.debugPrint('❌ Delete error: $e');
       throw Exception('Failed to delete picture: $e');
     }
   }
 
   static Future<void> setPictureAsProfilePicture(String pictureUrl) async {
     ensureUserAuthenticated();
-    
+   
     try {
       await _workerQuery(
         action: 'update',
@@ -941,9 +1053,11 @@ Shared from Recipe Scanner App
           'updated_at': DateTime.now().toIso8601String(),
         },
       );
-      
+     
       await _clearCache('$_CACHE_USER_PROFILE$currentUserId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$currentUserId');
+     
+      AppConfig.debugPrint('✅ Profile picture updated');
     } catch (e) {
       throw Exception('Failed to set profile picture: $e');
     }
@@ -954,7 +1068,7 @@ Shared from Recipe Scanner App
       final profile = await getUserProfile(userId);
       return profile?['profile_picture'];
     } catch (e) {
-      print('Error getting profile picture: $e');
+      AppConfig.debugPrint('Error getting profile picture: $e');
       return null;
     }
   }

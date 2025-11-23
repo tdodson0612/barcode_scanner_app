@@ -25,7 +25,8 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveClientMixin {
+class _ProfileScreenState extends State<ProfileScreen>
+    with AutomaticKeepAliveClientMixin {
   File? _profileImage;
   File? _backgroundImage;
   final TextEditingController _nameController = TextEditingController();
@@ -35,7 +36,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
   String _userName = 'User';
   String _userEmail = '';
   bool _isLoading = false;
-  
+
   List<Map<String, dynamic>> _friends = [];
   bool _friendsListVisible = true;
   bool _isLoadingFriends = false;
@@ -85,7 +86,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     // Force immediate refresh of premium status by calling the update
     _updatePremiumState();
   }
-  
+
   void _updatePremiumState() {
     if (mounted) {
       setState(() {
@@ -102,21 +103,20 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     try {
       final prefs = await SharedPreferences.getInstance();
       final cached = prefs.getString('user_submitted_recipes');
-      
+
       if (cached == null) return null;
-      
+
       final data = json.decode(cached);
       final timestamp = data['_cached_at'] as int?;
-      
+
       if (timestamp == null) return null;
-      
+
       final age = DateTime.now().millisecondsSinceEpoch - timestamp;
       if (age > _recipesCacheDuration.inMilliseconds) return null;
-      
-      final recipes = (data['recipes'] as List)
-          .map((e) => SubmittedRecipe.fromJson(e))
-          .toList();
-      
+
+      final recipes =
+          (data['recipes'] as List).map((e) => SubmittedRecipe.fromJson(e)).toList();
+
       print('📦 Using cached submitted recipes (${recipes.length} found)');
       return recipes;
     } catch (e) {
@@ -152,19 +152,19 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     try {
       final prefs = await SharedPreferences.getInstance();
       final cached = prefs.getString('user_pictures');
-      
+
       if (cached == null) return null;
-      
+
       final data = json.decode(cached);
       final timestamp = data['_cached_at'] as int?;
-      
+
       if (timestamp == null) return null;
-      
+
       final age = DateTime.now().millisecondsSinceEpoch - timestamp;
       if (age > _picturesCacheDuration.inMilliseconds) return null;
-      
+
       final pictures = List<String>.from(data['pictures']);
-      
+
       print('📦 Using cached pictures (${pictures.length} found)');
       return pictures;
     } catch (e) {
@@ -200,21 +200,21 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     try {
       final prefs = await SharedPreferences.getInstance();
       final cached = prefs.getString('user_friends');
-      
+
       if (cached == null) return null;
-      
+
       final data = json.decode(cached);
       final timestamp = data['_cached_at'] as int?;
-      
+
       if (timestamp == null) return null;
-      
+
       final age = DateTime.now().millisecondsSinceEpoch - timestamp;
       if (age > _friendsCacheDuration.inMilliseconds) return null;
-      
+
       final friends = (data['friends'] as List)
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
-      
+
       print('📦 Using cached friends (${friends.length} found)');
       return friends;
     } catch (e) {
@@ -250,7 +250,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
   Future<void> _loadSubmittedRecipes({bool forceRefresh = false}) async {
     if (!mounted) return;
-    
+
     setState(() {
       _isLoadingRecipes = true;
     });
@@ -258,7 +258,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     try {
       if (!forceRefresh) {
         final cachedRecipes = await _getCachedRecipes();
-        
+
         if (cachedRecipes != null) {
           if (mounted) {
             setState(() {
@@ -272,7 +272,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
       final recipes = await DatabaseService.getSubmittedRecipes();
       await _cacheRecipes(recipes);
-      
+
       if (mounted) {
         setState(() {
           _submittedRecipes = recipes;
@@ -281,7 +281,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
       }
     } catch (e) {
       print('Error loading recipes: $e');
-      
+
       if (!forceRefresh) {
         final staleRecipes = await _getCachedRecipes();
         if (staleRecipes != null && mounted) {
@@ -292,7 +292,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
           return;
         }
       }
-      
+
       if (mounted) {
         setState(() {
           _submittedRecipes = [];
@@ -310,10 +310,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     try {
       await DatabaseService.deleteSubmittedRecipe(recipeId);
       await _invalidateRecipesCache();
-      
+
       if (mounted) {
         await _loadSubmittedRecipes(forceRefresh: true);
-        ErrorHandlingService.showSuccess(context, 'Recipe deleted successfully');
+        ErrorHandlingService.showSuccess(
+            context, 'Recipe deleted successfully');
       }
     } catch (e) {
       if (mounted) {
@@ -350,7 +351,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
   Future<void> _loadPictures({bool forceRefresh = false}) async {
     if (!mounted) return;
-    
+
     setState(() {
       _isLoadingPictures = true;
     });
@@ -358,7 +359,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     try {
       if (!forceRefresh) {
         final cachedPictures = await _getCachedPictures();
-        
+
         if (cachedPictures != null) {
           if (mounted) {
             setState(() {
@@ -372,7 +373,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
 
       final pictures = await DatabaseService.getCurrentUserPictures();
       await _cachePictures(pictures);
-      
+
       if (mounted) {
         setState(() {
           _pictures = pictures;
@@ -381,7 +382,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
       }
     } catch (e) {
       print('Error loading pictures: $e');
-      
+
       if (!forceRefresh) {
         final stalePictures = await _getCachedPictures();
         if (stalePictures != null && mounted) {
@@ -392,7 +393,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
           return;
         }
       }
-      
+
       if (mounted) {
         setState(() {
           _pictures = [];
@@ -402,14 +403,17 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     }
   }
 
+  // 🔧 UPDATED: use new DatabaseService.uploadPicture + safer loading state
   Future<void> _uploadPicture(ImageSource source) async {
     if (_pictures.length >= _maxPictures) {
       ErrorHandlingService.showSimpleError(
-        context, 
-        'Maximum $_maxPictures pictures allowed. Please delete some first.'
+        context,
+        'Maximum $_maxPictures pictures allowed. Please delete some first.',
       );
       return;
     }
+
+    bool startedUpload = false;
 
     try {
       final picker = ImagePicker();
@@ -420,26 +424,36 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
         imageQuality: 85,
       );
 
-      if (pickedFile != null && mounted) {
-        setState(() {
-          _isLoadingPictures = true;
-        });
+      if (pickedFile == null || !mounted) {
+        return;
+      }
 
-        final imageFile = File(pickedFile.path);
-        await DatabaseService.uploadPicture(imageFile);
-        await _invalidatePicturesCache();
-        await _loadPictures(forceRefresh: true);
-        
-        if (mounted) {
-          ErrorHandlingService.showSuccess(context, 'Picture uploaded successfully!');
-        }
+      setState(() {
+        _isLoadingPictures = true;
+      });
+      startedUpload = true;
+
+      final imageFile = File(pickedFile.path);
+
+      // Uses the updated DatabaseService.uploadPicture which:
+      // - checks auth
+      // - enforces max 10MB
+      // - uploads via Worker → R2
+      // - updates user_profiles.pictures
+      await DatabaseService.uploadPicture(imageFile);
+
+      // Refresh local cache/UI
+      await _invalidatePicturesCache();
+      await _loadPictures(forceRefresh: true);
+
+      if (mounted) {
+        ErrorHandlingService.showSuccess(
+          context,
+          'Picture uploaded successfully!',
+        );
       }
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _isLoadingPictures = false;
-        });
-        
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -448,8 +462,15 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
           onRetry: () => _uploadPicture(source),
         );
       }
+    } finally {
+      if (mounted && startedUpload) {
+        setState(() {
+          _isLoadingPictures = false;
+        });
+      }
     }
   }
+
 
   Future<void> _deletePicture(String pictureUrl) async {
     final confirm = await showDialog<bool>(
