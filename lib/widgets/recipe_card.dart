@@ -1,10 +1,11 @@
-// lib/widgets/recipe_card.dart - OPTIMIZED: Aggressive caching for ratings (HIGHEST EGRESS REDUCTION)
+// lib/widgets/recipe_card.dart - FIXED: Prevents users from rating their own recipes
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../models/submitted_recipe.dart';
 import '../services/database_service.dart';
+import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
 import '../widgets/rating_dialog.dart';
 
@@ -35,12 +36,18 @@ class _RecipeCardState extends State<RecipeCard> {
   // Cache keys
   static const String _ratingCachePrefix = 'recipe_rating_';
   static const String _userRatingCachePrefix = 'recipe_user_rating_';
-  static const Duration _cacheDuration = Duration(minutes: 5); // Ratings don't change frequently
+  static const Duration _cacheDuration = Duration(minutes: 5);
 
   @override
   void initState() {
     super.initState();
     _loadRating();
+  }
+
+  // FIX #2: Check if this recipe belongs to the current user
+  bool get _isOwnRecipe {
+    final currentUserId = AuthService.currentUserId;
+    return widget.recipe.userId == currentUserId;
   }
 
   /// Get cache key for recipe ratings
@@ -228,7 +235,19 @@ class _RecipeCardState extends State<RecipeCard> {
     }
   }
 
+  // FIX #2: Prevent rating own recipes
   Future<void> _rateRecipe() async {
+    // Check if this is the user's own recipe
+    if (_isOwnRecipe) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'You cannot rate your own recipe',
+        );
+      }
+      return;
+    }
+
     // Check if recipe ID is valid
     if (widget.recipe.id == null) {
       if (mounted) {
@@ -324,7 +343,31 @@ class _RecipeCardState extends State<RecipeCard> {
                     ),
                   ),
                 ),
-                if (_userRating != null)
+                // FIX #2: Show "Your Recipe" badge instead of user rating for own recipes
+                if (_isOwnRecipe)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.check_circle, size: 14, color: Colors.green.shade700),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Your Recipe',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.green.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else if (_userRating != null)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
@@ -435,19 +478,21 @@ class _RecipeCardState extends State<RecipeCard> {
             const SizedBox(height: 8),
             Row(
               children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _rateRecipe,
-                    icon: const Icon(Icons.star, size: 16),
-                    label: Text(_userRating != null ? 'Update Rating' : 'Rate'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.amber.shade700,
-                      side: BorderSide(color: Colors.amber.shade700),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
+                // FIX #2: Hide rate button for own recipes
+                if (!_isOwnRecipe)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _rateRecipe,
+                      icon: const Icon(Icons.star, size: 16),
+                      label: Text(_userRating != null ? 'Update Rating' : 'Rate'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.amber.shade700,
+                        side: BorderSide(color: Colors.amber.shade700),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
+                if (!_isOwnRecipe) const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: _deleteRecipe,
