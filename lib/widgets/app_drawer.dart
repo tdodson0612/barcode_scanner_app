@@ -1,4 +1,4 @@
-// lib/widgets/app_drawer.dart - OPTIMIZED: Reuses cached unread count
+// lib/widgets/app_drawer.dart - OPTIMIZED: Reuses cached unread count + clears route on logout
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../controllers/premium_gate_controller.dart';
@@ -196,28 +196,6 @@ class _AppDrawerState extends State<AppDrawer> {
               },
             ),
             
-            // ListTile(
-            //   leading: Icon(
-            //     Icons.explore,
-            //     color: widget.currentPage == 'feed' ? Colors.green : Colors.grey[700],
-            //   ),
-            //   title: Text(
-            //     'Discovery Feed',
-            //     style: TextStyle(
-            //       color: widget.currentPage == 'feed' ? Colors.green : Colors.black,
-            //       fontWeight: widget.currentPage == 'feed' ? FontWeight.bold : FontWeight.normal,
-            //     ),
-            //   ),
-            //   selected: widget.currentPage == 'feed',
-            //   selectedTileColor: Colors.green.withOpacity(0.1),
-            //   onTap: () {
-            //     Navigator.pop(context);
-            //     if (widget.currentPage != 'feed') {
-            //       Navigator.pushReplacementNamed(context, '/feed');
-            //     }
-            //   },
-            // ),
-
             ListTile(
               leading: Icon(
                 Icons.person,
@@ -556,8 +534,7 @@ class _AppDrawerState extends State<AppDrawer> {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(context);
-              await AuthService.signOut();
-              Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+              await _logout(context);
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: Text('Sign Out', style: TextStyle(color: Colors.white)),
@@ -565,5 +542,31 @@ class _AppDrawerState extends State<AppDrawer> {
         ],
       ),
     );
+  }
+
+  Future<void> _logout(BuildContext context) async {
+    try {
+      // Clear the saved route BEFORE logging out
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('last_route');
+
+      // Sign out from Supabase
+      await AuthService.signOut();
+      
+      // Clear all preferences
+      await prefs.clear();
+
+      // Navigate to login
+      if (mounted) {
+        Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+      }
+    } catch (e) {
+      print('Error during logout: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error signing out: $e')),
+        );
+      }
+    }
   }
 }
