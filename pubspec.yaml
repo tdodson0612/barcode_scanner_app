@@ -4,7 +4,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 # App version - increment for each App Store submission
 # Format: MAJOR.MINOR.PATCH+BUILD_NUMBER
-version: 1.0.3+23
+version: 1.0.3+24
 
 # Flutter SDK constraints
 environment:
@@ -50,6 +50,7 @@ dependencies:
   
   # Cloud storage
   amplify_storage_s3_dart: ^0.4.11
+  flutter_dotenv: ^6.0.0
 
 # Development dependencies
 dev_dependencies:
@@ -75,6 +76,7 @@ flutter:
   # Asset configuration
   assets:
     # New organized backgrounds
+    - .env
     - assets/backgrounds/splash_screen.png
     - assets/backgrounds/login_background.png
     - assets/backgrounds/home_background.png

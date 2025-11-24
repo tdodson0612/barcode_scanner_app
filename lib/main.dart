@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // ADD THIS LINE
 import 'config/app_config.dart';
 
 // Screens and Pages
@@ -23,6 +24,9 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
+    // Load environment variables FIRST
+    await dotenv.load(fileName: ".env"); // ADD THIS LINE
+
     // Initialize Supabase with timeout
     await Supabase.initialize(
       url: AppConfig.supabaseUrl,

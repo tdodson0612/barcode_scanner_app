@@ -1,4 +1,4 @@
-// lib/home_screen.dart - COMPLETE FILE with Cloudflare Worker integration
+// lib/home_screen.dart - COMPLETE FILE with AI Food Classifier
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -13,49 +13,14 @@ import '../controllers/premium_gate_controller.dart';
 import 'liverhealthbar.dart';
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
+import '../services/food_classifier_service.dart'; // ADD THIS LINE
 import '../models/favorite_recipe.dart';
 import '../pages/search_users_page.dart';
 import '../widgets/app_drawer.dart';
 import '../config/app_config.dart';
 import '../widgets/menu_icon_with_badge.dart';
 
-class IngredientKeywordExtractor {
-  static final List<String> _removeWords = [
-    'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds', 'kg', 'kilogram', 'kilograms',
-    'gram', 'grams', 'g', 'ml', 'milliliter', 'milliliters', 'liter', 'liters', 'l',
-    'gallon', 'gallons', 'quart', 'quarts', 'pint', 'pints', 'cup', 'cups', 'tbsp', 'tsp',
-    'tablespoon', 'tablespoons', 'teaspoon', 'teaspoons', 'fl', 'fluid',
-    'can', 'canned', 'jar', 'bottle', 'bottled', 'box', 'boxed', 'bag', 'bagged',
-    'pack', 'package', 'packaged', 'carton', 'container', 'pouch', 'tube', 'tin',
-    'organic', 'natural', 'fresh', 'frozen', 'dried', 'raw', 'cooked', 'prepared',
-    'whole', 'sliced', 'diced', 'chopped', 'minced', 'crushed', 'ground',
-    'reduced', 'low', 'high', 'fat', 'free', 'sodium', 'sugar', 'calorie', 'diet',
-    'light', 'lite', 'extra', 'pure', 'premium', 'grade', 'quality',
-    'red', 'green', 'yellow', 'white', 'black', 'brown',
-    'style', 'flavored', 'flavour', 'seasoned', 'unseasoned', 'salted', 'unsalted',
-    'sweetened', 'unsweetened', 'plain', 'original',
-    'peeled', 'unpeeled', 'pitted', 'unpitted', 'seeded', 'unseeded',
-    'bone-in', 'boneless', 'skin-on', 'skinless', 'roasted',
-  ];
-
-  static String extract(String productName) {
-    if (productName.trim().isEmpty) return productName;
-    String processed = productName.toLowerCase().trim();
-    processed = processed.replaceAll(RegExp(r'[^\w\s-]'), ' ');
-    processed = processed.replaceAll(RegExp(r'\b\d+\.?\d*\s*(oz|lb|g|kg|ml|l)?\b'), '');
-    processed = processed.replaceAll(RegExp(r'\d+'), '');
-    List<String> words = processed.split(RegExp(r'\s+'))
-        .where((word) => word.isNotEmpty)
-        .toList();
-    words = words.where((word) {
-      return !_removeWords.contains(word.toLowerCase());
-    }).toList();
-    if (words.isEmpty) {
-      return productName.trim();
-    }
-    return words.last;
-  }
-}
+// REMOVED: IngredientKeywordExtractor class (replaced by AI service)
 
 class NutritionInfo {
   final String productName;
@@ -146,38 +111,51 @@ class LiverHealthCalculator {
 }
 
 class RecipeGenerator {
+  // UPDATED: Now uses AI to extract food words
   static Future<List<Recipe>> generateSuggestionsFromProduct(String productName) async {
-    final keyword = IngredientKeywordExtractor.extract(productName);
-    AppConfig.debugPrint('Product: $productName -> Keyword: $keyword');
+    AppConfig.debugPrint('Product: $productName');
     
-    try {
-      final response = await http.post(
-        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'search_recipes',
-          'keyword': keyword,
-          'limit': 5,
-        }),
-      );
-
-      if (response.statusCode != 200) {
-        throw Exception('Worker query failed: ${response.body}');
-      }
-
-      final data = jsonDecode(response.body);
-      
-      final recipes = (data as List)
-          .map((json) => Recipe.fromJson(json))
-          .toList();
-      
-      AppConfig.debugPrint('Found ${recipes.length} recipes for keyword: $keyword');
-      
-      return recipes.isEmpty ? _getHealthyRecipes() : recipes;
-    } catch (e) {
-      AppConfig.debugPrint('Error fetching recipes from Worker: $e');
+    // NEW: Use AI-powered food word extraction
+    final foodWords = await FoodClassifierService.extractFoodWords(productName);
+    
+    if (foodWords.isEmpty) {
+      AppConfig.debugPrint('No food words found in: $productName');
       return _getHealthyRecipes();
     }
+    
+    AppConfig.debugPrint('Food words detected: $foodWords');
+    
+    // Try each food word until we find recipes
+    for (String foodWord in foodWords) {
+      try {
+        final response = await http.post(
+          Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'action': 'search_recipes',
+            'keyword': foodWord,
+            'limit': 5,
+          }),
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final recipes = (data as List)
+              .map((json) => Recipe.fromJson(json))
+              .toList();
+          
+          if (recipes.isNotEmpty) {
+            AppConfig.debugPrint('Found ${recipes.length} recipes for: $foodWord');
+            return recipes;
+          }
+        }
+      } catch (e) {
+        AppConfig.debugPrint('Error searching for "$foodWord": $e');
+      }
+    }
+    
+    AppConfig.debugPrint('No recipes found for food words: $foodWords');
+    return _getHealthyRecipes();
   }
 
   static List<Recipe> generateSuggestions(int liverHealthScore) {
@@ -332,7 +310,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     super.initState();
     _initializePremiumController();
     _initializeAsync();
-    // Precache background images
     _precacheImages();
   }
 
@@ -363,8 +340,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     _rewardedAd?.dispose();
     super.dispose();
   }
-
-  void _initializePremiumController() {
+void _initializePremiumController() {
     _premiumController = PremiumGateController();
     _premiumSubscription = _premiumController.addListener(() {
       if (mounted && !_isDisposed) {
@@ -769,8 +745,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       }
     }
   }
-
-  Future<void> _submitPhoto() async {
+Future<void> _submitPhoto() async {
     if (_imageFile == null || _isDisposed) return;
     try {
       final success = await _premiumController.useScan();
@@ -870,6 +845,123 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
           error: e,
           category: ErrorHandlingService.navigationError,
           customMessage: 'Error opening user search',
+        );
+      }
+    }
+  }
+
+  Future<void> _addNutritionToGroceryList() async {
+    if (_currentNutrition == null) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'No nutrition data available',
+        );
+      }
+      return;
+    }
+
+    try {
+      // Use AI to extract food words
+      final foodWords = await FoodClassifierService.extractFoodWords(_currentNutrition!.productName);
+      
+      if (foodWords.isEmpty) {
+        if (mounted) {
+          ErrorHandlingService.showSimpleError(
+            context,
+            'No food items found in "${_currentNutrition!.productName}"',
+          );
+        }
+        return;
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      List<String> list = prefs.getStringList('grocery_list') ?? [];
+
+      // Add all food words found
+      int addedCount = 0;
+      for (String foodWord in foodWords) {
+        if (!list.contains(foodWord)) {
+          list.add(foodWord);
+          addedCount++;
+        }
+      }
+
+      if (addedCount > 0) {
+        await prefs.setStringList('grocery_list', list);
+        
+        if (mounted) {
+          ErrorHandlingService.showSuccess(
+            context,
+            'Added $addedCount item(s) to grocery list: ${foodWords.join(", ")}',
+          );
+          Navigator.pushNamed(context, '/grocery-list');
+        }
+      } else {
+        if (mounted) {
+          ErrorHandlingService.showSuccess(
+            context,
+            'Items already in grocery list',
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.navigationError,
+          customMessage: 'Error adding to grocery list',
+        );
+      }
+    }
+  }
+
+  Future<void> _makeRecipeFromNutrition() async {
+    if (_currentNutrition == null) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'No nutrition data available',
+        );
+      }
+      return;
+    }
+
+    try {
+      final productName = _currentNutrition!.productName;
+      final foodWords = await FoodClassifierService.extractFoodWords(productName);
+      final keyword = foodWords.isNotEmpty ? foodWords.join(', ') : productName;
+
+      final recipeDraft = {
+        'initialIngredients': keyword,
+        'productName': productName,
+        'initialTitle': "$productName Recipe",
+        'initialDescription': "A recipe idea based on $productName.",
+      };
+
+      if (mounted) {
+        final result = await Navigator.pushNamed(
+          context,
+          '/submit-recipe',
+          arguments: recipeDraft,
+        );
+
+        if (result == true && mounted) {
+          ErrorHandlingService.showSuccess(
+            context,
+            'Recipe submitted successfully!',
+          );
+          _resetToHome();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.navigationError,
+          customMessage: 'Error opening recipe submission',
         );
       }
     }
@@ -1021,8 +1113,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       ),
     );
   }
-
-  Widget _buildNutritionRecipeCard(Recipe recipe) {
+Widget _buildNutritionRecipeCard(Recipe recipe) {
     final isFavorite = _isRecipeFavorited(recipe.title);
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1133,7 +1224,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
         Positioned.fill(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              // Detect if tablet/iPad (width > 600)
               final isTablet = constraints.maxWidth > 600;
               
               return Image.asset(
@@ -1342,6 +1432,26 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                       label: Text('Quick Scan Demo'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                    // ADD TEST BUTTON HERE FOR TESTING
+                    SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        print('🧪 Testing AI Food Classifier...');
+                        final foods = await FoodClassifierService.extractFoodWords('canned tomatoes');
+                        print('✅ Foods found: $foods');
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Test complete! Found: $foods')),
+                          );
+                        }
+                      },
+                      icon: Icon(Icons.science),
+                      label: Text('🧪 Test AI Food Detector'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.purple,
                         foregroundColor: Colors.white,
                       ),
                     ),
@@ -1702,107 +1812,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       ),
     );
   }
-
-  // NEW: Add these helper methods to the _HomePageState class:
-
-  Future<void> _addNutritionToGroceryList() async {
-    if (_currentNutrition == null) {
-      if (mounted) {
-        ErrorHandlingService.showSimpleError(
-          context,
-          'No nutrition data available',
-        );
-      }
-      return;
-    }
-
-    try {
-      final keyword = IngredientKeywordExtractor.extract(_currentNutrition!.productName);
-
-      // LOAD EXISTING GROCERY LIST
-      final prefs = await SharedPreferences.getInstance();
-      List<String> list = prefs.getStringList('grocery_list') ?? [];
-
-      // ADD ITEM IF NOT DUPLICATE
-      if (!list.contains(keyword)) {
-        list.add(keyword);
-        await prefs.setStringList('grocery_list', list);
-      }
-
-      if (mounted) {
-        ErrorHandlingService.showSuccess(
-          context,
-          '"$keyword" added to your grocery list!',
-        );
-
-        // NOW NAVIGATE
-        Navigator.pushNamed(context, '/grocery-list');
-      }
-
-    } catch (e) {
-      if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.navigationError,
-          customMessage: 'Error adding to grocery list',
-        );
-      }
-    }
-  }
-
-
-  Future<void> _makeRecipeFromNutrition() async {
-    if (_currentNutrition == null) {
-      if (mounted) {
-        ErrorHandlingService.showSimpleError(
-          context,
-          'No nutrition data available',
-        );
-      }
-      return;
-    }
-
-    try {
-      final productName = _currentNutrition!.productName;
-      final keyword = IngredientKeywordExtractor.extract(productName);
-
-      // Build initial recipe draft
-      final recipeDraft = {
-        'initialIngredients': keyword,
-        'productName': productName,
-        'initialTitle': "$productName Recipe",
-        'initialDescription': "A recipe idea based on $productName.",
-      };
-
-      if (mounted) {
-        final result = await Navigator.pushNamed(
-          context,
-          '/submit-recipe',
-          arguments: recipeDraft,
-        );
-
-        if (result == true && mounted) {
-          ErrorHandlingService.showSuccess(
-            context,
-            'Recipe submitted successfully!',
-          );
-          _resetToHome();
-        }
-      }
-
-    } catch (e) {
-      if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.navigationError,
-          customMessage: 'Error opening recipe submission',
-        );
-      }
-    }
-  }
-
 
   @override
   Widget build(BuildContext context) {
