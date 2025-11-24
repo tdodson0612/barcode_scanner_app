@@ -1557,38 +1557,73 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                 ),
               ),
             const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                ElevatedButton.icon(
-                  onPressed: _takePhoto,
-                  icon: const Icon(Icons.camera_alt),
-                  label: const Text('Retake'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-                if (_imageFile != null && !_isLoading)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
                   ElevatedButton.icon(
-                    onPressed: _submitPhoto,
-                    icon: const Icon(Icons.send),
-                    label: const Text('Analyze'),
+                    onPressed: _takePhoto,
+                    icon: const Icon(Icons.camera_alt, size: 18),
+                    label: const Text('Retake', style: TextStyle(fontSize: 12)),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
+                      backgroundColor: Colors.blue,
                       foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                     ),
                   ),
-                ElevatedButton.icon(
-                  onPressed: _resetToHome,
-                  icon: const Icon(Icons.home),
-                  label: const Text('Home'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                    foregroundColor: Colors.white,
+                  const SizedBox(width: 8),
+                  if (_imageFile != null && !_isLoading)
+                    ElevatedButton.icon(
+                      onPressed: _submitPhoto,
+                      icon: const Icon(Icons.send, size: 18),
+                      label: const Text('Analyze', style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                      ),
+                    ),
+                  if (_imageFile != null && !_isLoading)
+                    const SizedBox(width: 8),
+                  if (_nutritionText.isNotEmpty)
+                    ElevatedButton.icon(
+                      onPressed: _addNutritionToGroceryList,
+                      icon: const Icon(Icons.add_shopping_cart, size: 18),
+                      label: const Text('+ Grocery List +', style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.purple,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                      ),
+                    ),
+                  if (_nutritionText.isNotEmpty)
+                    const SizedBox(width: 8),
+                  if (_nutritionText.isNotEmpty)
+                    ElevatedButton.icon(
+                      onPressed: _makeRecipeFromNutrition,
+                      icon: const Icon(Icons.restaurant_menu, size: 18),
+                      label: const Text('+ Recipe +', style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                      ),
+                    ),
+                  if (_nutritionText.isNotEmpty)
+                    const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    onPressed: _resetToHome,
+                    icon: const Icon(Icons.home, size: 18),
+                    label: const Text('Home', style: TextStyle(fontSize: 12)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 20),
             if (_isLoading)
@@ -1668,10 +1703,112 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     );
   }
 
+  // NEW: Add these helper methods to the _HomePageState class:
+
+  Future<void> _addNutritionToGroceryList() async {
+    if (_currentNutrition == null) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'No nutrition data available',
+        );
+      }
+      return;
+    }
+
+    try {
+      final keyword = IngredientKeywordExtractor.extract(_currentNutrition!.productName);
+
+      // LOAD EXISTING GROCERY LIST
+      final prefs = await SharedPreferences.getInstance();
+      List<String> list = prefs.getStringList('grocery_list') ?? [];
+
+      // ADD ITEM IF NOT DUPLICATE
+      if (!list.contains(keyword)) {
+        list.add(keyword);
+        await prefs.setStringList('grocery_list', list);
+      }
+
+      if (mounted) {
+        ErrorHandlingService.showSuccess(
+          context,
+          '"$keyword" added to your grocery list!',
+        );
+
+        // NOW NAVIGATE
+        Navigator.pushNamed(context, '/grocery-list');
+      }
+
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.navigationError,
+          customMessage: 'Error adding to grocery list',
+        );
+      }
+    }
+  }
+
+
+  Future<void> _makeRecipeFromNutrition() async {
+    if (_currentNutrition == null) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'No nutrition data available',
+        );
+      }
+      return;
+    }
+
+    try {
+      final productName = _currentNutrition!.productName;
+      final keyword = IngredientKeywordExtractor.extract(productName);
+
+      // Build initial recipe draft
+      final recipeDraft = {
+        'initialIngredients': keyword,
+        'productName': productName,
+        'initialTitle': "$productName Recipe",
+        'initialDescription': "A recipe idea based on $productName.",
+      };
+
+      if (mounted) {
+        final result = await Navigator.pushNamed(
+          context,
+          '/submit-recipe',
+          arguments: recipeDraft,
+        );
+
+        if (result == true && mounted) {
+          ErrorHandlingService.showSuccess(
+            context,
+            'Recipe submitted successfully!',
+          );
+          _resetToHome();
+        }
+      }
+
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.navigationError,
+          customMessage: 'Error opening recipe submission',
+        );
+      }
+    }
+  }
+
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
     return Scaffold(
+      drawerEnableOpenDragGesture: false,
       appBar: AppBar(
         leading: Builder(
           builder: (context) => IconButton(
