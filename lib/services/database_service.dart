@@ -1794,18 +1794,26 @@ Shared from Recipe Scanner App
 
   static Future<void> removeFriend(String friendId) async {
     ensureUserAuthenticated();
-    
+
     try {
+      // Fetch ALL friend requests (Worker cannot do OR filters)
       final allRequests = await _workerQuery(
         action: 'select',
         table: 'friend_requests',
         columns: ['id', 'sender', 'receiver', 'status'],
-        filters: {'status': 'accepted'},
       );
-      
+
+      // Filter in Dart only
       for (var row in allRequests as List) {
-        if ((row['sender'] == currentUserId && row['receiver'] == friendId) ||
-            (row['sender'] == friendId && row['receiver'] == currentUserId)) {
+        final sender = row['sender'];
+        final receiver = row['receiver'];
+        final status = row['status'];
+
+        // Only delete THIS specific friendship
+        if (status == 'accepted' &&
+            ((sender == currentUserId && receiver == friendId) ||
+            (sender == friendId && receiver == currentUserId))) {
+
           await _workerQuery(
             action: 'delete',
             table: 'friend_requests',
@@ -1813,12 +1821,13 @@ Shared from Recipe Scanner App
           );
         }
       }
-      
+
       await _clearCache('$_CACHE_FRIENDS$currentUserId');
     } catch (e) {
       throw Exception('Failed to remove friend: $e');
     }
   }
+
 
   static Future<Map<String, dynamic>> checkFriendshipStatus(String userId) async {
     ensureUserAuthenticated();
