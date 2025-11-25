@@ -15,6 +15,32 @@ class AuthService {
   static bool get isLoggedIn => _supabase.auth.currentUser != null;
   static User? get currentUser => _supabase.auth.currentUser;
   static String? get currentUserId => currentUser?.id;
+  
+  // ADD: Get username from user metadata or fetch from database
+  static String? get currentUsername {
+    // Try to get from user metadata first
+    final username = currentUser?.userMetadata?['username'] as String?;
+    if (username != null) return username;
+    
+    // If not in metadata, it needs to be fetched from database
+    // This is a synchronous getter, so we can't do async operations here
+    // The calling code will need to fetch it if null
+    return null;
+  }
+  
+  // ADD: Async method to fetch username from database if needed
+  static Future<String?> fetchCurrentUsername() async {
+    if (currentUserId == null) return null;
+    
+    try {
+      final profile = await DatabaseService.getUserProfile(currentUserId!);
+      return profile?['username'] as String?;
+    } catch (e) {
+      print('Error fetching username: $e');
+      return null;
+    }
+  }
+
   static Stream<AuthState> get authStateChanges => _supabase.auth.onAuthStateChange;
 
   static bool _isDefaultPremiumEmail(String email) {
@@ -36,7 +62,7 @@ class AuthService {
       if (response.user != null) {
         final normalizedEmail = email.trim().toLowerCase();
         final isPremium = _isDefaultPremiumEmail(normalizedEmail);
-        
+
         // Create profile via Worker (database operation)
         await DatabaseService.createUserProfile(
           response.user!.id,
@@ -113,7 +139,7 @@ class AuthService {
     if (currentUserId == null) {
       throw Exception('No user logged in');
     }
-    
+
     try {
       await _supabase.auth.updateUser(
         UserAttributes(password: newPassword),
@@ -128,7 +154,7 @@ class AuthService {
     if (currentUser?.email == null) {
       throw Exception('No user email found');
     }
-    
+
     try {
       await _supabase.auth.resend(
         type: OtpType.signup,

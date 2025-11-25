@@ -1,4 +1,4 @@
-// lib/home_screen.dart - COMPLETE FILE with AI Food Classifier
+// lib/home_screen.dart - PART 1 OF 3
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -13,14 +13,12 @@ import '../controllers/premium_gate_controller.dart';
 import 'liverhealthbar.dart';
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
-import '../services/food_classifier_service.dart'; // ADD THIS LINE
+import '../services/food_classifier_service.dart';
 import '../models/favorite_recipe.dart';
 import '../pages/search_users_page.dart';
 import '../widgets/app_drawer.dart';
 import '../config/app_config.dart';
 import '../widgets/menu_icon_with_badge.dart';
-
-// REMOVED: IngredientKeywordExtractor class (replaced by AI service)
 
 class NutritionInfo {
   final String productName;
@@ -77,10 +75,12 @@ class Recipe {
   };
 
   factory Recipe.fromJson(Map<String, dynamic> json) => Recipe(
-    title: json['title'] ?? '',
+    title: json['title'] ?? json['name'] ?? '',
     description: json['description'] ?? '',
-    ingredients: List<String>.from(json['ingredients'] ?? []),
-    instructions: json['instructions'] ?? '',
+    ingredients: json['ingredients'] is String 
+        ? (json['ingredients'] as String).split(',').map((e) => e.trim()).toList()
+        : List<String>.from(json['ingredients'] ?? []),
+    instructions: json['instructions'] ?? json['directions'] ?? '',
   );
 }
 
@@ -111,23 +111,25 @@ class LiverHealthCalculator {
 }
 
 class RecipeGenerator {
-  // UPDATED: Now uses AI to extract food words
+  // UPDATED: Now uses AI to extract food words with enhanced debug logging
   static Future<List<Recipe>> generateSuggestionsFromProduct(String productName) async {
-    AppConfig.debugPrint('Product: $productName');
+    AppConfig.debugPrint('🔍 Product: $productName');
     
-    // NEW: Use AI-powered food word extraction
+    // Use AI-powered food word extraction
     final foodWords = await FoodClassifierService.extractFoodWords(productName);
     
     if (foodWords.isEmpty) {
-      AppConfig.debugPrint('No food words found in: $productName');
+      AppConfig.debugPrint('❌ No food words found in: $productName');
       return _getHealthyRecipes();
     }
     
-    AppConfig.debugPrint('Food words detected: $foodWords');
+    AppConfig.debugPrint('✅ Food words detected: $foodWords');
     
     // Try each food word until we find recipes
     for (String foodWord in foodWords) {
       try {
+        AppConfig.debugPrint('🔍 Searching for recipes with: $foodWord');
+        
         final response = await http.post(
           Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
           headers: {'Content-Type': 'application/json'},
@@ -138,23 +140,33 @@ class RecipeGenerator {
           }),
         );
 
+        AppConfig.debugPrint('📡 Response status: ${response.statusCode}');
+        AppConfig.debugPrint('📡 Response body: ${response.body}');
+
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
+          AppConfig.debugPrint('📊 Decoded data type: ${data.runtimeType}');
+          AppConfig.debugPrint('📊 Decoded data: $data');
+          
           final recipes = (data as List)
               .map((json) => Recipe.fromJson(json))
               .toList();
           
           if (recipes.isNotEmpty) {
-            AppConfig.debugPrint('Found ${recipes.length} recipes for: $foodWord');
+            AppConfig.debugPrint('✅ Found ${recipes.length} recipes for: $foodWord');
             return recipes;
+          } else {
+            AppConfig.debugPrint('⚠️ No recipes in response for: $foodWord');
           }
+        } else {
+          AppConfig.debugPrint('❌ Non-200 status for "$foodWord": ${response.statusCode}');
         }
       } catch (e) {
-        AppConfig.debugPrint('Error searching for "$foodWord": $e');
+        AppConfig.debugPrint('❌ Error searching for "$foodWord": $e');
       }
     }
     
-    AppConfig.debugPrint('No recipes found for food words: $foodWords');
+    AppConfig.debugPrint('⚠️ No recipes found for any food words: $foodWords - showing fallback recipes');
     return _getHealthyRecipes();
   }
 
@@ -340,7 +352,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     _rewardedAd?.dispose();
     super.dispose();
   }
-void _initializePremiumController() {
+
+  void _initializePremiumController() {
     _premiumController = PremiumGateController();
     _premiumSubscription = _premiumController.addListener(() {
       if (mounted && !_isDisposed) {
@@ -458,6 +471,7 @@ void _initializePremiumController() {
     _isAdReady = false;
   }
 
+
   void _showRewardedAd() {
     if (_isDisposed) return;
     if (_isRewardedAdReady && _rewardedAd != null) {
@@ -540,47 +554,123 @@ void _initializePremiumController() {
 
   Future<void> _toggleFavoriteRecipe(Recipe recipe) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
       final currentUserId = AuthService.currentUserId;
-      if (currentUserId == null) {
+      final currentUsername = await AuthService.fetchCurrentUsername();      
+      if (currentUserId == null || currentUsername == null) {
         if (mounted) {
           ErrorHandlingService.showSimpleError(context, 'Please log in to save recipes');
         }
         return;
       }
-      final existingIndex = _favoriteRecipes.indexWhere((fav) => fav.recipeName == recipe.title);
-      if (existingIndex >= 0) {
-        if (mounted && !_isDisposed) {
-          setState(() {
-            _favoriteRecipes.removeAt(existingIndex);
-          });
-          ErrorHandlingService.showSuccess(
-            context,
-            'Removed "${recipe.title}" from favorites'
+
+      // First, search for the recipe in the database to get its ID
+      final searchResponse = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'select',
+          'table': 'recipes',
+          'filters': {'title': recipe.title},
+          'limit': 1,
+        }),
+      );
+
+      if (searchResponse.statusCode != 200) {
+        throw Exception('Failed to find recipe in database');
+      }
+
+      final recipes = jsonDecode(searchResponse.body) as List;
+      if (recipes.isEmpty) {
+        if (mounted) {
+          ErrorHandlingService.showSimpleError(
+            context, 
+            'This recipe must be in the database first. Please submit it!'
           );
+        }
+        return;
+      }
+
+      final recipeId = recipes[0]['id'];
+
+      // Check if already favorited
+      final checkResponse = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'select',
+          'table': 'favorite_recipes',
+          'filters': {
+            'user_id': currentUserId,
+            'recipe_id': recipeId,
+          },
+        }),
+      );
+
+      final existingFavorites = jsonDecode(checkResponse.body) as List;
+
+      if (existingFavorites.isNotEmpty) {
+        // Remove from favorites
+        final deleteResponse = await http.post(
+          Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'action': 'delete',
+            'table': 'favorite_recipes',
+            'filters': {'id': existingFavorites[0]['id']},
+          }),
+        );
+
+        if (deleteResponse.statusCode == 200) {
+          if (mounted) {
+            // Update local state
+            setState(() {
+              _favoriteRecipes.removeWhere((fav) => fav.recipeName == recipe.title);
+            });
+            
+            ErrorHandlingService.showSuccess(
+              context,
+              'Removed "${recipe.title}" from favorites'
+            );
+          }
         }
       } else {
-        final favoriteRecipe = FavoriteRecipe(
-          userId: currentUserId,
-          recipeName: recipe.title,
-          ingredients: recipe.ingredients.join(', '),
-          directions: recipe.instructions,
-          createdAt: DateTime.now(),
+        // Add to favorites
+        final insertResponse = await http.post(
+          Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'action': 'insert',
+            'table': 'favorite_recipes',
+            'data': {
+              'user_id': currentUserId,
+              'recipe_id': recipeId,
+              'username': currentUsername,
+            },
+          }),
         );
-        if (mounted && !_isDisposed) {
-          setState(() {
-            _favoriteRecipes.add(favoriteRecipe);
-          });
-          ErrorHandlingService.showSuccess(
-            context,
-            'Added "${recipe.title}" to favorites!'
-          );
+
+        if (insertResponse.statusCode == 200 || insertResponse.statusCode == 201) {
+          if (mounted) {
+            // Update local state
+            final favoriteRecipe = FavoriteRecipe(
+              userId: currentUserId,
+              recipeName: recipe.title,
+              ingredients: recipe.ingredients.join(', '),
+              directions: recipe.instructions,
+              createdAt: DateTime.now(),
+            );
+            
+            setState(() {
+              _favoriteRecipes.add(favoriteRecipe);
+            });
+            
+            ErrorHandlingService.showSuccess(
+              context,
+              'Added "${recipe.title}" to favorites!'
+            );
+          }
         }
       }
-      final favoriteRecipesJson = _favoriteRecipes
-          .map((recipe) => json.encode(recipe.toJson()))
-          .toList();
-      await prefs.setStringList('favorite_recipes_detailed', favoriteRecipesJson);
     } catch (e) {
       if (mounted) {
         await ErrorHandlingService.handleError(
@@ -745,7 +835,8 @@ void _initializePremiumController() {
       }
     }
   }
-Future<void> _submitPhoto() async {
+
+  Future<void> _submitPhoto() async {
     if (_imageFile == null || _isDisposed) return;
     try {
       final success = await _premiumController.useScan();
@@ -1113,7 +1204,10 @@ Future<void> _submitPhoto() async {
       ),
     );
   }
-Widget _buildNutritionRecipeCard(Recipe recipe) {
+// lib/home_screen.dart - PART 3 OF 3 (FINAL)
+// This continues from Part 2 - starts at line 1001
+
+  Widget _buildNutritionRecipeCard(Recipe recipe) {
     final isFavorite = _isRecipeFavorited(recipe.title);
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1435,7 +1529,7 @@ Widget _buildNutritionRecipeCard(Recipe recipe) {
                         foregroundColor: Colors.white,
                       ),
                     ),
-                    // ADD TEST BUTTON HERE FOR TESTING
+                    // TEST BUTTON - For testing AI Food Classifier
                     SizedBox(height: 12),
                     ElevatedButton.icon(
                       onPressed: () async {
