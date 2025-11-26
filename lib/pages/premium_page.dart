@@ -41,8 +41,8 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   static const String testerKey = '82125';
 
   // Product IDs
-  static const String premiumProductId = 'premium_upgrade';
-  static const String testerProductId = 'tester_upgrade';
+  static const String premiumProductId = '11.111.0000';
+  static const String testerProductId = 'Tester_Account';
   static const Set<String> _productIds = {premiumProductId, testerProductId};
 
   // Cache keys and expiration times
