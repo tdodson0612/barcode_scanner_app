@@ -2468,4 +2468,82 @@ Shared from Recipe Scanner App
       throw Exception('Failed to rate recipe: $e');
     }
   }
+
+
+  static Future<void> deleteAccountCompletely() async {
+    ensureUserAuthenticated();
+    final userId = currentUserId!;
+    
+    try {
+      // 1) Get profile to extract picture URLs
+      final profile = await getUserProfile(userId);
+      final picturesJson = profile?['pictures'];
+      if (picturesJson != null && picturesJson.isNotEmpty) {
+        final pictures = List<String>.from(jsonDecode(picturesJson));
+        
+        // Remove all pictures from R2
+        for (final url in pictures) {
+          try {
+            await deletePicture(url);
+          } catch (_) {}
+        }
+      }
+
+      // 2) Delete favorite recipes
+      await _workerQuery(
+        action: 'delete',
+        table: 'favorite_recipes',
+        filters: {'user_id': userId},
+      );
+
+      // 3) Delete submitted recipes
+      await _workerQuery(
+        action: 'delete',
+        table: 'submitted_recipes',
+        filters: {'user_id': userId},
+      );
+
+      // 4) Delete friend links
+      final allRequests = await _workerQuery(
+        action: 'select',
+        table: 'friend_requests',
+        columns: ['id', 'sender', 'receiver'],
+      );
+
+      for (final row in allRequests as List) {
+        if (row['sender'] == userId || row['receiver'] == userId) {
+          await _workerQuery(
+            action: 'delete',
+            table: 'friend_requests',
+            filters: {'id': row['id']},
+          );
+        }
+      }
+
+      // 5) Delete messages
+      await _workerQuery(
+        action: 'delete',
+        table: 'messages',
+        filters: {'sender': userId},
+      );
+      await _workerQuery(
+        action: 'delete',
+        table: 'messages',
+        filters: {'receiver': userId},
+      );
+
+      // 6) Delete the user profile row
+      await _workerQuery(
+        action: 'delete',
+        table: 'user_profiles',
+        filters: {'id': userId},
+      );
+
+      // 7) Delete Supabase auth user
+      await Supabase.instance.client.auth.admin.deleteUser(userId);
+
+    } catch (e) {
+      throw Exception("Failed to delete account: $e");
+    }
+  }
 }

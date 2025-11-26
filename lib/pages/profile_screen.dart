@@ -471,7 +471,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
-
   Future<void> _deletePicture(String pictureUrl) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -772,6 +771,71 @@ class _ProfileScreenState extends State<ProfileScreen>
           customMessage: 'Unable to update privacy setting',
           onRetry: () => _toggleFriendsVisibility(isVisible),
         );
+      }
+    }
+  }
+
+  // 🔴 DELETE ACCOUNT: confirmation + call to DB + sign out
+  Future<void> _confirmDeleteAccount() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Account'),
+        content: const Text(
+          'This action is permanent and cannot be undone.\n\n'
+          'All your recipes, pictures, friends, and account data will be permanently deleted.\n\n'
+          'Are you sure you want to continue?'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // You should implement this in DatabaseService as discussed:
+      // Future<void> deleteAccountCompletely()
+      await DatabaseService.deleteAccountCompletely();
+
+      await AuthService.signOut();
+
+      if (!mounted) return;
+
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        '/login',
+        (route) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      await ErrorHandlingService.handleError(
+        context: context,
+        error: e,
+        category: ErrorHandlingService.databaseError,
+        customMessage: 'Unable to delete account',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
@@ -2145,6 +2209,46 @@ class _ProfileScreenState extends State<ProfileScreen>
                           ],
                         ],
                       ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // DANGER ZONE: Delete account
+                  _sectionContainer(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Danger Zone',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Permanently delete your account and all associated data. This action cannot be undone.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _isLoading ? null : _confirmDeleteAccount,
+                            icon: const Icon(Icons.delete_forever),
+                            label: const Text('Delete My Account'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                              side: const BorderSide(color: Colors.red),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
 
