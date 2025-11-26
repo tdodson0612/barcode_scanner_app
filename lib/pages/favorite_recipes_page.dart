@@ -1,10 +1,14 @@
-// lib/pages/favorite_recipes_page.dart - OPTIMIZED: Better caching with timestamp validation
+// lib/pages/favorite_recipes_page.dart - PART 1 OF 2
+// UPDATED: Uses Cloudflare Worker for database queries
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../models/favorite_recipe.dart';
 import '../widgets/app_drawer.dart';
 import '../services/error_handling_service.dart';
-import 'dart:convert';
+import '../services/auth_service.dart';
+import '../config/app_config.dart';
 
 class FavoriteRecipesPage extends StatefulWidget {
   final List<FavoriteRecipe> favoriteRecipes;
@@ -139,12 +143,21 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
-  // ========== LOAD FUNCTION WITH CACHING ==========
+  // ========== LOAD FROM DATABASE VIA CLOUDFLARE WORKER ==========
 
   Future<void> _loadFavoriteRecipes({bool forceRefresh = false}) async {
     try {
       setState(() => _isLoading = true);
       
+      final currentUserId = AuthService.currentUserId;
+      if (currentUserId == null) {
+        if (mounted) {
+          setState(() => _isLoading = false);
+          ErrorHandlingService.showSimpleError(context, 'Please log in to view favorites');
+        }
+        return;
+      }
+
       // Try cache first unless force refresh
       if (!forceRefresh) {
         final cachedRecipes = await _getCachedFavorites();
@@ -160,35 +173,49 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         }
       }
 
-      // Cache miss or force refresh - load from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
-      
-      final recipes = favoriteRecipesJson
-          .map((jsonString) {
-            try {
-              return FavoriteRecipe.fromJson(json.decode(jsonString));
-            } catch (e) {
-              return null;
-            }
-          })
-          .where((recipe) => recipe != null)
-          .cast<FavoriteRecipe>()
-          .toList();
-      
-      // Cache the loaded recipes
-      await _cacheFavorites(recipes);
-      
-      if (mounted) {
-        setState(() {
-          _favoriteRecipes = recipes;
-          _isLoading = false;
-        });
+      // ✅ LOAD FROM DATABASE VIA CLOUDFLARE WORKER (avoids Supabase egress cache)
+      final response = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'select',
+          'table': 'favorite_recipes_with_details',
+          'filters': {'user_id': currentUserId},
+          'orderBy': 'created_at',
+          'ascending': false,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as List;
+       
+        if (mounted) {
+          final recipes = data.map((json) {
+            return FavoriteRecipe(
+              userId: json['user_id'] ?? '',
+              recipeName: json['title'] ?? '',
+              ingredients: json['ingredients'] ?? '',
+              directions: json['directions'] ?? '',
+              createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
+            );
+          }).toList();
+
+          setState(() {
+            _favoriteRecipes = recipes;
+            _isLoading = false;
+          });
+
+          // ✅ CACHE THE LOADED RECIPES
+          await _cacheFavorites(recipes);
+          print('✅ Loaded ${recipes.length} favorites from database');
+        }
+      } else {
+        throw Exception('Failed to load favorites: ${response.statusCode}');
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        
+       
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -201,21 +228,60 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
+  // ========== REMOVE FROM DATABASE VIA CLOUDFLARE WORKER ==========
+
   Future<void> _removeFavoriteRecipe(FavoriteRecipe recipe) async {
     try {
-      // Store removed recipe for undo functionality
+      final currentUserId = AuthService.currentUserId;
+      if (currentUserId == null) return;
+
+      // Find the favorite record to delete via Cloudflare Worker
+      final searchResponse = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'select',
+          'table': 'favorite_recipes_with_details',
+          'filters': {
+            'user_id': currentUserId,
+            'title': recipe.recipeName,
+          },
+        }),
+      );
+
+      final favorites = jsonDecode(searchResponse.body) as List;
+      if (favorites.isEmpty) {
+        if (mounted) {
+          ErrorHandlingService.showSimpleError(context, 'Recipe not found in favorites');
+        }
+        return;
+      }
+
+      final favoriteId = favorites[0]['id'];
+     
+      // Store for undo
       final removedRecipe = recipe;
       final removedIndex = _favoriteRecipes.indexOf(recipe);
-      
+     
       setState(() {
         _favoriteRecipes.remove(recipe);
       });
-      
-      // Invalidate cache and save updated list
+
+      // Invalidate cache
       await _invalidateFavoritesCache();
-      await _cacheFavorites(_favoriteRecipes);
       
-      if (mounted) {
+      // Delete from database via Cloudflare Worker
+      final deleteResponse = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'delete',
+          'table': 'favorite_recipes',
+          'filters': {'id': favoriteId},
+        }),
+      );
+
+      if (deleteResponse.statusCode == 200 && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Removed "${recipe.recipeName}" from favorites'),
@@ -241,18 +307,72 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
+  // ========== UNDO REMOVE (RE-ADD TO DATABASE VIA CLOUDFLARE WORKER) ==========
+
   Future<void> _undoRemoveFavorite(FavoriteRecipe recipe, int index) async {
     try {
-      setState(() {
-        _favoriteRecipes.insert(index, recipe);
-      });
-      
-      // Invalidate cache and save updated list
-      await _invalidateFavoritesCache();
-      await _cacheFavorites(_favoriteRecipes);
-      
-      if (mounted) {
-        ErrorHandlingService.showSuccess(context, 'Recipe restored to favorites');
+      final currentUserId = AuthService.currentUserId;
+      final currentUsername = await AuthService.fetchCurrentUsername();
+     
+      if (currentUserId == null || currentUsername == null) {
+        if (mounted) {
+          ErrorHandlingService.showSimpleError(context, 'Unable to restore: User not found');
+        }
+        return;
+      }
+
+      // Find the recipe ID via Cloudflare Worker
+      final searchResponse = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'select',
+          'table': 'recipes',
+          'filters': {'title': recipe.recipeName},
+          'limit': 1,
+        }),
+      );
+
+      final recipes = jsonDecode(searchResponse.body) as List;
+      if (recipes.isEmpty) {
+        if (mounted) {
+          ErrorHandlingService.showSimpleError(context, 'Recipe not found in database');
+        }
+        return;
+      }
+
+      final recipeId = recipes[0]['id'];
+
+      // Re-add to database via Cloudflare Worker
+      final readdResponse = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'insert',
+          'table': 'favorite_recipes',
+          'data': {
+            'user_id': currentUserId,
+            'recipe_id': recipeId,
+            'username': currentUsername,
+            'title': recipe.recipeName,
+            'description': '',
+            'ingredients': recipe.ingredients,
+            'directions': recipe.directions,
+          },
+        }),
+      );
+
+      if (readdResponse.statusCode == 200 || readdResponse.statusCode == 201) {
+        // Invalidate cache
+        await _invalidateFavoritesCache();
+
+        setState(() {
+          _favoriteRecipes.insert(index, recipe);
+        });
+       
+        if (mounted) {
+          ErrorHandlingService.showSuccess(context, 'Recipe restored to favorites');
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -366,7 +486,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     );
   }
 
-  @override
+@override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(

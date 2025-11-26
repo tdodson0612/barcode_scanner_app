@@ -19,6 +19,7 @@ import '../pages/search_users_page.dart';
 import '../widgets/app_drawer.dart';
 import '../config/app_config.dart';
 import '../widgets/menu_icon_with_badge.dart';
+import '../services/database_service.dart';
 
 class NutritionInfo {
   final String productName;
@@ -375,6 +376,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     try {
       await _premiumController.refresh();
       await _loadFavoriteRecipes();
+      // ✅ SYNC FAVORITES FROM DATABASE TO LOCAL CACHE
+      await _syncFavoritesFromDatabase();
       _loadInterstitialAd();
       _loadRewardedAd();
     } catch (e) {
@@ -387,6 +390,55 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
           customMessage: 'Failed to initialize home screen',
         );
       }
+    }
+  }
+
+  /// ✅ SYNC FAVORITES FROM DATABASE TO LOCAL CACHE
+  Future<void> _syncFavoritesFromDatabase() async {
+    try {
+      final currentUserId = AuthService.currentUserId;
+      if (currentUserId == null) return;
+
+      // Fetch all favorites from database for current user
+      final response = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'select',
+          'table': 'favorite_recipes_with_details',
+          'filters': {'user_id': currentUserId},
+          'orderBy': 'created_at',
+          'ascending': false,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as List;
+        
+        // Convert database records to FavoriteRecipe objects
+        final favoriteRecipes = data.map((json) {
+          return FavoriteRecipe(
+            userId: json['user_id'] ?? '',
+            recipeName: json['title'] ?? '',
+            ingredients: json['ingredients'] ?? '',
+            directions: json['directions'] ?? '',
+            createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
+          );
+        }).toList();
+
+        // Update state
+        if (mounted && !_isDisposed) {
+          setState(() {
+            _favoriteRecipes = favoriteRecipes;
+          });
+        }
+
+        // ✅ SAVE TO LOCAL CACHE
+        await _saveFavoritesToLocalCache(favoriteRecipes);
+        print('✅ Synced ${favoriteRecipes.length} favorites from database');
+      }
+    } catch (e) {
+      print('⚠️ Error syncing favorites from database: $e');
     }
   }
 
@@ -552,6 +604,20 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     }
   }
 
+  /// ✅ Saves favorite recipes to SharedPreferences for offline access
+  Future<void> _saveFavoritesToLocalCache(List<FavoriteRecipe> favorites) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final favoriteRecipesJson = favorites
+          .map((recipe) => jsonEncode(recipe.toJson()))
+          .toList();
+      await prefs.setStringList('favorite_recipes_detailed', favoriteRecipesJson);
+      print('✅ Synced ${favorites.length} favorites to local cache');
+    } catch (e) {
+      print('⚠️ Error saving favorites to local cache: $e');
+    }
+  }
+
   Future<void> _toggleFavoriteRecipe(Recipe recipe) async {
     try {
       final currentUserId = AuthService.currentUserId;
@@ -627,6 +693,9 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
               _favoriteRecipes.removeWhere((fav) => fav.recipeName == recipe.title);
             });
             
+            // ✅ SYNC TO LOCAL CACHE
+            await _saveFavoritesToLocalCache(_favoriteRecipes);
+            
             ErrorHandlingService.showSuccess(
               context,
               'Removed "${recipe.title}" from favorites'
@@ -634,7 +703,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
           }
         }
       } else {
-        // Add to favorites
+        // Add to favorites WITH ALL RECIPE DETAILS
         final insertResponse = await http.post(
           Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
           headers: {'Content-Type': 'application/json'},
@@ -645,13 +714,18 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
               'user_id': currentUserId,
               'recipe_id': recipeId,
               'username': currentUsername,
+              // ✅ ADD ALL THE DETAIL COLUMNS
+              'title': recipe.title,
+              'description': recipe.description,
+              'ingredients': recipe.ingredients.join(', '),
+              'directions': recipe.instructions,
             },
           }),
         );
 
         if (insertResponse.statusCode == 200 || insertResponse.statusCode == 201) {
           if (mounted) {
-            // Update local state
+            // Create FavoriteRecipe object WITH FULL DETAILS
             final favoriteRecipe = FavoriteRecipe(
               userId: currentUserId,
               recipeName: recipe.title,
@@ -663,6 +737,9 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
             setState(() {
               _favoriteRecipes.add(favoriteRecipe);
             });
+            
+            // ✅ SYNC TO LOCAL CACHE
+            await _saveFavoritesToLocalCache(_favoriteRecipes);
             
             ErrorHandlingService.showSuccess(
               context,
@@ -966,35 +1043,19 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
         return;
       }
 
-      final prefs = await SharedPreferences.getInstance();
-      List<String> list = prefs.getStringList('grocery_list') ?? [];
-
-      // Add all food words found
+      // ✅ USE addToGroceryList (appends without deleting)
       int addedCount = 0;
       for (String foodWord in foodWords) {
-        if (!list.contains(foodWord)) {
-          list.add(foodWord);
-          addedCount++;
-        }
+        await DatabaseService.addToGroceryList(foodWord);
+        addedCount++;
       }
 
-      if (addedCount > 0) {
-        await prefs.setStringList('grocery_list', list);
-        
-        if (mounted) {
-          ErrorHandlingService.showSuccess(
-            context,
-            'Added $addedCount item(s) to grocery list: ${foodWords.join(", ")}',
-          );
-          Navigator.pushNamed(context, '/grocery-list');
-        }
-      } else {
-        if (mounted) {
-          ErrorHandlingService.showSuccess(
-            context,
-            'Items already in grocery list',
-          );
-        }
+      if (mounted) {
+        ErrorHandlingService.showSuccess(
+          context,
+          'Added $addedCount item(s) to grocery list: ${foodWords.join(", ")}',
+        );
+        Navigator.pushNamed(context, '/grocery-list');
       }
     } catch (e) {
       if (mounted) {
@@ -1005,6 +1066,58 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
           customMessage: 'Error adding to grocery list',
         );
       }
+    }
+  }
+
+  Future<void> _addRecipeIngredientsToGroceryList(dynamic recipe) async {
+    try {
+      List<String> ingredients = [];
+
+      if (recipe is Recipe) {
+        // From AI / Nutrition suggestions
+        ingredients = recipe.ingredients;
+      } 
+      else if (recipe is Map<String, String>) {
+        // From scanned quick recipes
+        ingredients = recipe['ingredients']!
+            .split(',')
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+      } else {
+        throw Exception("Unsupported recipe type");
+      }
+
+      if (ingredients.isEmpty) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'No ingredients found for this recipe.',
+        );
+        return;
+      }
+
+      int addedCount = 0;
+
+      for (String item in ingredients) {
+        await DatabaseService.addToGroceryList(item);
+        addedCount++;
+      }
+
+      if (mounted) {
+        ErrorHandlingService.showSuccess(
+          context,
+          'Added $addedCount ingredients to grocery list!',
+        );
+        Navigator.pushNamed(context, '/grocery-list');
+      }
+
+    } catch (e) {
+      await ErrorHandlingService.handleError(
+        context: context,
+        error: e,
+        category: ErrorHandlingService.databaseError,
+        customMessage: 'Failed to add ingredients to grocery list',
+      );
     }
   }
 
@@ -1288,11 +1401,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                         feature: PremiumFeature.groceryList,
                         featureName: 'Grocery List',
                         child: ElevatedButton.icon(
-                          onPressed: () {
-                            if (mounted) {
-                              ErrorHandlingService.showSuccess(context, 'Added to grocery list!');
-                            }
-                          },
+                          onPressed: () => _addRecipeIngredientsToGroceryList(recipe),
                           icon: Icon(Icons.add_shopping_cart),
                           label: Text('Add to List'),
                           style: ElevatedButton.styleFrom(
@@ -1686,11 +1795,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                         feature: PremiumFeature.groceryList,
                         featureName: 'Grocery List',
                         child: ElevatedButton.icon(
-                          onPressed: () {
-                            if (mounted) {
-                              ErrorHandlingService.showSuccess(context, 'Added to grocery list!');
-                            }
-                          },
+                          onPressed: () => _addRecipeIngredientsToGroceryList(recipe),
                           icon: Icon(Icons.add_shopping_cart),
                           label: Text('Add to List'),
                           style: ElevatedButton.styleFrom(
