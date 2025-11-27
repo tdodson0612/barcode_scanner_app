@@ -27,6 +27,17 @@ class DatabaseService {
   static const String _CACHE_SUBMITTED_RECIPES = 'cache_submitted_recipes';
   static const String _CACHE_FAVORITE_RECIPES = 'cache_favorite_recipes';
 
+  // Buckets
+  static const String _PROFILE_BUCKET = 'profile-pictures';
+  static const String _BACKGROUND_BUCKET = 'background-pictures';
+  static const String _ALBUM_BUCKET = 'photo-album';
+
+  static const List<String> _KNOWN_BUCKETS = [
+    _PROFILE_BUCKET,
+    _BACKGROUND_BUCKET,
+    _ALBUM_BUCKET,
+  ];
+
   // ==================================================
   // CLOUDFLARE WORKER HELPER METHODS - WITH AUTH TOKEN
   // ==================================================
@@ -194,6 +205,29 @@ class DatabaseService {
       AppConfig.debugPrint('✅ Delete successful');
     } catch (e) {
       AppConfig.debugPrint('❌ Storage delete error: $e');
+      rethrow;
+    }
+  }
+
+  /// Helper: delete a file from any known bucket using its public URL
+  static Future<void> _deleteFileByPublicUrl(String url) async {
+    try {
+      final uri = Uri.parse(url);
+      final segments = uri.pathSegments;
+
+      for (final bucket in _KNOWN_BUCKETS) {
+        final bucketIndex = segments.indexOf(bucket);
+        if (bucketIndex != -1 && bucketIndex < segments.length - 1) {
+          final filePath = segments.sublist(bucketIndex + 1).join('/');
+          AppConfig.debugPrint('🗑️ Deleting from $bucket: $filePath');
+          await _workerStorageDelete(bucket: bucket, path: filePath);
+          return;
+        }
+      }
+
+      AppConfig.debugPrint('⚠️ Could not determine bucket for URL: $url');
+    } catch (e) {
+      AppConfig.debugPrint('❌ _deleteFileByPublicUrl error: $e');
       rethrow;
     }
   }
@@ -791,7 +825,7 @@ Shared from Recipe Scanner App
     String? firstName,
     String? lastName,
     String? avatarUrl,
-    String? profilePicture,
+    String? profilePicture, // now mapped to profile_picture_url
   }) async {
     ensureUserAuthenticated();
     
@@ -805,7 +839,7 @@ Shared from Recipe Scanner App
       if (firstName != null) updates['first_name'] = firstName;
       if (lastName != null) updates['last_name'] = lastName;
       if (avatarUrl != null) updates['avatar_url'] = avatarUrl;
-      if (profilePicture != null) updates['profile_picture'] = profilePicture;
+      if (profilePicture != null) updates['profile_picture_url'] = profilePicture;
 
       await _workerQuery(
         action: 'update',
@@ -860,9 +894,142 @@ Shared from Recipe Scanner App
   }
 
   // ==================================================
-  // PROFILE PICTURES MANAGEMENT (via Worker → R2)
+  // USER IMAGES: PROFILE, BACKGROUND, GALLERY (via Worker → R2)
   // ==================================================
 
+  /// Upload and set the user's main profile picture (profile_picture_url)
+  static Future<String> uploadProfilePicture(File imageFile) async {
+    ensureUserAuthenticated();
+
+    try {
+      final userId = currentUserId!;
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = 'profile_$timestamp.jpg';
+      final filePath = '$userId/$fileName';
+
+      final fileSize = await imageFile.length();
+      AppConfig.debugPrint('📸 Profile image size: ${fileSize / 1024 / 1024} MB');
+
+      if (fileSize > 10 * 1024 * 1024) {
+        throw Exception('Image file too large. Please choose a smaller image (max 10MB).');
+      }
+
+      final bytes = await imageFile.readAsBytes();
+      final base64Image = base64Encode(bytes);
+
+      final publicUrl = await _workerStorageUpload(
+        bucket: _PROFILE_BUCKET,
+        path: filePath,
+        base64Data: base64Image,
+        contentType: 'image/jpeg',
+      );
+
+      await _workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'profile_picture_url': publicUrl,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
+
+      await _clearCache('$_CACHE_USER_PROFILE$userId');
+      await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
+
+      AppConfig.debugPrint('✅ Profile picture URL set: $publicUrl');
+      return publicUrl;
+    } catch (e) {
+      AppConfig.debugPrint('❌ uploadProfilePicture error: $e');
+      throw Exception('Failed to upload profile picture: $e');
+    }
+  }
+
+  /// Upload and set the user's profile background (background_picture_url)
+  static Future<String> uploadBackgroundPicture(File imageFile) async {
+    ensureUserAuthenticated();
+
+    try {
+      final userId = currentUserId!;
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = 'background_$timestamp.jpg';
+      final filePath = '$userId/$fileName';
+
+      final fileSize = await imageFile.length();
+      AppConfig.debugPrint('📸 Background image size: ${fileSize / 1024 / 1024} MB');
+
+      if (fileSize > 10 * 1024 * 1024) {
+        throw Exception('Image file too large. Please choose a smaller image (max 10MB).');
+      }
+
+      final bytes = await imageFile.readAsBytes();
+      final base64Image = base64Encode(bytes);
+
+      final publicUrl = await _workerStorageUpload(
+        bucket: _BACKGROUND_BUCKET,
+        path: filePath,
+        base64Data: base64Image,
+        contentType: 'image/jpeg',
+      );
+
+      await _workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'background_picture_url': publicUrl,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
+
+      await _clearCache('$_CACHE_USER_PROFILE$userId');
+      await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
+
+      AppConfig.debugPrint('✅ Background picture URL set: $publicUrl');
+      return publicUrl;
+    } catch (e) {
+      AppConfig.debugPrint('❌ uploadBackgroundPicture error: $e');
+      throw Exception('Failed to upload background picture: $e');
+    }
+  }
+
+  /// Remove the background picture URL and delete the file from storage
+  static Future<void> removeBackgroundPicture() async {
+    ensureUserAuthenticated();
+    final userId = currentUserId!;
+
+    try {
+      final profile = await getUserProfile(userId);
+      final backgroundUrl = profile?['background_picture_url'] as String?;
+
+      if (backgroundUrl != null && backgroundUrl.isNotEmpty) {
+        try {
+          await _deleteFileByPublicUrl(backgroundUrl);
+        } catch (e) {
+          AppConfig.debugPrint('⚠️ Failed to delete background file from storage: $e');
+        }
+      }
+
+      await _workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'background_picture_url': null,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
+
+      await _clearCache('$_CACHE_USER_PROFILE$userId');
+      await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
+
+      AppConfig.debugPrint('✅ Background picture cleared');
+    } catch (e) {
+      throw Exception('Failed to reset background: $e');
+    }
+  }
+
+  /// Upload to the user's photo album & append to pictures JSON array
   static Future<String> uploadPicture(File imageFile) async {
     ensureUserAuthenticated();
    
@@ -885,11 +1052,11 @@ Shared from Recipe Scanner App
       final imageBytes = await imageFile.readAsBytes();
       final base64Image = base64Encode(imageBytes);
      
-      AppConfig.debugPrint('📤 Uploading to R2: $filePath');
+      AppConfig.debugPrint('📤 Uploading to R2 (album): $filePath');
      
-      // Upload to R2 via Worker
+      // Upload to R2 via Worker → photo-album bucket
       final publicUrl = await _workerStorageUpload(
-        bucket: 'profile-pictures',
+        bucket: _ALBUM_BUCKET,
         path: filePath,
         base64Data: base64Image,
         contentType: 'image/jpeg',
@@ -991,24 +1158,11 @@ Shared from Recipe Scanner App
     try {
       final userId = currentUserId!;
      
-      // Extract the path from the URL
-      final uri = Uri.parse(pictureUrl);
-      final pathSegments = uri.pathSegments;
-     
-      // Find 'profile-pictures' in the path and get everything after it
-      final bucketIndex = pathSegments.indexOf('profile-pictures');
-      if (bucketIndex != -1 && bucketIndex < pathSegments.length - 1) {
-        final filePath = pathSegments.sublist(bucketIndex + 1).join('/');
-       
-        AppConfig.debugPrint('🗑️ Deleting: profile-pictures/$filePath');
-       
-        // Delete from R2 storage
-        await _workerStorageDelete(
-          bucket: 'profile-pictures',
-          path: filePath,
-        );
-      } else {
-        AppConfig.debugPrint('⚠️ Could not extract file path from URL: $pictureUrl');
+      // Delete from storage (photo-album or whatever bucket the URL points to)
+      try {
+        await _deleteFileByPublicUrl(pictureUrl);
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Failed to delete picture from storage: $e');
       }
      
       // Remove from profile's pictures array
@@ -1032,7 +1186,7 @@ Shared from Recipe Scanner App
         await _clearCache('$_CACHE_USER_PROFILE$userId');
         await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
        
-        AppConfig.debugPrint('✅ Picture deleted successfully');
+        AppConfig.debugPrint('✅ Picture reference removed from profile');
       }
     } catch (e) {
       AppConfig.debugPrint('❌ Delete error: $e');
@@ -1049,7 +1203,7 @@ Shared from Recipe Scanner App
         table: 'user_profiles',
         filters: {'id': currentUserId!},
         data: {
-          'profile_picture': pictureUrl,
+          'profile_picture_url': pictureUrl,
           'updated_at': DateTime.now().toIso8601String(),
         },
       );
@@ -1057,7 +1211,7 @@ Shared from Recipe Scanner App
       await _clearCache('$_CACHE_USER_PROFILE$currentUserId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$currentUserId');
      
-      AppConfig.debugPrint('✅ Profile picture updated');
+      AppConfig.debugPrint('✅ Profile picture updated (from gallery)');
     } catch (e) {
       throw Exception('Failed to set profile picture: $e');
     }
@@ -1066,7 +1220,7 @@ Shared from Recipe Scanner App
   static Future<String?> getProfilePictureUrl(String userId) async {
     try {
       final profile = await getUserProfile(userId);
-      return profile?['profile_picture'];
+      return profile?['profile_picture_url'];
     } catch (e) {
       AppConfig.debugPrint('Error getting profile picture: $e');
       return null;
@@ -1828,7 +1982,6 @@ Shared from Recipe Scanner App
     }
   }
 
-
   static Future<Map<String, dynamic>> checkFriendshipStatus(String userId) async {
     ensureUserAuthenticated();
     
@@ -2469,7 +2622,6 @@ Shared from Recipe Scanner App
     }
   }
 
-
   static Future<void> deleteAccountCompletely() async {
     ensureUserAuthenticated();
     final userId = currentUserId!;
@@ -2478,15 +2630,32 @@ Shared from Recipe Scanner App
       // 1) Get profile to extract picture URLs
       final profile = await getUserProfile(userId);
       final picturesJson = profile?['pictures'];
+      final profilePictureUrl = profile?['profile_picture_url'];
+      final backgroundPictureUrl = profile?['background_picture_url'];
+
+      // 1a) Remove gallery pictures from R2
       if (picturesJson != null && picturesJson.isNotEmpty) {
         final pictures = List<String>.from(jsonDecode(picturesJson));
         
-        // Remove all pictures from R2
         for (final url in pictures) {
           try {
-            await deletePicture(url);
+            await _deleteFileByPublicUrl(url);
           } catch (_) {}
         }
+      }
+
+      // 1b) Remove profile picture file
+      if (profilePictureUrl is String && profilePictureUrl.isNotEmpty) {
+        try {
+          await _deleteFileByPublicUrl(profilePictureUrl);
+        } catch (_) {}
+      }
+
+      // 1c) Remove background picture file
+      if (backgroundPictureUrl is String && backgroundPictureUrl.isNotEmpty) {
+        try {
+          await _deleteFileByPublicUrl(backgroundPictureUrl);
+        } catch (_) {}
       }
 
       // 2) Delete favorite recipes

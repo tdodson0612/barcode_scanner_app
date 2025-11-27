@@ -1,9 +1,10 @@
-// lib/pages/profile_screen.dart - COMPLETE FIX: All 4 issues resolved
+// lib/pages/profile_screen.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+
 import '../widgets/app_drawer.dart';
 import '../widgets/premium_gate.dart';
 import '../widgets/recipe_card.dart';
@@ -27,8 +28,10 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen>
     with AutomaticKeepAliveClientMixin {
-  File? _profileImage;
-  File? _backgroundImage;
+  // 🔧 URLs instead of local files
+  String? _profileImageUrl;
+  String? _backgroundImageUrl;
+
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   bool _isEditingName = false;
@@ -79,11 +82,9 @@ class _ProfileScreenState extends State<ProfileScreen>
     super.dispose();
   }
 
-  // FIX #4: Force premium status refresh on profile load
   void _initializePremiumController() {
     _premiumController = PremiumGateController();
     _premiumController.addListener(_updatePremiumState);
-    // Force immediate refresh of premium status by calling the update
     _updatePremiumState();
   }
 
@@ -403,7 +404,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
-  // 🔧 UPDATED: use new DatabaseService.uploadPicture + safer loading state
   Future<void> _uploadPicture(ImageSource source) async {
     if (_pictures.length >= _maxPictures) {
       ErrorHandlingService.showSimpleError(
@@ -435,14 +435,8 @@ class _ProfileScreenState extends State<ProfileScreen>
 
       final imageFile = File(pickedFile.path);
 
-      // Uses the updated DatabaseService.uploadPicture which:
-      // - checks auth
-      // - enforces max 10MB
-      // - uploads via Worker → R2
-      // - updates user_profiles.pictures
       await DatabaseService.uploadPicture(imageFile);
 
-      // Refresh local cache/UI
       await _invalidatePicturesCache();
       await _loadPictures(forceRefresh: true);
 
@@ -502,16 +496,17 @@ class _ProfileScreenState extends State<ProfileScreen>
         await DatabaseService.deletePicture(pictureUrl);
         await _invalidatePicturesCache();
         await _loadPictures(forceRefresh: true);
-        
+
         if (mounted) {
-          ErrorHandlingService.showSuccess(context, 'Picture deleted successfully');
+          ErrorHandlingService.showSuccess(
+              context, 'Picture deleted successfully');
         }
       } catch (e) {
         if (mounted) {
           setState(() {
             _isLoadingPictures = false;
           });
-          
+
           await ErrorHandlingService.handleError(
             context: context,
             error: e,
@@ -563,7 +558,12 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     try {
       await DatabaseService.setPictureAsProfilePicture(pictureUrl);
-      
+
+      // Update local state
+      setState(() {
+        _profileImageUrl = pictureUrl;
+      });
+
       if (mounted) {
         ErrorHandlingService.showSuccess(context, 'Profile picture updated!');
       }
@@ -679,7 +679,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   Future<void> _loadFriends({bool forceRefresh = false}) async {
     if (!mounted) return;
-    
+
     setState(() {
       _isLoadingFriends = true;
     });
@@ -698,10 +698,10 @@ class _ProfileScreenState extends State<ProfileScreen>
 
       if (!forceRefresh) {
         final cachedFriends = await _getCachedFriends();
-        
+
         if (cachedFriends != null) {
           final visibility = await DatabaseService.getFriendsListVisibility();
-          
+
           if (mounted) {
             setState(() {
               _friends = cachedFriends;
@@ -716,7 +716,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       final friends = await DatabaseService.getUserFriends(currentUserId);
       final visibility = await DatabaseService.getFriendsListVisibility();
       await _cacheFriends(friends);
-      
+
       if (mounted) {
         setState(() {
           _friends = friends;
@@ -726,7 +726,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       }
     } catch (e) {
       print('Error loading friends: $e');
-      
+
       if (!forceRefresh) {
         final staleFriends = await _getCachedFriends();
         if (staleFriends != null && mounted) {
@@ -737,7 +737,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           return;
         }
       }
-      
+
       if (mounted) {
         setState(() {
           _friends = [];
@@ -754,12 +754,12 @@ class _ProfileScreenState extends State<ProfileScreen>
         setState(() {
           _friendsListVisible = isVisible;
         });
-        
+
         ErrorHandlingService.showSuccess(
           context,
-          isVisible 
-              ? 'Friends list is now visible to others' 
-              : 'Friends list is now hidden from others'
+          isVisible
+              ? 'Friends list is now visible to others'
+              : 'Friends list is now hidden from others',
         );
       }
     } catch (e) {
@@ -775,7 +775,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
-  // 🔴 DELETE ACCOUNT: confirmation + call to DB + sign out
   Future<void> _confirmDeleteAccount() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -784,7 +783,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         content: const Text(
           'This action is permanent and cannot be undone.\n\n'
           'All your recipes, pictures, friends, and account data will be permanently deleted.\n\n'
-          'Are you sure you want to continue?'
+          'Are you sure you want to continue?',
         ),
         actions: [
           TextButton(
@@ -810,10 +809,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
 
     try {
-      // You should implement this in DatabaseService as discussed:
-      // Future<void> deleteAccountCompletely()
       await DatabaseService.deleteAccountCompletely();
-
       await AuthService.signOut();
 
       if (!mounted) return;
@@ -840,108 +836,66 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
-  // FIX #3: Persist background image to database instead of just SharedPreferences
+  // 🔧 Load profile + background URLs from database
   Future<void> _loadProfile() async {
     if (!mounted) return;
-    
+
     setState(() {
       _isLoading = true;
     });
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      
-      // Load from server first
+
+      // Load from database
       final profile = await DatabaseService.getCurrentUserProfile();
-      
+
       if (profile != null && mounted) {
         final userName = profile['username'] ?? 'User';
         final userEmail = profile['email'] ?? '';
-        
-        // Save to local preferences
+
+        final profilePictureUrl = profile['profile_picture_url'] as String?;
+        final backgroundPictureUrl = profile['background_picture_url'] as String?;
+
+        // Save to local preferences for fallback
         await prefs.setString('user_name', userName);
         await prefs.setString('user_email', userEmail);
-        
-        // FIX #3: Load background from profile if available
-        final backgroundUrl = profile['profile_background'];
-        
+
         setState(() {
           _userName = userName;
           _userEmail = userEmail;
           _nameController.text = userName;
           _emailController.text = userEmail;
+          _profileImageUrl = profilePictureUrl;
+          _backgroundImageUrl = backgroundPictureUrl;
         });
-        
-        // Load profile picture from local storage (avatar)
-        final imagePath = prefs.getString('profile_image_path');
-        if (imagePath != null && imagePath.isNotEmpty && mounted) {
-          setState(() {
-            _profileImage = File(imagePath);
-          });
-        }
-        
-        // FIX #3: Only use local background if no server background exists
-        if (backgroundUrl != null && backgroundUrl.isNotEmpty) {
-          // Background is stored on server, load from there
-          // Note: This would require downloading the image, for now we'll keep local
-          final backgroundPath = prefs.getString('profile_background_path');
-          if (backgroundPath != null && backgroundPath.isNotEmpty && mounted) {
-            setState(() {
-              _backgroundImage = File(backgroundPath);
-            });
-          }
-        } else {
-          final backgroundPath = prefs.getString('profile_background_path');
-          if (backgroundPath != null && backgroundPath.isNotEmpty && mounted) {
-            setState(() {
-              _backgroundImage = File(backgroundPath);
-            });
-          }
-        }
       } else {
         // Fallback to local preferences
         final savedName = prefs.getString('user_name') ?? 'User';
         final savedEmail = prefs.getString('user_email') ?? '';
-        final imagePath = prefs.getString('profile_image_path');
-        final backgroundPath = prefs.getString('profile_background_path');
-        
+
         if (mounted) {
           setState(() {
             _userName = savedName;
             _userEmail = savedEmail;
             _nameController.text = savedName;
             _emailController.text = savedEmail;
-            if (imagePath != null && imagePath.isNotEmpty) {
-              _profileImage = File(imagePath);
-            }
-            if (backgroundPath != null && backgroundPath.isNotEmpty) {
-              _backgroundImage = File(backgroundPath);
-            }
           });
         }
       }
     } catch (e) {
       print('Error loading profile: $e');
-      // Fallback to local preferences on error
       try {
         final prefs = await SharedPreferences.getInstance();
         final savedName = prefs.getString('user_name') ?? 'User';
         final savedEmail = prefs.getString('user_email') ?? '';
-        final imagePath = prefs.getString('profile_image_path');
-        final backgroundPath = prefs.getString('profile_background_path');
-        
+
         if (mounted) {
           setState(() {
             _userName = savedName;
             _userEmail = savedEmail;
             _nameController.text = savedName;
             _emailController.text = savedEmail;
-            if (imagePath != null && imagePath.isNotEmpty) {
-              _profileImage = File(imagePath);
-            }
-            if (backgroundPath != null && backgroundPath.isNotEmpty) {
-              _backgroundImage = File(backgroundPath);
-            }
           });
         }
       } catch (e2) {
@@ -956,33 +910,53 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+  // 🔧 Upload profile picture to Supabase Storage and save URL to database
   Future<void> _pickImage(ImageSource source) async {
     try {
       final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(source: source);
+      final pickedFile = await picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
 
-      if (pickedFile != null && mounted) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('profile_image_path', pickedFile.path);
-        
+      if (pickedFile == null || !mounted) return;
+
+      setState(() {
+        _isLoading = true;
+      });
+
+      final imageFile = File(pickedFile.path);
+
+      final url = await DatabaseService.uploadProfilePicture(imageFile);
+
+      if (mounted) {
         setState(() {
-          _profileImage = File(pickedFile.path);
+          _profileImageUrl = url;
+          _isLoading = false;
         });
 
         ErrorHandlingService.showSuccess(context, 'Profile picture updated!');
       }
     } catch (e) {
       if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
           category: ErrorHandlingService.imageError,
+          customMessage: 'Unable to upload profile picture',
           onRetry: () => _pickImage(source),
         );
       }
     }
   }
 
+  // 🔧 Upload background to Supabase Storage and save URL to database
   Future<void> _pickBackgroundImage(ImageSource source) async {
     try {
       final picker = ImagePicker();
@@ -993,18 +967,30 @@ class _ProfileScreenState extends State<ProfileScreen>
         imageQuality: 85,
       );
 
-      if (pickedFile != null && mounted) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('profile_background_path', pickedFile.path);
-        
+      if (pickedFile == null || !mounted) return;
+
+      setState(() {
+        _isLoading = true;
+      });
+
+      final imageFile = File(pickedFile.path);
+
+      final url = await DatabaseService.uploadBackgroundPicture(imageFile);
+
+      if (mounted) {
         setState(() {
-          _backgroundImage = File(pickedFile.path);
+          _backgroundImageUrl = url;
+          _isLoading = false;
         });
 
         ErrorHandlingService.showSuccess(context, 'Background updated!');
       }
     } catch (e) {
       if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -1018,18 +1004,26 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   Future<void> _removeBackgroundImage() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('profile_background_path');
-      
+      setState(() {
+        _isLoading = true;
+      });
+
+      await DatabaseService.removeBackgroundPicture();
+
       if (mounted) {
         setState(() {
-          _backgroundImage = null;
+          _backgroundImageUrl = null;
+          _isLoading = false;
         });
-        
+
         ErrorHandlingService.showSuccess(context, 'Background reset to default');
       }
     } catch (e) {
       if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -1051,18 +1045,21 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
 
     try {
-      await DatabaseService.updateProfile(username: _nameController.text.trim());
-      
+      await DatabaseService.updateProfile(
+        username: _nameController.text.trim(),
+      );
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user_name', _nameController.text.trim());
-      
+
       if (mounted) {
         setState(() {
           _userName = _nameController.text.trim();
           _isEditingName = false;
         });
-        
-        ErrorHandlingService.showSuccess(context, 'Name updated successfully!');
+
+        ErrorHandlingService.showSuccess(
+            context, 'Name updated successfully!');
       }
     } catch (e) {
       if (mounted) {
@@ -1084,14 +1081,15 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Future<void> _saveUserEmail() async {
-    if (_emailController.text.trim().isEmpty) {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
       ErrorHandlingService.showSimpleError(context, 'Email cannot be empty');
       return;
     }
 
-    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$'
-      ).hasMatch(_emailController.text.trim())) {
-      ErrorHandlingService.showSimpleError(context, 'Please enter a valid email address');
+    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email)) {
+      ErrorHandlingService.showSimpleError(
+          context, 'Please enter a valid email address');
       return;
     }
 
@@ -1100,18 +1098,19 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
 
     try {
-      await DatabaseService.updateProfile(email: _emailController.text.trim());
-      
+      await DatabaseService.updateProfile(email: email);
+
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('user_email', _emailController.text.trim());
-      
+      await prefs.setString('user_email', email);
+
       if (mounted) {
         setState(() {
-          _userEmail = _emailController.text.trim();
+          _userEmail = email;
           _isEditingEmail = false;
         });
-        
-        ErrorHandlingService.showSuccess(context, 'Email updated successfully!');
+
+        ErrorHandlingService.showSuccess(
+            context, 'Email updated successfully!');
       }
     } catch (e) {
       if (mounted) {
@@ -1232,8 +1231,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                   _pickBackgroundImage(ImageSource.gallery);
                 },
               ),
-              if (_backgroundImage != null) ...[
-                Divider(),
+              if (_backgroundImageUrl != null) ...[
+                const Divider(),
                 ListTile(
                   leading: const Icon(Icons.restore, color: Colors.orange),
                   title: const Text('Reset to Default'),
@@ -1264,7 +1263,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to open profile')),
+          const SnackBar(content: Text('Unable to open profile')),
         );
       }
     }
@@ -1276,7 +1275,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Search page unavailable')),
+          const SnackBar(content: Text('Search page unavailable')),
         );
       }
     }
@@ -1289,7 +1288,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         builder: (BuildContext context) {
           return AlertDialog(
             title: Row(
-              children: [
+              children: const [
                 Icon(Icons.people, color: Colors.blue),
                 SizedBox(width: 8),
                 Text('All Friends'),
@@ -1299,30 +1298,38 @@ class _ProfileScreenState extends State<ProfileScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('You have ${_friends.length} friends:'),
-                SizedBox(height: 12),
+                const SizedBox(height: 12),
                 Container(
-                  constraints: BoxConstraints(maxHeight: 200),
+                  constraints: const BoxConstraints(maxHeight: 200),
                   child: SingleChildScrollView(
                     child: Column(
-                      children: _friends.map((friend) => ListTile(
-                        leading: CircleAvatar(
-                          backgroundImage: friend['avatar_url'] != null
-                              ? NetworkImage(friend['avatar_url'])
-                              : null,
-                          child: friend['avatar_url'] == null
-                              ? Text((friend['username'] ?? 'U')[0].toUpperCase())
-                              : null,
-                        ),
-                        title: Text(
-                          friend['first_name'] != null && friend['last_name'] != null
-                              ? '${friend['first_name']} ${friend['last_name']}'
-                              : friend['username'] ?? 'Unknown',
-                        ),
-                        onTap: () {
-                          Navigator.pop(context);
-                          _navigateToUserProfile(friend['id']);
-                        },
-                      )).toList(),
+                      children: _friends
+                          .map(
+                            (friend) => ListTile(
+                              leading: CircleAvatar(
+                                backgroundImage: friend['avatar_url'] != null
+                                    ? NetworkImage(friend['avatar_url'])
+                                    : null,
+                                child: friend['avatar_url'] == null
+                                    ? Text(
+                                        (friend['username'] ?? 'U')[0]
+                                            .toUpperCase(),
+                                      )
+                                    : null,
+                              ),
+                              title: Text(
+                                friend['first_name'] != null &&
+                                        friend['last_name'] != null
+                                    ? '${friend['first_name']} ${friend['last_name']}'
+                                    : friend['username'] ?? 'Unknown',
+                              ),
+                              onTap: () {
+                                Navigator.pop(context);
+                                _navigateToUserProfile(friend['id']);
+                              },
+                            ),
+                          )
+                          .toList(),
                     ),
                   ),
                 ),
@@ -1331,7 +1338,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: Text('Close'),
+                child: const Text('Close'),
               ),
             ],
           );
@@ -1350,8 +1357,8 @@ class _ProfileScreenState extends State<ProfileScreen>
           if (_isPremium) ...[
             Row(
               children: [
-                Icon(Icons.star, color: Colors.amber, size: 24),
-                SizedBox(width: 8),
+                const Icon(Icons.star, color: Colors.amber, size: 24),
+                const SizedBox(width: 8),
                 Text(
                   'Premium Account Active',
                   style: TextStyle(
@@ -1362,7 +1369,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                 ),
               ],
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(
               'You have access to all premium features!',
               style: TextStyle(color: Colors.grey.shade600),
@@ -1370,8 +1377,8 @@ class _ProfileScreenState extends State<ProfileScreen>
           ] else ...[
             Row(
               children: [
-                Icon(Icons.person, color: Colors.grey, size: 24),
-                SizedBox(width: 8),
+                const Icon(Icons.person, color: Colors.grey, size: 24),
+                const SizedBox(width: 8),
                 Text(
                   'Free Account',
                   style: TextStyle(
@@ -1382,19 +1389,19 @@ class _ProfileScreenState extends State<ProfileScreen>
                 ),
               ],
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 8),
             Text(
               'Daily scans used: $_totalScansUsed/3',
               style: TextStyle(
-                color: _hasUsedAllFreeScans 
-                    ? Colors.red.shade600 
+                color: _hasUsedAllFreeScans
+                    ? Colors.red.shade600
                     : Colors.grey.shade600,
-                fontWeight: _hasUsedAllFreeScans 
-                    ? FontWeight.w600 
+                fontWeight: _hasUsedAllFreeScans
+                    ? FontWeight.w600
                     : FontWeight.normal,
               ),
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -1403,16 +1410,17 @@ class _ProfileScreenState extends State<ProfileScreen>
                     Navigator.pushNamed(context, '/purchase');
                   } catch (e) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Premium page unavailable')),
+                      const SnackBar(
+                          content: Text('Premium page unavailable')),
                     );
                   }
                 },
-                icon: Icon(Icons.star),
-                label: Text('Upgrade to Premium'),
+                icon: const Icon(Icons.star),
+                label: const Text('Upgrade to Premium'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.amber,
                   foregroundColor: Colors.white,
-                  padding: EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
             ),
@@ -1432,23 +1440,23 @@ class _ProfileScreenState extends State<ProfileScreen>
             children: [
               Text(
                 'Pictures (${_pictures.length}/$_maxPictures)',
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               if (_pictures.length < _maxPictures)
                 IconButton(
-                  icon: Icon(Icons.add_photo_alternate, color: Colors.blue),
+                  icon:
+                      const Icon(Icons.add_photo_alternate, color: Colors.blue),
                   onPressed: _showPictureUploadDialog,
                   tooltip: 'Add Picture',
                 ),
             ],
           ),
-          SizedBox(height: 12),
-          
+          const SizedBox(height: 12),
           if (_isLoadingPictures) ...[
-            Center(
+            const Center(
               child: Padding(
                 padding: EdgeInsets.all(20),
                 child: CircularProgressIndicator(),
@@ -1463,7 +1471,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     size: 50,
                     color: Colors.grey.shade400,
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
                     'No pictures yet',
                     style: TextStyle(
@@ -1471,11 +1479,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                       fontSize: 14,
                     ),
                   ),
-                  SizedBox(height: 12),
+                  const SizedBox(height: 12),
                   ElevatedButton.icon(
                     onPressed: _showPictureUploadDialog,
-                    icon: Icon(Icons.add_photo_alternate),
-                    label: Text('Add Your First Picture'),
+                    icon: const Icon(Icons.add_photo_alternate),
+                    label: const Text('Add Your First Picture'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue,
                       foregroundColor: Colors.white,
@@ -1487,8 +1495,8 @@ class _ProfileScreenState extends State<ProfileScreen>
           ] else ...[
             GridView.builder(
               shrinkWrap: true,
-              physics: NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 3,
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 8,
@@ -1515,10 +1523,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                           return Center(
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              value: loadingProgress.expectedTotalBytes != null
-                                  ? loadingProgress.cumulativeBytesLoaded /
-                                      loadingProgress.expectedTotalBytes!
-                                  : null,
+                              value:
+                                  loadingProgress.expectedTotalBytes != null
+                                      ? loadingProgress.cumulativeBytesLoaded /
+                                          loadingProgress.expectedTotalBytes!
+                                      : null,
                             ),
                           );
                         },
@@ -1542,7 +1551,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  // FIX #1 & #2: Prevent rating own recipes
   Widget _buildSubmittedRecipesSection() {
     return _sectionContainer(
       child: Column(
@@ -1553,23 +1561,22 @@ class _ProfileScreenState extends State<ProfileScreen>
             children: [
               Text(
                 'My Submitted Recipes (${_submittedRecipes.length})',
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               IconButton(
-                icon: Icon(Icons.add_circle, color: Colors.green),
+                icon: const Icon(Icons.add_circle, color: Colors.green),
                 onPressed: () async {
                   try {
-                    // FIX #1: Use Navigator.push to properly receive return value
                     final result = await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => SubmitRecipePage(),
+                        builder: (context) => const SubmitRecipePage(),
                       ),
                     );
-                    
+
                     if (result == true && mounted) {
                       await _invalidateRecipesCache();
                       await _loadSubmittedRecipes(forceRefresh: true);
@@ -1577,7 +1584,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                   } catch (e) {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Recipe page unavailable')),
+                        const SnackBar(
+                            content: Text('Recipe page unavailable')),
                       );
                     }
                   }
@@ -1586,10 +1594,9 @@ class _ProfileScreenState extends State<ProfileScreen>
               ),
             ],
           ),
-          SizedBox(height: 12),
-          
+          const SizedBox(height: 12),
           if (_isLoadingRecipes) ...[
-            Center(
+            const Center(
               child: Padding(
                 padding: EdgeInsets.all(20),
                 child: CircularProgressIndicator(),
@@ -1604,7 +1611,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     size: 50,
                     color: Colors.grey.shade400,
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
                     'No recipes submitted yet',
                     style: TextStyle(
@@ -1612,7 +1619,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                       fontSize: 14,
                     ),
                   ),
-                  SizedBox(height: 4),
+                  const SizedBox(height: 4),
                   Text(
                     'Share your favorite recipes with the community!',
                     style: TextStyle(
@@ -1621,18 +1628,17 @@ class _ProfileScreenState extends State<ProfileScreen>
                     ),
                     textAlign: TextAlign.center,
                   ),
-                  SizedBox(height: 12),
+                  const SizedBox(height: 12),
                   ElevatedButton.icon(
                     onPressed: () async {
                       try {
-                        // FIX #1: Use Navigator.push
                         final result = await Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => SubmitRecipePage(),
+                            builder: (context) => const SubmitRecipePage(),
                           ),
                         );
-                        
+
                         if (result == true && mounted) {
                           await _invalidateRecipesCache();
                           await _loadSubmittedRecipes(forceRefresh: true);
@@ -1640,13 +1646,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                       } catch (e) {
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Recipe page unavailable')),
+                            const SnackBar(
+                                content: Text('Recipe page unavailable')),
                           );
                         }
                       }
                     },
-                    icon: Icon(Icons.add),
-                    label: Text('Submit Your First Recipe'),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Submit Your First Recipe'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                       foregroundColor: Colors.white,
@@ -1658,21 +1665,21 @@ class _ProfileScreenState extends State<ProfileScreen>
           ] else ...[
             ListView.builder(
               shrinkWrap: true,
-              physics: NeverScrollableScrollPhysics(),
+              physics: const NeverScrollableScrollPhysics(),
               itemCount: _submittedRecipes.length,
               itemBuilder: (context, index) {
                 final recipe = _submittedRecipes[index];
-                
+
                 if (recipe.id == null) {
-                  return SizedBox.shrink();
+                  return const SizedBox.shrink();
                 }
-                
-                // FIX #2: Remove isOwnRecipe parameter for now (will need to add to RecipeCard)
+
                 return RecipeCard(
                   recipe: recipe,
                   onDelete: () => _deleteRecipe(recipe.id!),
                   onEdit: () => _editRecipe(recipe),
-                  onRatingChanged: () => _loadSubmittedRecipes(forceRefresh: true),
+                  onRatingChanged: () =>
+                      _loadSubmittedRecipes(forceRefresh: true),
                 );
               },
             ),
@@ -1685,7 +1692,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profile'),
@@ -1700,12 +1707,12 @@ class _ProfileScreenState extends State<ProfileScreen>
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.wallpaper),
+            icon: const Icon(Icons.wallpaper),
             tooltip: 'Change Background',
             onPressed: _showBackgroundPickerDialog,
           ),
           if (_isLoading)
-            Center(
+            const Center(
               child: SizedBox(
                 width: 20,
                 height: 20,
@@ -1717,13 +1724,13 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
         ],
       ),
-      drawer: AppDrawer(currentPage: 'profile'),
+      drawer: const AppDrawer(currentPage: 'profile'),
       body: Stack(
         children: [
           Positioned.fill(
-            child: _backgroundImage != null
-                ? Image.file(
-                    _backgroundImage!,
+            child: _backgroundImageUrl != null
+                ? Image.network(
+                    _backgroundImageUrl!,
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) {
                       return Image.asset(
@@ -1743,7 +1750,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     errorBuilder: (context, error, stackTrace) {
                       return Container(
                         color: Colors.green.shade50,
-                        child: Center(
+                        child: const Center(
                           child: Icon(
                             Icons.image_not_supported,
                             size: 50,
@@ -1754,13 +1761,12 @@ class _ProfileScreenState extends State<ProfileScreen>
                     },
                   ),
           ),
-          
           RefreshIndicator(
             onRefresh: () async {
               await _invalidateRecipesCache();
               await _invalidatePicturesCache();
               await _invalidateFriendsCache();
-              
+
               await Future.wait([
                 _loadSubmittedRecipes(forceRefresh: true),
                 _loadPictures(forceRefresh: true),
@@ -1769,7 +1775,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               ]);
             },
             child: SingleChildScrollView(
-              physics: AlwaysScrollableScrollPhysics(),
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
@@ -1779,10 +1785,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                         CircleAvatar(
                           radius: 80,
                           backgroundColor: Colors.grey[300],
-                          backgroundImage: _profileImage != null
-                              ? FileImage(_profileImage!)
+                          backgroundImage: _profileImageUrl != null
+                              ? NetworkImage(_profileImageUrl!)
                               : null,
-                          child: _profileImage == null
+                          child: _profileImageUrl == null
                               ? const Icon(
                                   Icons.person,
                                   size: 80,
@@ -1812,9 +1818,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 30),
-
                   _sectionContainer(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1860,12 +1864,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   foregroundColor: Colors.white,
                                 ),
                                 child: _isLoading
-                                    ? SizedBox(
+                                    ? const SizedBox(
                                         width: 16,
                                         height: 16,
                                         child: CircularProgressIndicator(
                                           strokeWidth: 2,
-                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                  Colors.white),
                                         ),
                                       )
                                     : const Text('Save'),
@@ -1886,9 +1892,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 20),
-
                   _sectionContainer(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1935,12 +1939,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   foregroundColor: Colors.white,
                                 ),
                                 child: _isLoading
-                                    ? SizedBox(
+                                    ? const SizedBox(
                                         width: 16,
                                         height: 16,
                                         child: CircularProgressIndicator(
                                           strokeWidth: 2,
-                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                  Colors.white),
                                         ),
                                       )
                                     : const Text('Save'),
@@ -1961,13 +1967,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 20),
-
                   _buildPicturesSection(),
-
                   const SizedBox(height: 20),
-
                   _sectionContainer(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1977,13 +1979,13 @@ class _ProfileScreenState extends State<ProfileScreen>
                           children: [
                             Text(
                               'Friends (${_friends.length})',
-                              style: TextStyle(
+                              style: const TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
                             PopupMenuButton<String>(
-                              icon: Icon(Icons.more_vert, size: 20),
+                              icon: const Icon(Icons.more_vert, size: 20),
                               onSelected: (value) {
                                 if (value == 'toggle_visibility') {
                                   _toggleFriendsVisibility(!_friendsListVisible);
@@ -1995,12 +1997,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   child: Row(
                                     children: [
                                       Icon(
-                                        _friendsListVisible ? Icons.visibility_off : Icons.visibility,
+                                        _friendsListVisible
+                                            ? Icons.visibility_off
+                                            : Icons.visibility,
                                         size: 20,
                                       ),
-                                      SizedBox(width: 8),
-                                      Text(_friendsListVisible 
-                                          ? 'Hide from Others' 
+                                      const SizedBox(width: 8),
+                                      Text(_friendsListVisible
+                                          ? 'Hide from Others'
                                           : 'Make Visible'),
                                     ],
                                   ),
@@ -2009,17 +2013,21 @@ class _ProfileScreenState extends State<ProfileScreen>
                             ),
                           ],
                         ),
-                        SizedBox(height: 8),
+                        const SizedBox(height: 8),
                         Row(
                           children: [
                             Icon(
-                              _friendsListVisible ? Icons.visibility : Icons.visibility_off,
+                              _friendsListVisible
+                                  ? Icons.visibility
+                                  : Icons.visibility_off,
                               size: 16,
                               color: Colors.grey.shade600,
                             ),
-                            SizedBox(width: 4),
+                            const SizedBox(width: 4),
                             Text(
-                              _friendsListVisible ? 'Visible to others' : 'Hidden from others',
+                              _friendsListVisible
+                                  ? 'Visible to others'
+                                  : 'Hidden from others',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: Colors.grey.shade600,
@@ -2027,10 +2035,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                             ),
                           ],
                         ),
-                        SizedBox(height: 16),
-                        
+                        const SizedBox(height: 16),
                         if (_isLoadingFriends) ...[
-                          Center(child: CircularProgressIndicator()),
+                          const Center(child: CircularProgressIndicator()),
                         ] else if (_friends.isEmpty) ...[
                           Text(
                             'No friends yet. Start by finding and adding friends!',
@@ -2039,11 +2046,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                               fontSize: 14,
                             ),
                           ),
-                          SizedBox(height: 12),
+                          const SizedBox(height: 12),
                           ElevatedButton.icon(
                             onPressed: _navigateToSearchUsers,
-                            icon: Icon(Icons.person_search),
-                            label: Text('Find Friends'),
+                            icon: const Icon(Icons.person_search),
+                            label: const Text('Find Friends'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.blue,
                               foregroundColor: Colors.white,
@@ -2052,14 +2059,16 @@ class _ProfileScreenState extends State<ProfileScreen>
                         ] else ...[
                           GridView.builder(
                             shrinkWrap: true,
-                            physics: NeverScrollableScrollPhysics(),
-                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
                               crossAxisCount: 3,
                               childAspectRatio: 0.8,
                               crossAxisSpacing: 8,
                               mainAxisSpacing: 8,
                             ),
-                            itemCount: _friends.length > 6 ? 6 : _friends.length,
+                            itemCount:
+                                _friends.length > 6 ? 6 : _friends.length,
                             itemBuilder: (context, index) {
                               if (index == 5 && _friends.length > 6) {
                                 return GestureDetector(
@@ -2068,13 +2077,17 @@ class _ProfileScreenState extends State<ProfileScreen>
                                     decoration: BoxDecoration(
                                       color: Colors.grey.shade100,
                                       borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: Colors.grey.shade300),
+                                      border: Border.all(
+                                          color: Colors.grey.shade300),
                                     ),
                                     child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
                                       children: [
-                                        Icon(Icons.more_horiz, size: 30, color: Colors.grey.shade600),
-                                        SizedBox(height: 4),
+                                        Icon(Icons.more_horiz,
+                                            size: 30,
+                                            color: Colors.grey.shade600),
+                                        const SizedBox(height: 4),
                                         Text(
                                           'View All\n${_friends.length} friends',
                                           textAlign: TextAlign.center,
@@ -2088,7 +2101,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   ),
                                 );
                               }
-                              
+
                               final friend = _friends[index];
                               return GestureDetector(
                                 onTap: () => _navigateToUserProfile(friend['id']),
@@ -2096,26 +2109,34 @@ class _ProfileScreenState extends State<ProfileScreen>
                                   children: [
                                     CircleAvatar(
                                       radius: 25,
-                                      backgroundImage: friend['avatar_url'] != null
-                                          ? NetworkImage(friend['avatar_url'])
-                                          : null,
+                                      backgroundImage:
+                                          friend['avatar_url'] != null
+                                              ? NetworkImage(
+                                                  friend['avatar_url'],
+                                                )
+                                              : null,
                                       child: friend['avatar_url'] == null
                                           ? Text(
-                                              (friend['username'] ?? friend['first_name'] ?? friend['email'] ?? 'U')[0].toUpperCase(),
-                                              style: TextStyle(
+                                              (friend['username'] ??
+                                                          friend['first_name'] ??
+                                                          friend['email'] ??
+                                                          'U')[0]
+                                                  .toUpperCase(),
+                                              style: const TextStyle(
                                                 fontSize: 20,
                                                 fontWeight: FontWeight.bold,
                                               ),
                                             )
                                           : null,
                                     ),
-                                    SizedBox(height: 4),
+                                    const SizedBox(height: 4),
                                     Expanded(
                                       child: Text(
-                                        friend['first_name'] != null && friend['last_name'] != null
+                                        friend['first_name'] != null &&
+                                                friend['last_name'] != null
                                             ? '${friend['first_name']} ${friend['last_name']}'
                                             : friend['username'] ?? 'Unknown',
-                                        style: TextStyle(
+                                        style: const TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w500,
                                         ),
@@ -2129,51 +2150,47 @@ class _ProfileScreenState extends State<ProfileScreen>
                               );
                             },
                           ),
-                          
                           if (_friends.length > 6) ...[
-                            SizedBox(height: 12),
+                            const SizedBox(height: 12),
                             TextButton(
                               onPressed: _showFullFriendsList,
-                              child: Text('View All ${_friends.length} Friends'),
+                              child:
+                                  Text('View All ${_friends.length} Friends'),
                             ),
                           ],
                         ],
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 20),
-
                   _buildPremiumStatusSection(),
-
                   const SizedBox(height: 20),
-
                   PremiumGate(
                     feature: PremiumFeature.submitRecipes,
                     featureName: 'Recipe Submission',
-                    featureDescription: 'Share your favorite recipes with the community.',
+                    featureDescription:
+                        'Share your favorite recipes with the community.',
                     child: _buildSubmittedRecipesSection(),
                   ),
-
                   const SizedBox(height: 20),
-
                   PremiumGate(
                     feature: PremiumFeature.favoriteRecipes,
                     featureName: 'Favorite Recipes',
-                    featureDescription: 'Save and organize your favorite recipes.',
+                    featureDescription:
+                        'Save and organize your favorite recipes.',
                     showSoftPreview: true,
                     child: _sectionContainer(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
+                          const Text(
                             'Favorite Recipes',
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          SizedBox(height: 10),
+                          const SizedBox(height: 10),
                           Text(
                             widget.favoriteRecipes.isEmpty
                                 ? 'No favorite recipes yet. Start scanning to discover new recipes!'
@@ -2184,25 +2201,29 @@ class _ProfileScreenState extends State<ProfileScreen>
                             ),
                           ),
                           if (widget.favoriteRecipes.isNotEmpty) ...[
-                            SizedBox(height: 12),
+                            const SizedBox(height: 12),
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton.icon(
                                 onPressed: () {
                                   try {
-                                    Navigator.pushNamed(context, '/favorite-recipes');
+                                    Navigator.pushNamed(
+                                        context, '/favorite-recipes');
                                   } catch (e) {
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Favorites page unavailable')),
+                                      const SnackBar(
+                                          content: Text(
+                                              'Favorites page unavailable')),
                                     );
                                   }
                                 },
-                                icon: Icon(Icons.favorite),
-                                label: Text('View Favorite Recipes'),
+                                icon: const Icon(Icons.favorite),
+                                label: const Text('View Favorite Recipes'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.red,
                                   foregroundColor: Colors.white,
-                                  padding: EdgeInsets.symmetric(vertical: 12),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 12),
                                 ),
                               ),
                             ),
@@ -2211,10 +2232,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 20),
-
-                  // DANGER ZONE: Delete account
                   _sectionContainer(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2228,18 +2246,19 @@ class _ProfileScreenState extends State<ProfileScreen>
                           ),
                         ),
                         const SizedBox(height: 8),
-                        Text(
+                        const Text(
                           'Permanently delete your account and all associated data. This action cannot be undone.',
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey.shade700,
+                            color: Colors.grey,
                           ),
                         ),
                         const SizedBox(height: 12),
                         SizedBox(
                           width: double.infinity,
                           child: OutlinedButton.icon(
-                            onPressed: _isLoading ? null : _confirmDeleteAccount,
+                            onPressed:
+                                _isLoading ? null : _confirmDeleteAccount,
                             icon: const Icon(Icons.delete_forever),
                             label: const Text('Delete My Account'),
                             style: OutlinedButton.styleFrom(
@@ -2251,7 +2270,6 @@ class _ProfileScreenState extends State<ProfileScreen>
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 100),
                 ],
               ),
