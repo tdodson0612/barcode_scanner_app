@@ -801,31 +801,62 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
     );
 
-    if (confirm != true) return;
-    if (!mounted) return;
+    if (confirm != true || !mounted) return;
 
     setState(() {
       _isLoading = true;
     });
 
     try {
+      // ✅ Call the DatabaseService method that handles everything
       await DatabaseService.deleteAccountCompletely();
+
+      if (!mounted) return;
+
+      // ✅ Sign out
       await AuthService.signOut();
 
       if (!mounted) return;
 
+      // ✅ Navigate to login
       Navigator.pushNamedAndRemoveUntil(
         context,
         '/login',
         (route) => false,
       );
+
+      // ✅ Show success message
+      Future.delayed(Duration(milliseconds: 500), () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Account deleted successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      });
+
     } catch (e) {
+      print('❌ Error deleting account: $e');
+      
       if (!mounted) return;
+
+      // Better error handling with specific messages
+      String errorMessage = 'Unable to delete account';
+      
+      if (e.toString().contains('No user')) {
+        errorMessage = 'You must be logged in to delete your account';
+      } else if (e.toString().contains('network')) {
+        errorMessage = 'Network error. Please check your connection.';
+      } else if (e.toString().contains('timeout')) {
+        errorMessage = 'Request timed out. Please try again.';
+      }
+
       await ErrorHandlingService.handleError(
         context: context,
         error: e,
         category: ErrorHandlingService.databaseError,
-        customMessage: 'Unable to delete account',
+        customMessage: errorMessage,
       );
     } finally {
       if (mounted) {

@@ -2627,91 +2627,69 @@ Shared from Recipe Scanner App
     final userId = currentUserId!;
     
     try {
+      print('🗑️ Starting account deletion for user: $userId');
+
       // 1) Get profile to extract picture URLs
       final profile = await getUserProfile(userId);
       final picturesJson = profile?['pictures'];
       final profilePictureUrl = profile?['profile_picture_url'];
       final backgroundPictureUrl = profile?['background_picture_url'];
 
-      // 1a) Remove gallery pictures from R2
+      // 2) Delete files from R2 storage
       if (picturesJson != null && picturesJson.isNotEmpty) {
-        final pictures = List<String>.from(jsonDecode(picturesJson));
-        
-        for (final url in pictures) {
-          try {
-            await _deleteFileByPublicUrl(url);
-          } catch (_) {}
+        try {
+          final pictures = List<String>.from(jsonDecode(picturesJson));
+          print('🗑️ Deleting ${pictures.length} gallery pictures...');
+          
+          for (final url in pictures) {
+            try {
+              await _deleteFileByPublicUrl(url);
+            } catch (e) {
+              print('⚠️ Failed to delete gallery picture: $e');
+            }
+          }
+        } catch (e) {
+          print('⚠️ Error parsing pictures: $e');
         }
       }
 
-      // 1b) Remove profile picture file
       if (profilePictureUrl is String && profilePictureUrl.isNotEmpty) {
         try {
+          print('🗑️ Deleting profile picture...');
           await _deleteFileByPublicUrl(profilePictureUrl);
-        } catch (_) {}
-      }
-
-      // 1c) Remove background picture file
-      if (backgroundPictureUrl is String && backgroundPictureUrl.isNotEmpty) {
-        try {
-          await _deleteFileByPublicUrl(backgroundPictureUrl);
-        } catch (_) {}
-      }
-
-      // 2) Delete favorite recipes
-      await _workerQuery(
-        action: 'delete',
-        table: 'favorite_recipes',
-        filters: {'user_id': userId},
-      );
-
-      // 3) Delete submitted recipes
-      await _workerQuery(
-        action: 'delete',
-        table: 'submitted_recipes',
-        filters: {'user_id': userId},
-      );
-
-      // 4) Delete friend links
-      final allRequests = await _workerQuery(
-        action: 'select',
-        table: 'friend_requests',
-        columns: ['id', 'sender', 'receiver'],
-      );
-
-      for (final row in allRequests as List) {
-        if (row['sender'] == userId || row['receiver'] == userId) {
-          await _workerQuery(
-            action: 'delete',
-            table: 'friend_requests',
-            filters: {'id': row['id']},
-          );
+        } catch (e) {
+          print('⚠️ Failed to delete profile picture: $e');
         }
       }
 
-      // 5) Delete messages
-      await _workerQuery(
-        action: 'delete',
-        table: 'messages',
-        filters: {'sender': userId},
-      );
-      await _workerQuery(
-        action: 'delete',
-        table: 'messages',
-        filters: {'receiver': userId},
-      );
+      if (backgroundPictureUrl is String && backgroundPictureUrl.isNotEmpty) {
+        try {
+          print('🗑️ Deleting background picture...');
+          await _deleteFileByPublicUrl(backgroundPictureUrl);
+        } catch (e) {
+          print('⚠️ Failed to delete background picture: $e');
+        }
+      }
 
-      // 6) Delete the user profile row
+      // 3) Delete the user profile (CASCADE will handle the rest!)
+      print('🗑️ Deleting user profile (CASCADE will delete related data)...');
       await _workerQuery(
         action: 'delete',
         table: 'user_profiles',
         filters: {'id': userId},
       );
 
-      // 7) Delete Supabase auth user
-      await Supabase.instance.client.auth.admin.deleteUser(userId);
-
+      // 4) Clear all local cache
+      print('🗑️ Clearing local cache...');
+      await clearAllUserCache();
+      
+      print('✅ Account deletion complete');
+      
+      // Note: With CASCADE rules in place, deleting user_profiles 
+      // automatically deletes all related records in other tables
+      
     } catch (e) {
+      print('❌ Error in deleteAccountCompletely: $e');
       throw Exception("Failed to delete account: $e");
     }
   }

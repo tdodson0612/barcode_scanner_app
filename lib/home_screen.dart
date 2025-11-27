@@ -1832,6 +1832,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
         child: Column(
           children: [
             const SizedBox(height: 20),
+            // Image Preview - ALWAYS SHOW if available
             if (_imageFile != null)
               Container(
                 decoration: BoxDecoration(
@@ -1848,13 +1849,13 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                   borderRadius: BorderRadius.circular(12),
                   child: Image.file(
                     _imageFile!,
-                    width: 200,
-                    height: 200,
+                    width: double.infinity, // FULL WIDTH instead of 200
+                    height: 300, // Larger height
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) {
                       return Container(
-                        width: 200,
-                        height: 200,
+                        width: double.infinity,
+                        height: 300,
                         decoration: BoxDecoration(
                           color: Colors.grey.shade300,
                           borderRadius: BorderRadius.circular(12),
@@ -1865,7 +1866,10 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                   ),
                 ),
               ),
+            
             const SizedBox(height: 20),
+            
+            // Action Buttons Row - ALWAYS SHOW
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
@@ -1874,11 +1878,11 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                   ElevatedButton.icon(
                     onPressed: _takePhoto,
                     icon: const Icon(Icons.camera_alt, size: 18),
-                    label: const Text('Retake', style: TextStyle(fontSize: 12)),
+                    label: const Text('Retake', style: TextStyle(fontSize: 14)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -1886,55 +1890,55 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                     ElevatedButton.icon(
                       onPressed: _submitPhoto,
                       icon: const Icon(Icons.send, size: 18),
-                      label: const Text('Analyze', style: TextStyle(fontSize: 12)),
+                      label: const Text('Analyze', style: TextStyle(fontSize: 14)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
                     ),
-                  if (_imageFile != null && !_isLoading)
+                  if (_nutritionText.isNotEmpty) ...[
                     const SizedBox(width: 8),
-                  if (_nutritionText.isNotEmpty)
                     ElevatedButton.icon(
                       onPressed: _addNutritionToGroceryList,
                       icon: const Icon(Icons.add_shopping_cart, size: 18),
-                      label: const Text('+ Grocery List +', style: TextStyle(fontSize: 12)),
+                      label: const Text('Grocery List', style: TextStyle(fontSize: 14)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.purple,
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
                     ),
-                  if (_nutritionText.isNotEmpty)
                     const SizedBox(width: 8),
-                  if (_nutritionText.isNotEmpty)
                     ElevatedButton.icon(
                       onPressed: _makeRecipeFromNutrition,
                       icon: const Icon(Icons.restaurant_menu, size: 18),
-                      label: const Text('+ Recipe +', style: TextStyle(fontSize: 12)),
+                      label: const Text('Make Recipe', style: TextStyle(fontSize: 14)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.teal,
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
                     ),
-                  if (_nutritionText.isNotEmpty)
-                    const SizedBox(width: 8),
+                  ],
+                  const SizedBox(width: 8),
                   ElevatedButton.icon(
                     onPressed: _resetToHome,
                     icon: const Icon(Icons.home, size: 18),
-                    label: const Text('Home', style: TextStyle(fontSize: 12)),
+                    label: const Text('Home', style: TextStyle(fontSize: 14)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.orange,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     ),
                   ),
                 ],
               ),
             ),
+            
             const SizedBox(height: 20),
+            
+            // Loading Indicator
             if (_isLoading)
               Container(
                 padding: const EdgeInsets.all(16),
@@ -1953,6 +1957,58 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                   ],
                 ),
               ),
+            
+            // Instruction Card - SHOW WHEN NO NUTRITION DATA YET
+            if (_nutritionText.isEmpty && !_isLoading)
+              Container(
+                padding: const EdgeInsets.all(20),
+                margin: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.1),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Icon(Icons.touch_app, size: 48, color: Colors.green),
+                    SizedBox(height: 12),
+                    Text(
+                      'Ready to Analyze!',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'Tap the "Analyze" button above to scan the barcode and get nutrition information.',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey.shade700,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.camera_alt, size: 20, color: Colors.blue),
+                        SizedBox(width: 8),
+                        Text('Not right? Tap "Retake"', style: TextStyle(color: Colors.grey.shade600)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            
+            // Nutrition Information
             if (_nutritionText.isNotEmpty)
               Container(
                 padding: const EdgeInsets.all(16),
@@ -1998,13 +2054,19 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                   ],
                 ),
               ),
+            
             const SizedBox(height: 20),
+            
+            // Liver Health Bar
             if (_showLiverBar && _liverHealthScore != null)
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 4),
                 child: LiverHealthBar(healthScore: _liverHealthScore!),
               ),
+            
             const SizedBox(height: 20),
+            
+            // Recipe Suggestions
             _buildNutritionRecipeSuggestions(),
           ],
         ),
