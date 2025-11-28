@@ -16,6 +16,7 @@ import '../services/error_handling_service.dart';
 import '../pages/user_profile_page.dart';
 import '../pages/edit_recipe_page.dart';
 import '../pages/submit_recipe.dart';
+import '../config/app_config.dart';
 
 class ProfileScreen extends StatefulWidget {
   final List<String> favoriteRecipes;
@@ -868,6 +869,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   // 🔧 Load profile + background URLs from database
+  // Replace the _loadProfile() method in ProfileScreen with this:
+
   Future<void> _loadProfile() async {
     if (!mounted) return;
 
@@ -884,26 +887,42 @@ class _ProfileScreenState extends State<ProfileScreen>
       if (profile != null && mounted) {
         final userName = profile['username'] ?? 'User';
         final userEmail = profile['email'] ?? '';
+        
+        // ✅ Use the correct field names from database
+        final profilePictureUrl = profile['profile_picture'] as String?;
+        final backgroundPictureUrl = profile['profile_background'] as String?;
 
-        final profilePictureUrl = profile['profile_picture_url'] as String?;
-        final backgroundPictureUrl = profile['background_picture_url'] as String?;
+        AppConfig.debugPrint('👤 Profile picture: $profilePictureUrl');
+        AppConfig.debugPrint('🏞️ Background picture: $backgroundPictureUrl');
 
         // Save to local preferences for fallback
         await prefs.setString('user_name', userName);
         await prefs.setString('user_email', userEmail);
+        if (profilePictureUrl != null) {
+          await prefs.setString('profile_picture_url', profilePictureUrl);
+        }
+        if (backgroundPictureUrl != null) {
+          await prefs.setString('background_picture_url', backgroundPictureUrl);
+        }
 
-        setState(() {
-          _userName = userName;
-          _userEmail = userEmail;
-          _nameController.text = userName;
-          _emailController.text = userEmail;
-          _profileImageUrl = profilePictureUrl;
-          _backgroundImageUrl = backgroundPictureUrl;
-        });
+        if (mounted) {
+          setState(() {
+            _userName = userName;
+            _userEmail = userEmail;
+            _nameController.text = userName;
+            _emailController.text = userEmail;
+            _profileImageUrl = profilePictureUrl;
+            _backgroundImageUrl = backgroundPictureUrl;
+            
+            AppConfig.debugPrint('✅ Profile loaded successfully');
+          });
+        }
       } else {
         // Fallback to local preferences
         final savedName = prefs.getString('user_name') ?? 'User';
         final savedEmail = prefs.getString('user_email') ?? '';
+        final savedProfilePicture = prefs.getString('profile_picture_url');
+        final savedBackgroundPicture = prefs.getString('background_picture_url');
 
         if (mounted) {
           setState(() {
@@ -911,15 +930,22 @@ class _ProfileScreenState extends State<ProfileScreen>
             _userEmail = savedEmail;
             _nameController.text = savedName;
             _emailController.text = savedEmail;
+            _profileImageUrl = savedProfilePicture;
+            _backgroundImageUrl = savedBackgroundPicture;
+            
+            AppConfig.debugPrint('⚠️ Using cached profile data');
           });
         }
       }
     } catch (e) {
-      print('Error loading profile: $e');
+      AppConfig.debugPrint('❌ Error loading profile: $e');
+      
       try {
         final prefs = await SharedPreferences.getInstance();
         final savedName = prefs.getString('user_name') ?? 'User';
         final savedEmail = prefs.getString('user_email') ?? '';
+        final savedProfilePicture = prefs.getString('profile_picture_url');
+        final savedBackgroundPicture = prefs.getString('background_picture_url');
 
         if (mounted) {
           setState(() {
@@ -927,10 +953,12 @@ class _ProfileScreenState extends State<ProfileScreen>
             _userEmail = savedEmail;
             _nameController.text = savedName;
             _emailController.text = savedEmail;
+            _profileImageUrl = savedProfilePicture;
+            _backgroundImageUrl = savedBackgroundPicture;
           });
         }
       } catch (e2) {
-        print('Error loading from preferences: $e2');
+        AppConfig.debugPrint('❌ Error loading from preferences: $e2');
       }
     } finally {
       if (mounted) {

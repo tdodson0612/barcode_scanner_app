@@ -900,134 +900,186 @@ Shared from Recipe Scanner App
   /// Upload and set the user's main profile picture (profile_picture_url)
   static Future<String> uploadProfilePicture(File imageFile) async {
     ensureUserAuthenticated();
-
+    
     try {
       final userId = currentUserId!;
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final fileName = 'profile_$timestamp.jpg';
       final filePath = '$userId/$fileName';
-
+      
+      // Check file size
       final fileSize = await imageFile.length();
-      AppConfig.debugPrint('📸 Profile image size: ${fileSize / 1024 / 1024} MB');
-
+      AppConfig.debugPrint('👤 Profile picture size: ${fileSize / 1024 / 1024} MB');
+      
       if (fileSize > 10 * 1024 * 1024) {
         throw Exception('Image file too large. Please choose a smaller image (max 10MB).');
       }
-
-      final bytes = await imageFile.readAsBytes();
-      final base64Image = base64Encode(bytes);
-
+      
+      // Read and encode image
+      final imageBytes = await imageFile.readAsBytes();
+      final base64Image = base64Encode(imageBytes);
+      
+      AppConfig.debugPrint('📤 Uploading profile picture to R2: $filePath');
+      
+      // Upload to R2 via Worker
       final publicUrl = await _workerStorageUpload(
-        bucket: _PROFILE_BUCKET,
+        bucket: 'profile-pictures',
         path: filePath,
         base64Data: base64Image,
         contentType: 'image/jpeg',
       );
-
+      
+      AppConfig.debugPrint('✅ Profile picture upload successful: $publicUrl');
+      
+      // Update profile with new picture URL
       await _workerQuery(
         action: 'update',
         table: 'user_profiles',
         filters: {'id': userId},
         data: {
-          'profile_picture_url': publicUrl,
+          'profile_picture': publicUrl,
           'updated_at': DateTime.now().toIso8601String(),
         },
       );
-
+      
+      // Clear cache
       await _clearCache('$_CACHE_USER_PROFILE$userId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
-
-      AppConfig.debugPrint('✅ Profile picture URL set: $publicUrl');
+      
+      AppConfig.debugPrint('✅ Profile picture saved to database');
+      
       return publicUrl;
+    } on FormatException {
+      throw Exception('Invalid image format. Please choose a valid image file.');
+    } on FileSystemException {
+      throw Exception('Unable to read image file. Please try another image.');
     } catch (e) {
-      AppConfig.debugPrint('❌ uploadProfilePicture error: $e');
-      throw Exception('Failed to upload profile picture: $e');
+      AppConfig.debugPrint('❌ Profile picture upload error: $e');
+      
+      final errorMsg = e.toString().toLowerCase();
+      
+      if (errorMsg.contains('authentication') || errorMsg.contains('401')) {
+        throw Exception('Session expired. Please sign out and sign back in.');
+      } else if (errorMsg.contains('network') || errorMsg.contains('socket')) {
+        throw Exception('Network error. Please check your internet connection and try again.');
+      } else if (errorMsg.contains('timeout')) {
+        throw Exception('Upload timeout. Please check your connection and try again.');
+      } else if (errorMsg.contains('413') || errorMsg.contains('too large')) {
+        throw Exception('Image file too large. Please choose a smaller image.');
+      } else if (errorMsg.contains('permission') || errorMsg.contains('403')) {
+        throw Exception('Permission denied. Please try signing out and back in.');
+      }
+      
+      rethrow;
     }
   }
+
 
   /// Upload and set the user's profile background (background_picture_url)
   static Future<String> uploadBackgroundPicture(File imageFile) async {
     ensureUserAuthenticated();
-
+    
     try {
       final userId = currentUserId!;
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final fileName = 'background_$timestamp.jpg';
       final filePath = '$userId/$fileName';
-
+      
+      // Check file size
       final fileSize = await imageFile.length();
-      AppConfig.debugPrint('📸 Background image size: ${fileSize / 1024 / 1024} MB');
-
+      AppConfig.debugPrint('🏞️ Background picture size: ${fileSize / 1024 / 1024} MB');
+      
       if (fileSize > 10 * 1024 * 1024) {
         throw Exception('Image file too large. Please choose a smaller image (max 10MB).');
       }
-
-      final bytes = await imageFile.readAsBytes();
-      final base64Image = base64Encode(bytes);
-
+      
+      // Read and encode image
+      final imageBytes = await imageFile.readAsBytes();
+      final base64Image = base64Encode(imageBytes);
+      
+      AppConfig.debugPrint('📤 Uploading background picture to R2: $filePath');
+      
+      // Upload to R2 via Worker
       final publicUrl = await _workerStorageUpload(
-        bucket: _BACKGROUND_BUCKET,
+        bucket: 'profile-pictures',
         path: filePath,
         base64Data: base64Image,
         contentType: 'image/jpeg',
       );
-
+      
+      AppConfig.debugPrint('✅ Background picture upload successful: $publicUrl');
+      
+      // Update profile with new background URL
       await _workerQuery(
         action: 'update',
         table: 'user_profiles',
         filters: {'id': userId},
         data: {
-          'background_picture_url': publicUrl,
+          'profile_background': publicUrl,
           'updated_at': DateTime.now().toIso8601String(),
         },
       );
-
+      
+      // Clear cache
       await _clearCache('$_CACHE_USER_PROFILE$userId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
-
-      AppConfig.debugPrint('✅ Background picture URL set: $publicUrl');
+      
+      AppConfig.debugPrint('✅ Background picture saved to database');
+      
       return publicUrl;
+    } on FormatException {
+      throw Exception('Invalid image format. Please choose a valid image file.');
+    } on FileSystemException {
+      throw Exception('Unable to read image file. Please try another image.');
     } catch (e) {
-      AppConfig.debugPrint('❌ uploadBackgroundPicture error: $e');
-      throw Exception('Failed to upload background picture: $e');
+      AppConfig.debugPrint('❌ Background picture upload error: $e');
+      
+      final errorMsg = e.toString().toLowerCase();
+      
+      if (errorMsg.contains('authentication') || errorMsg.contains('401')) {
+        throw Exception('Session expired. Please sign out and sign back in.');
+      } else if (errorMsg.contains('network') || errorMsg.contains('socket')) {
+        throw Exception('Network error. Please check your internet connection and try again.');
+      } else if (errorMsg.contains('timeout')) {
+        throw Exception('Upload timeout. Please check your connection and try again.');
+      } else if (errorMsg.contains('413') || errorMsg.contains('too large')) {
+        throw Exception('Image file too large. Please choose a smaller image.');
+      } else if (errorMsg.contains('permission') || errorMsg.contains('403')) {
+        throw Exception('Permission denied. Please try signing out and back in.');
+      }
+      
+      rethrow;
     }
   }
 
   /// Remove the background picture URL and delete the file from storage
   static Future<void> removeBackgroundPicture() async {
     ensureUserAuthenticated();
-    final userId = currentUserId!;
-
+    
     try {
-      final profile = await getUserProfile(userId);
-      final backgroundUrl = profile?['background_picture_url'] as String?;
-
-      if (backgroundUrl != null && backgroundUrl.isNotEmpty) {
-        try {
-          await _deleteFileByPublicUrl(backgroundUrl);
-        } catch (e) {
-          AppConfig.debugPrint('⚠️ Failed to delete background file from storage: $e');
-        }
-      }
-
+      final userId = currentUserId!;
+      
+      // Update profile to remove background
       await _workerQuery(
         action: 'update',
         table: 'user_profiles',
         filters: {'id': userId},
         data: {
-          'background_picture_url': null,
+          'profile_background': null,
           'updated_at': DateTime.now().toIso8601String(),
         },
       );
-
+      
+      // Clear cache
       await _clearCache('$_CACHE_USER_PROFILE$userId');
       await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
-
-      AppConfig.debugPrint('✅ Background picture cleared');
+      
+      AppConfig.debugPrint('✅ Background picture removed');
     } catch (e) {
-      throw Exception('Failed to reset background: $e');
+      throw Exception('Failed to remove background picture: $e');
     }
   }
+
 
   /// Upload to the user's photo album & append to pictures JSON array
   static Future<String> uploadPicture(File imageFile) async {
@@ -2622,75 +2674,226 @@ Shared from Recipe Scanner App
     }
   }
 
+  // Replace the deleteAccountCompletely() method in DatabaseService with this:
+
   static Future<void> deleteAccountCompletely() async {
     ensureUserAuthenticated();
     final userId = currentUserId!;
+    final authToken = _supabase.auth.currentSession?.accessToken;
     
     try {
-      print('🗑️ Starting account deletion for user: $userId');
+      AppConfig.debugPrint('🗑️ Starting account deletion for user: $userId');
 
       // 1) Get profile to extract picture URLs
       final profile = await getUserProfile(userId);
       final picturesJson = profile?['pictures'];
-      final profilePictureUrl = profile?['profile_picture_url'];
-      final backgroundPictureUrl = profile?['background_picture_url'];
-
-      // 2) Delete files from R2 storage
       if (picturesJson != null && picturesJson.isNotEmpty) {
-        try {
-          final pictures = List<String>.from(jsonDecode(picturesJson));
-          print('🗑️ Deleting ${pictures.length} gallery pictures...');
-          
-          for (final url in pictures) {
-            try {
-              await _deleteFileByPublicUrl(url);
-            } catch (e) {
-              print('⚠️ Failed to delete gallery picture: $e');
-            }
+        final pictures = List<String>.from(jsonDecode(picturesJson));
+        AppConfig.debugPrint('📸 Deleting ${pictures.length} pictures from storage');
+        
+        // Remove all pictures from R2
+        for (final url in pictures) {
+          try {
+            await deletePicture(url);
+          } catch (e) {
+            AppConfig.debugPrint('⚠️ Error deleting picture: $e');
           }
-        } catch (e) {
-          print('⚠️ Error parsing pictures: $e');
         }
       }
 
-      if (profilePictureUrl is String && profilePictureUrl.isNotEmpty) {
-        try {
-          print('🗑️ Deleting profile picture...');
-          await _deleteFileByPublicUrl(profilePictureUrl);
-        } catch (e) {
-          print('⚠️ Failed to delete profile picture: $e');
+      // 2) Delete favorite recipes
+      AppConfig.debugPrint('🍔 Deleting favorite recipes');
+      await _workerQuery(
+        action: 'delete',
+        table: 'favorite_recipes',
+        filters: {'user_id': userId},
+      );
+
+      // 3) Delete submitted recipes
+      AppConfig.debugPrint('🍳 Deleting submitted recipes');
+      await _workerQuery(
+        action: 'delete',
+        table: 'submitted_recipes',
+        filters: {'user_id': userId},
+      );
+
+      // 4) Delete recipe ratings and comments
+      AppConfig.debugPrint('⭐ Deleting recipe ratings and comments');
+      await _workerQuery(
+        action: 'delete',
+        table: 'recipe_ratings',
+        filters: {'user_id': userId},
+      );
+
+      await _workerQuery(
+        action: 'delete',
+        table: 'recipe_comments',
+        filters: {'user_id': userId},
+      );
+
+      // 5) Delete friend links
+      AppConfig.debugPrint('👥 Deleting friend connections');
+      final allRequests = await _workerQuery(
+        action: 'select',
+        table: 'friend_requests',
+        columns: ['id', 'sender', 'receiver'],
+      );
+
+      for (final row in allRequests as List) {
+        if (row['sender'] == userId || row['receiver'] == userId) {
+          try {
+            await _workerQuery(
+              action: 'delete',
+              table: 'friend_requests',
+              filters: {'id': row['id']},
+            );
+          } catch (e) {
+            AppConfig.debugPrint('⚠️ Error deleting friend request: $e');
+          }
         }
       }
 
-      if (backgroundPictureUrl is String && backgroundPictureUrl.isNotEmpty) {
-        try {
-          print('🗑️ Deleting background picture...');
-          await _deleteFileByPublicUrl(backgroundPictureUrl);
-        } catch (e) {
-          print('⚠️ Failed to delete background picture: $e');
-        }
+      // 6) Delete messages
+      AppConfig.debugPrint('💬 Deleting messages');
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'messages',
+          filters: {'sender': userId},
+        );
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting sent messages: $e');
       }
 
-      // 3) Delete the user profile (CASCADE will handle the rest!)
-      print('🗑️ Deleting user profile (CASCADE will delete related data)...');
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'messages',
+          filters: {'receiver': userId},
+        );
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting received messages: $e');
+      }
+
+      // 7) Delete user achievements and badges
+      AppConfig.debugPrint('🏆 Deleting achievements');
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'user_achievements',
+          filters: {'user_id': userId},
+        );
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting achievements: $e');
+      }
+
+      // 8) Delete grocery items
+      AppConfig.debugPrint('🛒 Deleting grocery list');
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'grocery_items',
+          filters: {'user_id': userId},
+        );
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting grocery items: $e');
+      }
+
+      // 9) Delete comment likes
+      AppConfig.debugPrint('👍 Deleting comment likes');
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'comment_likes',
+          filters: {'user_id': userId},
+        );
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting comment likes: $e');
+      }
+
+      // 10) Delete the user profile row from database
+      AppConfig.debugPrint('👤 Deleting user profile');
       await _workerQuery(
         action: 'delete',
         table: 'user_profiles',
         filters: {'id': userId},
       );
 
-      // 4) Clear all local cache
-      print('🗑️ Clearing local cache...');
+      // 11) Clear all local cache BEFORE signing out
+      AppConfig.debugPrint('🧹 Clearing local cache');
       await clearAllUserCache();
-      
-      print('✅ Account deletion complete');
-      
-      // Note: With CASCADE rules in place, deleting user_profiles 
-      // automatically deletes all related records in other tables
-      
+
+      // 12) Delete Supabase auth user via Worker endpoint
+      AppConfig.debugPrint('🔐 Deleting auth user via Worker');
+      try {
+        if (authToken == null) {
+          throw Exception('No auth token available');
+        }
+
+        final response = await http.post(
+          Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/auth/delete-user'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'userId': userId,
+            'authToken': authToken,
+          }),
+        );
+
+        AppConfig.debugPrint('📡 Worker response: ${response.statusCode}');
+
+        if (response.statusCode != 200) {
+          final errorBody = response.body;
+          AppConfig.debugPrint('❌ Auth delete failed: $errorBody');
+          throw Exception('Failed to delete auth user: ${response.statusCode}');
+        }
+
+        AppConfig.debugPrint('✅ Auth user deleted successfully');
+      } catch (e) {
+        AppConfig.debugPrint('❌ Auth deletion error: $e');
+        // Don't rethrow here - account data is already deleted
+        // Just log it and continue
+      }
+
+      AppConfig.debugPrint('✅ Account deletion complete');
+
     } catch (e) {
-      print('❌ Error in deleteAccountCompletely: $e');
+      AppConfig.debugPrint('❌ Account deletion error: $e');
       throw Exception("Failed to delete account: $e");
     }
+  }
+  // Add these methods to DatabaseService in lib/services/database_service.dart
+
+  // =====================================================
+  // PROFILE & BACKGROUND PICTURE MANAGEMENT (via Worker → R2)
+  // =====================================================
+  
+  static Future<String?> getProfilePicture(String userId) async {
+    try {
+      final profile = await getUserProfile(userId);
+      return profile?['profile_picture'] as String?;
+    } catch (e) {
+      AppConfig.debugPrint('Error getting profile picture: $e');
+      return null;
+    }
+  }
+
+  static Future<String?> getCurrentProfilePicture() async {
+    if (currentUserId == null) return null;
+    return getProfilePicture(currentUserId!);
+  }
+
+  static Future<String?> getBackgroundPicture(String userId) async {
+    try {
+      final profile = await getUserProfile(userId);
+      return profile?['profile_background'] as String?;
+    } catch (e) {
+      AppConfig.debugPrint('Error getting background picture: $e');
+      return null;
+    }
+  }
+
+  static Future<String?> getCurrentBackgroundPicture() async {
+    if (currentUserId == null) return null;
+    return getBackgroundPicture(currentUserId!);
   }
 }
