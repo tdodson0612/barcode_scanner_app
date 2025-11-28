@@ -1,4 +1,5 @@
-// lib/services/auth_service.dart - SIMPLIFIED: Direct Supabase auth (no Worker routing)
+// lib/services/auth_service.dart - FINAL: Handle profile creation failures gracefully
+
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/app_config.dart';
@@ -16,19 +17,12 @@ class AuthService {
   static User? get currentUser => _supabase.auth.currentUser;
   static String? get currentUserId => currentUser?.id;
   
-  // ADD: Get username from user metadata or fetch from database
   static String? get currentUsername {
-    // Try to get from user metadata first
     final username = currentUser?.userMetadata?['username'] as String?;
     if (username != null) return username;
-    
-    // If not in metadata, it needs to be fetched from database
-    // This is a synchronous getter, so we can't do async operations here
-    // The calling code will need to fetch it if null
     return null;
   }
   
-  // ADD: Async method to fetch username from database if needed
   static Future<String?> fetchCurrentUsername() async {
     if (currentUserId == null) return null;
     
@@ -48,7 +42,7 @@ class AuthService {
     return _premiumEmails.contains(normalizedEmail);
   }
 
-  // SIGN UP - Direct Supabase
+  // SIGN UP - Direct Supabase with profile creation
   static Future<AuthResponse> signUp({
     required String email,
     required String password,
@@ -62,13 +56,35 @@ class AuthService {
       if (response.user != null) {
         final normalizedEmail = email.trim().toLowerCase();
         final isPremium = _isDefaultPremiumEmail(normalizedEmail);
+        final userId = response.user!.id;
 
-        // Create profile via Worker (database operation)
-        await DatabaseService.createUserProfile(
-          response.user!.id,
-          email,
-          isPremium: isPremium,
-        );
+        // ✅ WAIT for session to establish
+        await Future.delayed(const Duration(seconds: 1));
+
+        // Verify auth token exists
+        final session = _supabase.auth.currentSession;
+        if (session == null) {
+          AppConfig.debugPrint('⚠️ Warning: No session established yet');
+        }
+
+        try {
+          // ✅ Try to create profile
+          await DatabaseService.createUserProfile(
+            userId,
+            email,
+            isPremium: isPremium,
+          );
+          AppConfig.debugPrint('✅ Profile created successfully during signup');
+        } catch (profileError) {
+          AppConfig.debugPrint('⚠️ Profile creation failed during signup: $profileError');
+          
+          // ✅ NEW: Mark that this user needs profile creation on next login
+          // This is a safety net - profile will be auto-created on first login if it doesn't exist
+          AppConfig.debugPrint('📝 User will have profile created on first login');
+          
+          // Don't block signup - re-throw so user knows there was an issue
+          throw Exception('Signup succeeded but profile setup had an issue. Please try signing in.');
+        }
       }
 
       return response;
@@ -77,7 +93,7 @@ class AuthService {
     }
   }
 
-  // SIGN IN - Direct Supabase
+  // SIGN IN - Direct Supabase with profile safety check
   static Future<AuthResponse> signIn({
     required String email,
     required String password,
@@ -89,9 +105,25 @@ class AuthService {
       );
 
       if (response.user != null) {
+        final userId = response.user!.id;
         final normalizedEmail = email.trim().toLowerCase();
+        
+        // ✅ NEW: Safety check - ensure profile exists
+        try {
+          await _ensureUserProfileExists(userId, email);
+        } catch (profileError) {
+          AppConfig.debugPrint('⚠️ Warning: Could not verify profile: $profileError');
+          // Don't block login - user can still proceed
+          // Profile will be created/fixed on next app restart or when accessing profile features
+        }
+        
+        // Set premium status if applicable
         if (_isDefaultPremiumEmail(normalizedEmail)) {
-          await _ensurePremiumStatus(response.user!.id);
+          try {
+            await _ensurePremiumStatus(userId);
+          } catch (premiumError) {
+            AppConfig.debugPrint('⚠️ Warning: Could not set premium status: $premiumError');
+          }
         }
       }
 
@@ -101,14 +133,41 @@ class AuthService {
     }
   }
 
+  /// ✅ NEW: Ensure user profile exists, create if missing
+  static Future<void> _ensureUserProfileExists(String userId, String email) async {
+    try {
+      // Check if profile already exists
+      final profile = await DatabaseService.getUserProfile(userId);
+      
+      if (profile == null) {
+        AppConfig.debugPrint('📝 Profile missing - creating now...');
+        
+        // Profile doesn't exist, create it
+        await DatabaseService.createUserProfile(
+          userId,
+          email,
+          isPremium: false,
+        );
+        
+        AppConfig.debugPrint('✅ Profile created successfully on login');
+      } else {
+        AppConfig.debugPrint('✅ Profile already exists');
+      }
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error ensuring profile exists: $e');
+      throw e;
+    }
+  }
+
   static Future<void> _ensurePremiumStatus(String userId) async {
     try {
       final currentProfile = await DatabaseService.getUserProfile(userId);
       if (currentProfile != null && currentProfile['is_premium'] != true) {
+        AppConfig.debugPrint('💎 Setting premium status for: $userId');
         await DatabaseService.setPremiumStatus(userId, true);
       }
     } catch (e) {
-      print('Error ensuring premium status: $e');
+      AppConfig.debugPrint('⚠️ Error ensuring premium status: $e');
     }
   }
 

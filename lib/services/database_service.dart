@@ -52,10 +52,15 @@ class DatabaseService {
     String? orderBy,
     bool? ascending,
     int? limit,
+    bool requireAuth = false, // ✅ NEW: Require auth for sensitive operations
   }) async {
     try {
-      // ✅ GET THE USER'S AUTH TOKEN
       final authToken = _supabase.auth.currentSession?.accessToken;
+      
+      // ✅ NEW: Verify auth for sensitive operations
+      if (requireAuth && authToken == null) {
+        throw Exception('Authentication required. Please sign in again.');
+      }
       
       AppConfig.debugPrint('🔐 Worker query ($action) with auth: ${authToken != null ? "YES" : "NO"}');
       
@@ -65,7 +70,7 @@ class DatabaseService {
         body: jsonEncode({
           'action': action,
           'table': table,
-          'authToken': authToken, // ✅ PASS THE TOKEN
+          'authToken': authToken,
           if (columns != null) 'columns': columns,
           if (filters != null) 'filters': filters,
           if (data != null) 'data': data,
@@ -73,15 +78,20 @@ class DatabaseService {
           if (ascending != null) 'ascending': ascending,
           if (limit != null) 'limit': limit,
         }),
+      ).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () => throw Exception('Worker request timed out'),
       );
 
       if (response.statusCode < 200 || response.statusCode > 299) {
-        throw Exception('Worker query failed: ${response.body}');
+        final errorBody = response.body;
+        AppConfig.debugPrint('❌ Worker error ($action): ${response.statusCode} - $errorBody');
+        throw Exception('Worker query failed ($action): $errorBody');
       }
 
       return jsonDecode(response.body);
     } catch (e) {
-      throw Exception('Failed to execute worker query: $e');
+      throw Exception('Failed to execute worker query ($action): $e');
     }
   }
 
@@ -94,15 +104,22 @@ class DatabaseService {
   }) async {
     try {
       final authToken = _supabase.auth.currentSession?.accessToken;
-     
+    
+      // ✅ REQUIRE auth token
       if (authToken == null) {
-        throw Exception('Authentication required. Please sign in again.');
+        throw Exception('Session expired. Please sign out and sign back in.');
       }
-     
+    
       AppConfig.debugPrint('🔐 Storage upload with auth token');
       AppConfig.debugPrint('📦 Bucket: $bucket, Path: $path');
-      AppConfig.debugPrint('📊 Data size: ${base64Data.length} chars (${(base64Data.length * 0.75 / 1024 / 1024).toStringAsFixed(2)} MB)');
-     
+      AppConfig.debugPrint('📊 Data size: ${base64Data.length} chars');
+    
+      // ✅ Validate file size early
+      final estimatedMB = (base64Data.length * 0.75 / 1024 / 1024);
+      if (estimatedMB > 10) {
+        throw Exception('Image file too large. Please choose a smaller image (max 10MB).');
+      }
+    
       final response = await http.post(
         Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/storage'),
         headers: {'Content-Type': 'application/json'},
@@ -117,44 +134,38 @@ class DatabaseService {
       ).timeout(
         const Duration(seconds: 60),
         onTimeout: () {
-          throw Exception('Upload timeout - connection too slow or server not responding. Please try again.');
+          throw Exception('Upload timeout - connection too slow. Please try again.');
         },
       );
-     
+    
       AppConfig.debugPrint('📡 Response status: ${response.statusCode}');
-     
-      if (response.statusCode == 401) {
+    
+      // ✅ Better error handling
+      if (response.statusCode == 401 || response.statusCode == 403) {
         throw Exception('Authentication failed. Please sign out and sign back in.');
       }
-     
-      if (response.statusCode == 403) {
-        throw Exception('Permission denied. You can only upload to your own folder.');
-      }
-     
+    
       if (response.statusCode != 200) {
         final errorBody = response.body;
         AppConfig.debugPrint('❌ Upload failed: $errorBody');
-        throw Exception('Upload failed (${response.statusCode}): ${errorBody.length > 100 ? errorBody.substring(0, 100) : errorBody}');
+        throw Exception('Upload failed: ${errorBody.length > 100 ? errorBody.substring(0, 100) : errorBody}');
       }
-     
+    
       final uploadResult = jsonDecode(response.body);
       final publicUrl = uploadResult['url'] ?? uploadResult['publicUrl'];
-     
+    
       if (publicUrl == null) {
-        throw Exception('Upload succeeded but no URL returned. Response: ${response.body}');
+        throw Exception('Upload succeeded but no URL returned.');
       }
-     
+    
       AppConfig.debugPrint('✅ Upload successful: $publicUrl');
       return publicUrl;
     } on http.ClientException {
-      throw Exception('Network error: Unable to connect to server. Check your internet connection.');
+      throw Exception('Network error: Unable to connect. Check your internet connection.');
     } on FormatException {
       throw Exception('Invalid response from server. Please try again.');
     } catch (e) {
       AppConfig.debugPrint('❌ Storage upload error: $e');
-      if (e.toString().toLowerCase().contains('timeout')) {
-        throw Exception('Upload timeout. File may be too large or connection too slow.');
-      }
       rethrow;
     }
   }
@@ -488,9 +499,12 @@ class DatabaseService {
     {bool isPremium = false}
   ) async {
     try {
-      await _workerQuery(
+      AppConfig.debugPrint('👤 Creating user profile for: $userId');
+      
+      final response = await _workerQuery(
         action: 'insert',
         table: 'user_profiles',
+        requireAuth: true, // ✅ Require authentication
         data: {
           'id': userId,
           'email': email,
@@ -505,9 +519,17 @@ class DatabaseService {
         },
       );
       
-      await awardBadge('early_adopter');
+      AppConfig.debugPrint('✅ User profile created: $userId');
+      
+      // ✅ Award badge after successful profile creation
+      try {
+        await awardBadge('early_adopter');
+      } catch (badgeError) {
+        AppConfig.debugPrint('⚠️ Badge award failed (non-critical): $badgeError');
+      }
     } catch (e) {
-      throw Exception('Failed to create user profile: $e');
+      AppConfig.debugPrint('❌ Failed to create user profile: $e');
+      throw Exception('Profile creation failed: $e');
     }
   }
 
