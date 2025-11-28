@@ -1269,15 +1269,6 @@ Shared from Recipe Scanner App
     }
   }
 
-  static Future<String?> getProfilePictureUrl(String userId) async {
-    try {
-      final profile = await getUserProfile(userId);
-      return profile?['profile_picture_url'];
-    } catch (e) {
-      AppConfig.debugPrint('Error getting profile picture: $e');
-      return null;
-    }
-  }
 
   // ==================================================
   // FRIENDS LIST VISIBILITY
@@ -2751,12 +2742,6 @@ Shared from Recipe Scanner App
       throw Exception("Failed to delete account: $e");
     }
   }
-  // Add these methods to DatabaseService in lib/services/database_service.dart
-
-  // =====================================================
-  // PROFILE & BACKGROUND PICTURE MANAGEMENT (via Worker → R2)
-  // =====================================================
-  
   static Future<String?> getProfilePicture(String userId) async {
     try {
       final profile = await getUserProfile(userId);
