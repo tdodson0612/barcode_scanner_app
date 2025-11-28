@@ -2674,7 +2674,7 @@ Shared from Recipe Scanner App
     }
   }
 
-  // Replace the deleteAccountCompletely() method in DatabaseService with this:
+  // Replace your existing deleteAccountCompletely() in database_service.dart
 
   static Future<void> deleteAccountCompletely() async {
     ensureUserAuthenticated();
@@ -2685,179 +2685,69 @@ Shared from Recipe Scanner App
       AppConfig.debugPrint('🗑️ Starting account deletion for user: $userId');
 
       // 1) Get profile to extract picture URLs
+      AppConfig.debugPrint('📋 Step 1: Fetching user profile...');
       final profile = await getUserProfile(userId);
+      AppConfig.debugPrint('✅ Profile fetched: ${profile != null}');
+      
       final picturesJson = profile?['pictures'];
+      final profilePictureUrl = profile?['profile_picture_url'];
+      final backgroundPictureUrl = profile?['background_picture_url'];
+
+      // 2) Delete files from R2 storage
       if (picturesJson != null && picturesJson.isNotEmpty) {
-        final pictures = List<String>.from(jsonDecode(picturesJson));
-        AppConfig.debugPrint('📸 Deleting ${pictures.length} pictures from storage');
-        
-        // Remove all pictures from R2
-        for (final url in pictures) {
-          try {
-            await deletePicture(url);
-          } catch (e) {
-            AppConfig.debugPrint('⚠️ Error deleting picture: $e');
+        try {
+          final pictures = List<String>.from(jsonDecode(picturesJson));
+          print('🗑️ Deleting ${pictures.length} gallery pictures...');
+          
+          for (final url in pictures) {
+            try {
+              await _deleteFileByPublicUrl(url);
+            } catch (e) {
+              print('⚠️ Failed to delete gallery picture: $e');
+            }
           }
+        } catch (e) {
+          print('⚠️ Error parsing pictures: $e');
         }
       }
 
-      // 2) Delete favorite recipes
-      AppConfig.debugPrint('🍔 Deleting favorite recipes');
-      await _workerQuery(
-        action: 'delete',
-        table: 'favorite_recipes',
-        filters: {'user_id': userId},
-      );
-
-      // 3) Delete submitted recipes
-      AppConfig.debugPrint('🍳 Deleting submitted recipes');
-      await _workerQuery(
-        action: 'delete',
-        table: 'submitted_recipes',
-        filters: {'user_id': userId},
-      );
-
-      // 4) Delete recipe ratings and comments
-      AppConfig.debugPrint('⭐ Deleting recipe ratings and comments');
-      await _workerQuery(
-        action: 'delete',
-        table: 'recipe_ratings',
-        filters: {'user_id': userId},
-      );
-
-      await _workerQuery(
-        action: 'delete',
-        table: 'recipe_comments',
-        filters: {'user_id': userId},
-      );
-
-      // 5) Delete friend links
-      AppConfig.debugPrint('👥 Deleting friend connections');
-      final allRequests = await _workerQuery(
-        action: 'select',
-        table: 'friend_requests',
-        columns: ['id', 'sender', 'receiver'],
-      );
-
-      for (final row in allRequests as List) {
-        if (row['sender'] == userId || row['receiver'] == userId) {
-          try {
-            await _workerQuery(
-              action: 'delete',
-              table: 'friend_requests',
-              filters: {'id': row['id']},
-            );
-          } catch (e) {
-            AppConfig.debugPrint('⚠️ Error deleting friend request: $e');
-          }
+      if (profilePictureUrl is String && profilePictureUrl.isNotEmpty) {
+        try {
+          print('🗑️ Deleting profile picture...');
+          await _deleteFileByPublicUrl(profilePictureUrl);
+        } catch (e) {
+          print('⚠️ Failed to delete profile picture: $e');
         }
       }
 
-      // 6) Delete messages
-      AppConfig.debugPrint('💬 Deleting messages');
-      try {
-        await _workerQuery(
-          action: 'delete',
-          table: 'messages',
-          filters: {'sender': userId},
-        );
-      } catch (e) {
-        AppConfig.debugPrint('⚠️ Error deleting sent messages: $e');
+      if (backgroundPictureUrl is String && backgroundPictureUrl.isNotEmpty) {
+        try {
+          print('🗑️ Deleting background picture...');
+          await _deleteFileByPublicUrl(backgroundPictureUrl);
+        } catch (e) {
+          print('⚠️ Failed to delete background picture: $e');
+        }
       }
 
-      try {
-        await _workerQuery(
-          action: 'delete',
-          table: 'messages',
-          filters: {'receiver': userId},
-        );
-      } catch (e) {
-        AppConfig.debugPrint('⚠️ Error deleting received messages: $e');
-      }
-
-      // 7) Delete user achievements and badges
-      AppConfig.debugPrint('🏆 Deleting achievements');
-      try {
-        await _workerQuery(
-          action: 'delete',
-          table: 'user_achievements',
-          filters: {'user_id': userId},
-        );
-      } catch (e) {
-        AppConfig.debugPrint('⚠️ Error deleting achievements: $e');
-      }
-
-      // 8) Delete grocery items
-      AppConfig.debugPrint('🛒 Deleting grocery list');
-      try {
-        await _workerQuery(
-          action: 'delete',
-          table: 'grocery_items',
-          filters: {'user_id': userId},
-        );
-      } catch (e) {
-        AppConfig.debugPrint('⚠️ Error deleting grocery items: $e');
-      }
-
-      // 9) Delete comment likes
-      AppConfig.debugPrint('👍 Deleting comment likes');
-      try {
-        await _workerQuery(
-          action: 'delete',
-          table: 'comment_likes',
-          filters: {'user_id': userId},
-        );
-      } catch (e) {
-        AppConfig.debugPrint('⚠️ Error deleting comment likes: $e');
-      }
-
-      // 10) Delete the user profile row from database
-      AppConfig.debugPrint('👤 Deleting user profile');
+      // 3) Delete the user profile (CASCADE will handle the rest!)
+      print('🗑️ Deleting user profile (CASCADE will delete related data)...');
       await _workerQuery(
         action: 'delete',
         table: 'user_profiles',
         filters: {'id': userId},
       );
 
-      // 11) Clear all local cache BEFORE signing out
-      AppConfig.debugPrint('🧹 Clearing local cache');
+      // 4) Clear all local cache
+      print('🗑️ Clearing local cache...');
       await clearAllUserCache();
-
-      // 12) Delete Supabase auth user via Worker endpoint
-      AppConfig.debugPrint('🔐 Deleting auth user via Worker');
-      try {
-        if (authToken == null) {
-          throw Exception('No auth token available');
-        }
-
-        final response = await http.post(
-          Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/auth/delete-user'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'userId': userId,
-            'authToken': authToken,
-          }),
-        );
-
-        AppConfig.debugPrint('📡 Worker response: ${response.statusCode}');
-
-        if (response.statusCode != 200) {
-          final errorBody = response.body;
-          AppConfig.debugPrint('❌ Auth delete failed: $errorBody');
-          throw Exception('Failed to delete auth user: ${response.statusCode}');
-        }
-
-        AppConfig.debugPrint('✅ Auth user deleted successfully');
-      } catch (e) {
-        AppConfig.debugPrint('❌ Auth deletion error: $e');
-        // Don't rethrow here - account data is already deleted
-        // Just log it and continue
-      }
-
-      AppConfig.debugPrint('✅ Account deletion complete');
-
+      
+      print('✅ Account deletion complete');
+      
+      // Note: With CASCADE rules in place, deleting user_profiles 
+      // automatically deletes all related records in other tables
+      
     } catch (e) {
-      AppConfig.debugPrint('❌ Account deletion error: $e');
+      print('❌ Error in deleteAccountCompletely: $e');
       throw Exception("Failed to delete account: $e");
     }
   }
