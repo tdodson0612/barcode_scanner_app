@@ -2622,75 +2622,101 @@ Shared from Recipe Scanner App
     }
   }
 
+  // Replace your existing deleteAccountCompletely() in database_service.dart
+
   static Future<void> deleteAccountCompletely() async {
     ensureUserAuthenticated();
     final userId = currentUserId!;
     
     try {
-      print('🗑️ Starting account deletion for user: $userId');
+      AppConfig.debugPrint('🗑️ Starting account deletion for user: $userId');
 
       // 1) Get profile to extract picture URLs
+      AppConfig.debugPrint('📋 Step 1: Fetching user profile...');
       final profile = await getUserProfile(userId);
+      AppConfig.debugPrint('✅ Profile fetched: ${profile != null}');
+      
       final picturesJson = profile?['pictures'];
       final profilePictureUrl = profile?['profile_picture_url'];
       final backgroundPictureUrl = profile?['background_picture_url'];
 
-      // 2) Delete files from R2 storage
+      // 2) Delete files from R2 storage (non-critical - continue even if fails)
+      AppConfig.debugPrint('📋 Step 2: Deleting pictures from storage...');
+      
       if (picturesJson != null && picturesJson.isNotEmpty) {
         try {
           final pictures = List<String>.from(jsonDecode(picturesJson));
-          print('🗑️ Deleting ${pictures.length} gallery pictures...');
+          AppConfig.debugPrint('🗑️ Deleting ${pictures.length} gallery pictures...');
           
           for (final url in pictures) {
             try {
               await _deleteFileByPublicUrl(url);
             } catch (e) {
-              print('⚠️ Failed to delete gallery picture: $e');
+              AppConfig.debugPrint('⚠️ Failed to delete gallery picture: $e');
+              // Continue - this is not critical
             }
           }
+          AppConfig.debugPrint('✅ Gallery pictures processed');
         } catch (e) {
-          print('⚠️ Error parsing pictures: $e');
+          AppConfig.debugPrint('⚠️ Error parsing pictures: $e');
+          // Continue - this is not critical
         }
       }
 
       if (profilePictureUrl is String && profilePictureUrl.isNotEmpty) {
         try {
-          print('🗑️ Deleting profile picture...');
+          AppConfig.debugPrint('🗑️ Deleting profile picture...');
           await _deleteFileByPublicUrl(profilePictureUrl);
+          AppConfig.debugPrint('✅ Profile picture deleted');
         } catch (e) {
-          print('⚠️ Failed to delete profile picture: $e');
+          AppConfig.debugPrint('⚠️ Failed to delete profile picture: $e');
+          // Continue - this is not critical
         }
       }
 
       if (backgroundPictureUrl is String && backgroundPictureUrl.isNotEmpty) {
         try {
-          print('🗑️ Deleting background picture...');
+          AppConfig.debugPrint('🗑️ Deleting background picture...');
           await _deleteFileByPublicUrl(backgroundPictureUrl);
+          AppConfig.debugPrint('✅ Background picture deleted');
         } catch (e) {
-          print('⚠️ Failed to delete background picture: $e');
+          AppConfig.debugPrint('⚠️ Failed to delete background picture: $e');
+          // Continue - this is not critical
         }
       }
 
       // 3) Delete the user profile (CASCADE will handle the rest!)
-      print('🗑️ Deleting user profile (CASCADE will delete related data)...');
-      await _workerQuery(
-        action: 'delete',
-        table: 'user_profiles',
-        filters: {'id': userId},
-      );
+      AppConfig.debugPrint('📋 Step 3: Deleting user profile (CASCADE deletes related data)...');
+      
+      try {
+        final deleteResult = await _workerQuery(
+          action: 'delete',
+          table: 'user_profiles',
+          filters: {'id': userId},
+        );
+        AppConfig.debugPrint('✅ User profile deleted. Result: $deleteResult');
+      } catch (e) {
+        AppConfig.debugPrint('❌ CRITICAL ERROR deleting user_profiles: $e');
+        AppConfig.debugPrint('Error type: ${e.runtimeType}');
+        AppConfig.debugPrint('Error details: ${e.toString()}');
+        throw Exception('Failed to delete user profile: $e');
+      }
 
       // 4) Clear all local cache
-      print('🗑️ Clearing local cache...');
+      AppConfig.debugPrint('📋 Step 4: Clearing local cache...');
       await clearAllUserCache();
+      AppConfig.debugPrint('✅ Local cache cleared');
       
-      print('✅ Account deletion complete');
+      AppConfig.debugPrint('✅✅✅ Account deletion COMPLETE');
       
-      // Note: With CASCADE rules in place, deleting user_profiles 
-      // automatically deletes all related records in other tables
+    } catch (e, stackTrace) {
+      AppConfig.debugPrint('❌❌❌ FATAL ERROR in deleteAccountCompletely');
+      AppConfig.debugPrint('Error: $e');
+      AppConfig.debugPrint('Type: ${e.runtimeType}');
+      AppConfig.debugPrint('Stack trace: $stackTrace');
       
-    } catch (e) {
-      print('❌ Error in deleteAccountCompletely: $e');
-      throw Exception("Failed to delete account: $e");
+      // Rethrow with more context
+      throw Exception("Account deletion failed at critical step: $e");
     }
   }
 }

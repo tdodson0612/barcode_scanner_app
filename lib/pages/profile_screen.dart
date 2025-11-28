@@ -836,27 +836,63 @@ class _ProfileScreenState extends State<ProfileScreen>
         );
       });
 
-    } catch (e) {
+    } catch (e, stackTrace) {
       print('❌ Error deleting account: $e');
+      print('Stack trace: $stackTrace');
       
       if (!mounted) return;
 
       // Better error handling with specific messages
       String errorMessage = 'Unable to delete account';
       
-      if (e.toString().contains('No user')) {
+      final errorString = e.toString().toLowerCase();
+      
+      if (errorString.contains('no user')) {
         errorMessage = 'You must be logged in to delete your account';
-      } else if (e.toString().contains('network')) {
+      } else if (errorString.contains('network') || errorString.contains('socket')) {
         errorMessage = 'Network error. Please check your connection.';
-      } else if (e.toString().contains('timeout')) {
+      } else if (errorString.contains('timeout')) {
         errorMessage = 'Request timed out. Please try again.';
+      } else if (errorString.contains('authentication') || errorString.contains('401')) {
+        errorMessage = 'Session expired. Please sign out and sign back in.';
+      } else if (errorString.contains('permission') || errorString.contains('403')) {
+        errorMessage = 'Permission denied. Please sign out and try again.';
+      } else {
+        // Show the actual error to help debug
+        errorMessage = 'Delete failed: ${e.toString().substring(0, e.toString().length > 100 ? 100 : e.toString().length)}';
       }
 
-      await ErrorHandlingService.handleError(
+      // Show detailed error dialog
+      showDialog(
         context: context,
-        error: e,
-        category: ErrorHandlingService.databaseError,
-        customMessage: errorMessage,
+        builder: (context) => AlertDialog(
+          title: Text('Delete Account Failed'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(errorMessage),
+                SizedBox(height: 16),
+                Text(
+                  'Technical details:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  e.toString(),
+                  style: TextStyle(fontSize: 10, fontFamily: 'monospace'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('OK'),
+            ),
+          ],
+        ),
       );
     } finally {
       if (mounted) {
