@@ -523,17 +523,30 @@ class _AppDrawerState extends State<AppDrawer> {
   void _showSignOutDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: false, // Prevent dismissing by tapping outside
+      builder: (dialogContext) => AlertDialog(
         title: Text('Sign Out'),
         content: Text('Are you sure you want to sign out?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () async {
-              Navigator.pop(context);
+              // Close dialog first
+              Navigator.pop(dialogContext);
+              
+              // Show loading indicator
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (ctx) => Center(
+                  child: CircularProgressIndicator(),
+                ),
+              );
+              
+              // Perform logout
               await _logout(context);
             },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -549,22 +562,33 @@ class _AppDrawerState extends State<AppDrawer> {
       // Clear the saved route BEFORE logging out
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('last_route');
-
+      
       // Sign out from Supabase
       await AuthService.signOut();
       
       // Clear all preferences
       await prefs.clear();
-
-      // Navigate to login
+      
+      // Dismiss loading dialog and navigate to login
       if (mounted) {
+        // Pop loading dialog
+        Navigator.pop(context);
+        
+        // Navigate to login and clear all routes
         Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
       }
     } catch (e) {
       print('Error during logout: $e');
+      
+      // Dismiss loading dialog
       if (mounted) {
+        Navigator.pop(context);
+        
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error signing out: $e')),
+          SnackBar(
+            content: Text('Error signing out: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }

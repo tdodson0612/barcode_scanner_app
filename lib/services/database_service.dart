@@ -2692,7 +2692,6 @@ Shared from Recipe Scanner App
   static Future<void> deleteAccountCompletely() async {
     ensureUserAuthenticated();
     final userId = currentUserId!;
-    final authToken = _supabase.auth.currentSession?.accessToken;
     
     try {
       AppConfig.debugPrint('🗑️ Starting account deletion for user: $userId');
@@ -2700,7 +2699,7 @@ Shared from Recipe Scanner App
       // 1) Get profile to extract picture URLs
       AppConfig.debugPrint('📋 Step 1: Fetching user profile...');
       final profile = await getUserProfile(userId);
-      AppConfig.debugPrint('✅ Profile fetched: ${profile != null}');
+      AppConfig.debugPrint('✅ Profile fetched');
       
       final picturesJson = profile?['pictures'];
       final profilePictureUrl = profile?['profile_picture_url'];
@@ -2710,57 +2709,190 @@ Shared from Recipe Scanner App
       if (picturesJson != null && picturesJson.isNotEmpty) {
         try {
           final pictures = List<String>.from(jsonDecode(picturesJson));
-          print('🗑️ Deleting ${pictures.length} gallery pictures...');
+          AppConfig.debugPrint('🗑️ Deleting ${pictures.length} gallery pictures...');
           
           for (final url in pictures) {
             try {
               await _deleteFileByPublicUrl(url);
             } catch (e) {
-              print('⚠️ Failed to delete gallery picture: $e');
+              AppConfig.debugPrint('⚠️ Failed to delete gallery picture: $e');
             }
           }
         } catch (e) {
-          print('⚠️ Error parsing pictures: $e');
+          AppConfig.debugPrint('⚠️ Error parsing pictures: $e');
         }
       }
 
       if (profilePictureUrl is String && profilePictureUrl.isNotEmpty) {
         try {
-          print('🗑️ Deleting profile picture...');
+          AppConfig.debugPrint('🗑️ Deleting profile picture...');
           await _deleteFileByPublicUrl(profilePictureUrl);
         } catch (e) {
-          print('⚠️ Failed to delete profile picture: $e');
+          AppConfig.debugPrint('⚠️ Failed to delete profile picture: $e');
         }
       }
 
       if (backgroundPictureUrl is String && backgroundPictureUrl.isNotEmpty) {
         try {
-          print('🗑️ Deleting background picture...');
+          AppConfig.debugPrint('🗑️ Deleting background picture...');
           await _deleteFileByPublicUrl(backgroundPictureUrl);
         } catch (e) {
-          print('⚠️ Failed to delete background picture: $e');
+          AppConfig.debugPrint('⚠️ Failed to delete background picture: $e');
         }
       }
 
-      // 3) Delete the user profile (CASCADE will handle the rest!)
-      print('🗑️ Deleting user profile (CASCADE will delete related data)...');
+      // 3) Delete all user data in correct order (children first)
+      AppConfig.debugPrint('🗑️ Step 3: Deleting user data from all tables...');
+      
+      // Delete grocery items
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'grocery_items',
+          filters: {'user_id': userId},
+        );
+        AppConfig.debugPrint('✅ Deleted grocery_items');
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting grocery_items: $e');
+      }
+
+      // Delete submitted recipes
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'submitted_recipes',
+          filters: {'user_id': userId},
+        );
+        AppConfig.debugPrint('✅ Deleted submitted_recipes');
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting submitted_recipes: $e');
+      }
+
+      // Delete favorite recipes
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'favorite_recipes',
+          filters: {'user_id': userId},
+        );
+        AppConfig.debugPrint('✅ Deleted favorite_recipes');
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting favorite_recipes: $e');
+      }
+
+      // Delete user achievements
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'user_achievements',
+          filters: {'user_id': userId},
+        );
+        AppConfig.debugPrint('✅ Deleted user_achievements');
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting user_achievements: $e');
+      }
+
+      // Delete recipe ratings
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'recipe_ratings',
+          filters: {'user_id': userId},
+        );
+        AppConfig.debugPrint('✅ Deleted recipe_ratings');
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting recipe_ratings: $e');
+      }
+
+      // Delete recipe comments
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'recipe_comments',
+          filters: {'user_id': userId},
+        );
+        AppConfig.debugPrint('✅ Deleted recipe_comments');
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting recipe_comments: $e');
+      }
+
+      // Delete comment likes
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'comment_likes',
+          filters: {'user_id': userId},
+        );
+        AppConfig.debugPrint('✅ Deleted comment_likes');
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting comment_likes: $e');
+      }
+
+      // Delete friend requests (where user is sender)
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'friend_requests',
+          filters: {'sender': userId},
+        );
+        AppConfig.debugPrint('✅ Deleted friend_requests (sender)');
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting friend_requests (sender): $e');
+      }
+
+      // Delete friend requests (where user is receiver)
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'friend_requests',
+          filters: {'receiver': userId},
+        );
+        AppConfig.debugPrint('✅ Deleted friend_requests (receiver)');
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting friend_requests (receiver): $e');
+      }
+
+      // Delete messages (where user is sender)
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'messages',
+          filters: {'sender': userId},
+        );
+        AppConfig.debugPrint('✅ Deleted messages (sender)');
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting messages (sender): $e');
+      }
+
+      // Delete messages (where user is receiver)
+      try {
+        await _workerQuery(
+          action: 'delete',
+          table: 'messages',
+          filters: {'receiver': userId},
+        );
+        AppConfig.debugPrint('✅ Deleted messages (receiver)');
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Error deleting messages (receiver): $e');
+      }
+
+      // 4) Finally delete the user profile
+      AppConfig.debugPrint('🗑️ Step 4: Deleting user profile...');
       await _workerQuery(
         action: 'delete',
         table: 'user_profiles',
         filters: {'id': userId},
       );
+      AppConfig.debugPrint('✅ Deleted user_profiles');
 
-      // 4) Clear all local cache
-      print('🗑️ Clearing local cache...');
+      // 5) Clear all local cache
+      AppConfig.debugPrint('🗑️ Step 5: Clearing local cache...');
       await clearAllUserCache();
       
-      print('✅ Account deletion complete');
-      
-      // Note: With CASCADE rules in place, deleting user_profiles 
-      // automatically deletes all related records in other tables
+      AppConfig.debugPrint('✅ Account deletion complete');
       
     } catch (e) {
-      print('❌ Error in deleteAccountCompletely: $e');
+      AppConfig.debugPrint('❌ Error in deleteAccountCompletely: $e');
       throw Exception("Failed to delete account: $e");
     }
   }
