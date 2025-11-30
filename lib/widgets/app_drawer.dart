@@ -1,9 +1,10 @@
 // lib/widgets/app_drawer.dart - OPTIMIZED: Reuses cached unread count + clears route on logout
 import 'package:flutter/material.dart';
+import 'package:liver_wise/services/messaging_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../controllers/premium_gate_controller.dart';
 import '../services/auth_service.dart';
-import '../services/database_service.dart';
+import '../services/database_service_core.dart';
 
 class AppDrawer extends StatefulWidget {
   final String currentPage;
@@ -68,7 +69,7 @@ class _AppDrawerState extends State<AppDrawer> {
       }
       
       // Cache is stale or doesn't exist, fetch from database
-      final count = await DatabaseService.getUnreadMessageCount();
+      final count = await MessagingService.getUnreadMessageCount();
       
       // Save to cache
       await prefs.setInt(_cacheKey, count);

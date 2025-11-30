@@ -1,11 +1,15 @@
 // lib/pages/premium_page.dart - OPTIMIZED: Local caching to reduce Supabase egress
 import 'package:flutter/material.dart';
+import 'package:liver_wise/services/auth_service.dart';
+import 'package:liver_wise/services/premium_service.dart';
+import 'package:liver_wise/services/profile_service.dart';
+import 'package:liver_wise/services/scan_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
-import '../services/database_service.dart';
+import '../services/database_service_core.dart';
 import '../services/error_handling_service.dart';
 import '../controllers/premium_gate_controller.dart';
 
@@ -77,7 +81,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
 
   Future<void> _initializePremiumPage() async {
     try {
-      DatabaseService.ensureUserAuthenticated();
+      AuthService.ensureUserAuthenticated();
       await _checkPremiumStatus(forceRefresh: false);
       await _initializeInAppPurchase();
       _animationController.forward();
@@ -141,7 +145,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
     try {
       setState(() => _isLoading = true);
       
-      final userId = DatabaseService.currentUserId;
+      final userId = DatabaseServiceCore.currentUserId;
       if (userId == null || userId.isEmpty) {
         throw Exception('User not authenticated');
       }
@@ -212,8 +216,8 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       }
 
       // If we reach here, we need to fetch from database
-      final premiumStatus = await DatabaseService.isPremiumUser();
-      final dailyScans = await DatabaseService.getDailyScanCount();
+      final premiumStatus = await PremiumService.isPremiumUser();
+      final dailyScans = await ScanService.getDailyScanCount();
       final today = DateTime.now().toIso8601String().split('T')[0];
       final localTester = prefs.getBool('isTesterUser') ?? false;
       
@@ -437,7 +441,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   Future<void> _handleSuccessfulPurchase(PurchaseDetails purchaseDetails) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final userId = DatabaseService.currentUserId;
+      final userId = AuthService.currentUserId;
       
       if (userId == null || userId.isEmpty) {
         throw Exception('User not authenticated - invalid user ID');
@@ -446,7 +450,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       String planName;
 
       if (purchaseDetails.productID == premiumProductId) {
-        await DatabaseService.setPremiumStatus(userId, true);
+        await ProfileService.setPremiumStatus(userId, true);
         await prefs.setBool('isPremiumUser', true);
         await prefs.setBool('isTesterUser', false);
         

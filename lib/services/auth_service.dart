@@ -3,7 +3,10 @@
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/app_config.dart';
-import 'database_service.dart';
+
+// NEW: correct imports
+import 'profile_service.dart';
+import 'database_service_core.dart';
 
 class AuthService {
   static final SupabaseClient _supabase = Supabase.instance.client;
@@ -23,11 +26,18 @@ class AuthService {
     return null;
   }
   
+  static void ensureLoggedIn() {
+    if (!isLoggedIn || currentUserId == null) {
+      throw Exception('User must be logged in to perform this action.');
+    }
+  }
+
+
   static Future<String?> fetchCurrentUsername() async {
     if (currentUserId == null) return null;
     
     try {
-      final profile = await DatabaseService.getUserProfile(currentUserId!);
+      final profile = await ProfileService.getUserProfile(currentUserId!);
       return profile?['username'] as String?;
     } catch (e) {
       print('Error fetching username: $e');
@@ -69,7 +79,7 @@ class AuthService {
 
         try {
           // ✅ Try to create profile
-          await DatabaseService.createUserProfile(
+          await ProfileService.createUserProfile(
             userId,
             email,
             isPremium: isPremium,
@@ -137,13 +147,13 @@ class AuthService {
   static Future<void> _ensureUserProfileExists(String userId, String email) async {
     try {
       // Check if profile already exists
-      final profile = await DatabaseService.getUserProfile(userId);
+      final profile = await ProfileService.getUserProfile(userId);
       
       if (profile == null) {
         AppConfig.debugPrint('📝 Profile missing - creating now...');
         
         // Profile doesn't exist, create it
-        await DatabaseService.createUserProfile(
+        await ProfileService.createUserProfile(
           userId,
           email,
           isPremium: false,
@@ -161,10 +171,10 @@ class AuthService {
 
   static Future<void> _ensurePremiumStatus(String userId) async {
     try {
-      final currentProfile = await DatabaseService.getUserProfile(userId);
+      final currentProfile = await ProfileService.getUserProfile(userId);
       if (currentProfile != null && currentProfile['is_premium'] != true) {
         AppConfig.debugPrint('💎 Setting premium status for: $userId');
-        await DatabaseService.setPremiumStatus(userId, true);
+        await ProfileService.setPremiumStatus(userId, true);
       }
     } catch (e) {
       AppConfig.debugPrint('⚠️ Error ensuring premium status: $e');
@@ -174,7 +184,7 @@ class AuthService {
   // SIGN OUT - Direct Supabase
   static Future<void> signOut() async {
     try {
-      await DatabaseService.clearAllUserCache();
+      await DatabaseServiceCore.clearAllUserCache();
       await _supabase.auth.signOut();
     } catch (e) {
       throw Exception('Sign out failed: $e');
@@ -223,4 +233,10 @@ class AuthService {
       throw Exception('Failed to resend verification email: $e');
     }
   }
+  static void ensureUserAuthenticated() {
+    if (!isLoggedIn) {
+      throw Exception('User must be logged in');
+    }
+  }
+
 }

@@ -6,6 +6,7 @@ import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
+import 'package:liver_wise/services/grocery_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import '../widgets/premium_gate.dart';
@@ -19,7 +20,7 @@ import '../pages/search_users_page.dart';
 import '../widgets/app_drawer.dart';
 import '../config/app_config.dart';
 import '../widgets/menu_icon_with_badge.dart';
-import '../services/database_service.dart';
+import '../services/database_service_core.dart';
 
 class NutritionInfo {
   final String productName;
@@ -1046,7 +1047,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       // ✅ USE addToGroceryList (appends without deleting)
       int addedCount = 0;
       for (String foodWord in foodWords) {
-        await DatabaseService.addToGroceryList(foodWord);
+        await GroceryService.addToGroceryList(foodWord);
         addedCount++;
       }
 
@@ -1099,7 +1100,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       int addedCount = 0;
 
       for (String item in ingredients) {
-        await DatabaseService.addToGroceryList(item);
+        await GroceryService.addToGroceryList(item);
         addedCount++;
       }
 

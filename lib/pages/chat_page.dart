@@ -1,11 +1,12 @@
-// lib/pages/chat_page.dart - WITH LOCAL CACHING
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import '../services/database_service.dart';
+
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
+import '../services/messaging_service.dart';
+
 
 class ChatPage extends StatefulWidget {
   final String friendId;
@@ -38,7 +39,7 @@ class _ChatPageState extends State<ChatPage> {
     super.initState();
     _loadMessages();
     // Mark all messages from this friend as read
-    DatabaseService.markMessagesAsReadFrom(widget.friendId);
+    MessagingService.markMessagesAsReadFrom(widget.friendId);
   }
 
   @override
@@ -64,7 +65,7 @@ class _ChatPageState extends State<ChatPage> {
       }
       
       // STEP 2: Fetch from server to get any new messages
-      final serverMessages = await DatabaseService.getMessages(widget.friendId);
+      final serverMessages = await MessagingService.getMessages(widget.friendId);
       
       if (mounted) {
         // Sort messages by timestamp in ascending order (oldest to newest)
@@ -173,7 +174,7 @@ class _ChatPageState extends State<ChatPage> {
     await _saveMessagesToCache(_messages);
 
     try {
-      await DatabaseService.sendMessage(widget.friendId, content);
+      await MessagingService.sendMessage(widget.friendId, content);
       
       if (mounted) {
         // Reload messages to get the actual message with proper ID

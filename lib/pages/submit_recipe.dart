@@ -1,6 +1,7 @@
 // lib/pages/submit_recipe.dart - ENHANCED: Can accept pre-filled ingredients from scanner
 import 'package:flutter/material.dart';
-import '../services/database_service.dart';
+import 'package:liver_wise/services/submitted_recipes_service.dart';
+import '../services/database_service_core.dart';
 
 class SubmitRecipePage extends StatefulWidget {
   // NEW: Optional parameters to pre-fill form from scanner
@@ -49,7 +50,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
   Future<void> _initializeUser() async {
     try {
-      DatabaseService.ensureUserAuthenticated();
+      DatabaseServiceCore.ensureUserAuthenticated();
       setState(() => isLoading = false);
     } catch (e) {
       Navigator.pushReplacementNamed(context, '/login');
@@ -62,9 +63,9 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     setState(() => isSubmitting = true);
 
     try {
-      DatabaseService.ensureUserAuthenticated();
+      DatabaseServiceCore.ensureUserAuthenticated();
       
-      await DatabaseService.submitRecipe(
+      await SubmittedRecipesService.submitRecipe(
         _nameController.text.trim(),
         _ingredientsController.text.trim(),
         _directionsController.text.trim(),

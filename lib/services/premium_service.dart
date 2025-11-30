@@ -1,22 +1,25 @@
-//premium_service.dart
+// lib/services/premium_service.dart
+
 import 'package:shared_preferences/shared_preferences.dart';
-import 'database_service.dart';
+
 import 'auth_service.dart';
+import 'profile_service.dart';          // NEW: replaces DatabaseService
+import 'database_service_core.dart';    // For workerQuery when updating DB (via ProfileService indirectly)
 
 class PremiumService {
   static const int FREE_DAILY_SCANS = 3;
   static const String SCAN_COUNT_KEY = 'daily_scan_count';
   static const String LAST_SCAN_DATE_KEY = 'last_scan_date';
 
-  // Check if user is premium
-  // Check if user is premium
+  // ==================================================
+  // CHECK IF USER IS PREMIUM
+  // ==================================================
   static Future<bool> isPremiumUser() async {
     if (!AuthService.isLoggedIn) return false;
 
     try {
-      final profile = await DatabaseService.getUserProfile(AuthService.currentUserId!);
-      print('DEBUG: User profile: $profile'); // Debug line
-      print('DEBUG: is_premium value: ${profile?['is_premium']}'); // Debug line
+      final profile = await ProfileService.getUserProfile(AuthService.currentUserId!);
+
       return profile?['is_premium'] ?? false;
     } catch (e) {
       print('Error checking premium status: $e');
@@ -24,22 +27,27 @@ class PremiumService {
     }
   }
 
-  // Check if user can access premium features
+  // ==================================================
+  // CHECK ACCESS TO PREMIUM FEATURES
+  // ==================================================
   static Future<bool> canAccessPremiumFeature() async {
     return await isPremiumUser();
   }
 
-  // Set premium status
-  // Set premium status
+  // ==================================================
+  // SET PREMIUM STATUS
+  // ==================================================
   static Future<void> setPremiumStatus(bool isPremium) async {
     if (!AuthService.isLoggedIn) {
       throw Exception('User must be logged in to set premium status');
     }
-  
-    await DatabaseService.setPremiumStatus(AuthService.currentUserId!, isPremium);
+
+    await ProfileService.setPremiumStatus(AuthService.currentUserId!, isPremium);
   }
 
-  // Get remaining scan count for free users
+  // ==================================================
+  // REMAINING SCAN COUNT FOR FREE USERS
+  // ==================================================
   static Future<int> getRemainingScanCount() async {
     final isPremium = await isPremiumUser();
     if (isPremium) return -1; // Unlimited
@@ -59,7 +67,9 @@ class PremiumService {
     return FREE_DAILY_SCANS - currentCount;
   }
 
-  // Use a scan (increment count)
+  // ==================================================
+  // USE A SCAN (INCREMENT)
+  // ==================================================
   static Future<bool> useScan() async {
     final isPremium = await isPremiumUser();
     if (isPremium) return true; // Unlimited scans
@@ -73,8 +83,6 @@ class PremiumService {
     return true;
   }
 
-  // Increment scan count (alias for useScan - matches your widget's expectation)
-  static Future<bool> incrementScanCount() async {
-    return await useScan();
-  }
+  // Backward compatibility
+  static Future<bool> incrementScanCount() async => await useScan();
 }

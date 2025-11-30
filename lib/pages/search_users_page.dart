@@ -6,7 +6,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/database_service.dart';
+
+// REPLACED DATABASE SERVICE WITH SPECIFIC SERVICES
+import '../services/user_search_service.dart';
+import '../services/friends_service.dart';
+
 import 'user_profile_page.dart';
 import '../widgets/app_drawer.dart';
 
@@ -162,7 +166,8 @@ class _SearchUsersPageState extends State<SearchUsersPage>
     });
 
     try {
-      await DatabaseService.debugTestUserSearch();
+      // CHANGED: DatabaseService.debugTestUserSearch() -> UserSearchService.debugTestUserSearch()
+      await UserSearchService.debugTestUserSearch();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -225,7 +230,8 @@ class _SearchUsersPageState extends State<SearchUsersPage>
         _logger.i('📱 Using cached results: ${results.length} users');
       } else {
         // 2) Fetch from database
-        results = await DatabaseService.searchUsers(query);
+        // CHANGED: DatabaseService.searchUsers(query) -> UserSearchService.searchUsers(query)
+        results = await UserSearchService.searchUsers(query);
         _logger.i('📱 Fetched fresh results: ${results.length} users');
         await _cacheSearchResults(query, results);
       }
@@ -242,7 +248,8 @@ class _SearchUsersPageState extends State<SearchUsersPage>
         if (status != null) {
           cachedStatuses++;
         } else {
-          status = await DatabaseService.checkFriendshipStatus(userId);
+          // CHANGED: DatabaseService.checkFriendshipStatus -> FriendsService.checkFriendshipStatus
+          status = await FriendsService.checkFriendshipStatus(userId);
           freshStatuses++;
           await _cacheFriendshipStatus(userId, status);
         }
@@ -309,7 +316,8 @@ class _SearchUsersPageState extends State<SearchUsersPage>
 
   Future<void> _sendFriendRequest(String userId) async {
     try {
-      await DatabaseService.sendFriendRequest(userId);
+      // CHANGED: DatabaseService.sendFriendRequest -> FriendsService.sendFriendRequest
+      await FriendsService.sendFriendRequest(userId);
 
       final newStatus = {
         'status': 'pending',
@@ -340,7 +348,8 @@ class _SearchUsersPageState extends State<SearchUsersPage>
 
   Future<void> _cancelFriendRequest(String userId) async {
     try {
-      await DatabaseService.cancelFriendRequest(userId);
+      // CHANGED: DatabaseService.cancelFriendRequest -> FriendsService.cancelFriendRequest
+      await FriendsService.cancelFriendRequest(userId);
 
       final newStatus = {
         'status': 'none',
@@ -490,7 +499,7 @@ class _SearchUsersPageState extends State<SearchUsersPage>
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 200),
       opacity: 1,
-      child: Card(
+      child: Card( 
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: ListTile(
           leading: CircleAvatar(
@@ -527,7 +536,7 @@ class _SearchUsersPageState extends State<SearchUsersPage>
             await prefs.remove(_getFriendshipCacheKey(user['id']));
 
             final freshStatus =
-                await DatabaseService.checkFriendshipStatus(user['id']);
+                await FriendsService.checkFriendshipStatus(user['id']);
             await _cacheFriendshipStatus(user['id'], freshStatus);
 
             if (!mounted) return;

@@ -1,10 +1,12 @@
 // lib/widgets/recipe_card.dart - FIXED: Prevents users from rating their own recipes
 import 'package:flutter/material.dart';
+import 'package:liver_wise/services/ratings_service.dart';
+import 'package:liver_wise/services/submitted_recipes_service.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../models/submitted_recipe.dart';
-import '../services/database_service.dart';
+import '../services/database_service_core.dart';
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
 import '../widgets/rating_dialog.dart';
@@ -107,8 +109,8 @@ class _RecipeCardState extends State<RecipeCard> {
       }
       
       // Cache miss or stale, fetch from database
-      final ratingData = await DatabaseService.getRecipeAverageRating(widget.recipe.id!);
-      final userRating = await DatabaseService.getUserRecipeRating(widget.recipe.id!);
+      final ratingData = await RatingsService.getRecipeAverageRating(widget.recipe.id!);
+      final userRating = await RatingsService.getUserRecipeRating(widget.recipe.id!);
 
       // Cache the results
       final cacheData = {
@@ -215,7 +217,7 @@ class _RecipeCardState extends State<RecipeCard> {
 
   Future<void> _shareRecipe() async {
     try {
-      final recipeText = DatabaseService.generateShareableRecipeText({
+      final recipeText = SubmittedRecipesService.generateShareableRecipeText({
         'recipe_name': widget.recipe.recipeName,
         'ingredients': widget.recipe.ingredients,
         'directions': widget.recipe.directions,

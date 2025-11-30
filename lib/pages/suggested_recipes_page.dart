@@ -1,8 +1,10 @@
 // lib/pages/suggested_recipes_page.dart - FIXED: Use dedicated Worker search endpoint
 import 'package:flutter/material.dart';
+import 'package:liver_wise/services/favorite_recipes_service.dart';
+import 'package:liver_wise/services/grocery_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import '../services/database_service.dart';
+import '../services/database_service_core.dart';
 import '../widgets/premium_gate.dart';
 import '../controllers/premium_gate_controller.dart';
 import 'package:http/http.dart' as http;
@@ -438,7 +440,7 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
 
   Future<void> _addToShoppingList(Recipe recipe) async {
     try {
-      final result = await DatabaseService.addRecipeToShoppingList(
+      final result = await GroceryService.addRecipeToShoppingList(
         recipe.title,
         recipe.ingredients.join(', '),
       );
@@ -472,13 +474,13 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
       bool isFavorited = await _getCachedFavoriteStatus(recipe.title);
       
       if (isFavorited) {
-        final favorites = await DatabaseService.getFavoriteRecipes();
+        final favorites = await FavoriteRecipesService.getFavoriteRecipes();
         final favoriteRecipe = favorites.firstWhere(
           (fav) => fav.recipeName == recipe.title,
         );
         
         if (favoriteRecipe.id != null) {
-          await DatabaseService.removeFavoriteRecipe(favoriteRecipe.id!);
+          await FavoriteRecipesService.removeFavoriteRecipe(favoriteRecipe.id!);
           await _cacheFavoriteStatus(recipe.title, false);
           
           if (mounted) {
@@ -492,7 +494,7 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
           }
         }
       } else {
-        await DatabaseService.addFavoriteRecipe(
+        await FavoriteRecipesService.addFavoriteRecipe(
           recipe.title,
           recipe.ingredients.join(', '),
           recipe.instructions,

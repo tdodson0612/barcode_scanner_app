@@ -1,6 +1,9 @@
 // lib/widgets/rating_dialog.dart - FIXED: Better error messages
 import 'package:flutter/material.dart';
-import '../services/database_service.dart';
+import 'package:liver_wise/services/comments_service.dart';
+import 'package:liver_wise/services/ratings_service.dart';
+import 'package:liver_wise/services/submitted_recipes_service.dart';
+import '../services/database_service_core.dart';
 import '../services/error_handling_service.dart';
 
 class RatingDialog extends StatefulWidget {
@@ -43,7 +46,7 @@ class _RatingDialogState extends State<RatingDialog> {
     });
 
     try {
-      await DatabaseService.rateRecipe(widget.recipeId, _selectedRating);
+      await RatingsService.rateRecipe(widget.recipeId, _selectedRating);
       
       if (mounted) {
         Navigator.pop(context, _selectedRating);

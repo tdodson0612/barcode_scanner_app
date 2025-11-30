@@ -1,8 +1,11 @@
 // lib/pages/recipe_detail_page.dart - OPTIMIZED: Cache comments, likes, and favorite status
 import 'package:flutter/material.dart';
+import 'package:liver_wise/services/comments_service.dart';
+import 'package:liver_wise/services/grocery_service.dart';
+import 'package:liver_wise/services/submitted_recipes_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import '../services/database_service.dart';
+import '../services/database_service_core.dart';
 import '../services/error_handling_service.dart';
 import '../services/auth_service.dart';
 import '../pages/user_profile_page.dart';
@@ -290,7 +293,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
 
   Future<void> _addToGroceryList() async {
     try {
-      final result = await DatabaseService.addRecipeToShoppingList(
+      final result = await GroceryService.addRecipeToShoppingList(
         widget.recipeName,
         widget.ingredients,
       );
@@ -344,7 +347,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
       }
 
       // Cache miss or force refresh, fetch from database
-      final comments = await DatabaseService.getRecipeComments(widget.recipeId);
+      final comments = await CommentsService.getRecipeComments(widget.recipeId);
       
       // Cache the results
       await _cacheComments(comments);
@@ -387,7 +390,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
     });
 
     try {
-      await DatabaseService.addComment(
+      await CommentsService.addComment(
         recipeId: widget.recipeId,
         commentText: _commentController.text.trim(),
         parentCommentId: _replyingToCommentId,
@@ -427,12 +430,12 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
 
   Future<void> _toggleLikeComment(String commentId) async {
     try {
-      final isLiked = await DatabaseService.hasUserLikedPost(commentId);
+      final isLiked = await CommentsService.hasUserLikedPost(commentId);
       
       if (isLiked) {
-        await DatabaseService.unlikeComment(commentId);
+        await CommentsService.unlikeComment(commentId);
       } else {
-        await DatabaseService.likeComment(commentId);
+        await CommentsService.likeComment(commentId);
       }
 
       // Invalidate cache and reload
@@ -485,7 +488,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
 
     if (confirm == true) {
       try {
-        await DatabaseService.deleteComment(commentId);
+        await CommentsService.deleteComment(commentId);
         
         // Invalidate cache and reload
         await _invalidateCommentsCache();
@@ -543,7 +546,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
                 }
 
                 try {
-                  await DatabaseService.reportComment(commentId, reason);
+                  await CommentsService.reportComment(commentId, reason);
                   Navigator.pop(context);
                   
                   if (mounted) {
@@ -575,7 +578,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
     final username = user['username'] ?? 'Unknown';
     final commentText = comment['comment_text'] ?? '';
     final createdAt = comment['created_at'];
-    final isCurrentUser = user['id'] == DatabaseService.currentUserId;
+    final isCurrentUser = user['id'] == AuthService.currentUserId;
 
     return Padding(
       padding: EdgeInsets.symmetric(vertical: 8, horizontal: 16),

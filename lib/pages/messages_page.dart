@@ -1,10 +1,12 @@
 // lib/pages/messages_page.dart - OPTIMIZED: Aggressive caching for chats and friend requests
 import 'package:flutter/material.dart';
+import 'package:liver_wise/services/friends_service.dart';
+import 'package:liver_wise/services/messaging_service.dart';
 import 'package:logger/logger.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import '../services/database_service.dart';
+import '../services/database_service_core.dart';
 import '../widgets/app_drawer.dart';
 import 'chat_page.dart';
 import 'search_users_page.dart';
@@ -176,7 +178,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
       }
 
       // Cache miss or force refresh, fetch from database
-      final chats = await DatabaseService.getChatList();
+      final chats = await MessagingService.getChatList();
       
       // Sort chats by last message timestamp (newest first)
       chats.sort((a, b) {
@@ -260,7 +262,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
       }
 
       // Cache miss or force refresh, fetch from database
-      final requests = await DatabaseService.getFriendRequests();
+      final requests = await FriendsService.getFriendRequests();
       
       // Cache the results
       await _cacheFriendRequests(requests);
@@ -307,7 +309,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
   Future<void> _acceptFriendRequest(String requestId) async {
     try {
       _logger.d('✅ Accepting friend request: $requestId');
-      await DatabaseService.acceptFriendRequest(requestId);
+      await FriendsService.acceptFriendRequest(requestId);
       
       // Invalidate both caches (new friend = new chat possibility)
       await _invalidateRequestsCache();
@@ -336,7 +338,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
   Future<void> _declineFriendRequest(String requestId) async {
     try {
       _logger.d('❌ Declining friend request: $requestId');
-      await DatabaseService.declineFriendRequest(requestId);
+      await FriendsService.declineFriendRequest(requestId);
       
       // Invalidate requests cache
       await _invalidateRequestsCache();

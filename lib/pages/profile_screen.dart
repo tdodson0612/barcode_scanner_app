@@ -2,6 +2,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:liver_wise/services/account_deletion_service.dart';
+import 'package:liver_wise/services/friends_visibility_service.dart';
+import 'package:liver_wise/services/picture_service.dart';
+import 'package:liver_wise/services/profile_service.dart';
+import 'package:liver_wise/services/submitted_recipes_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 
@@ -10,7 +15,7 @@ import '../widgets/premium_gate.dart';
 import '../widgets/recipe_card.dart';
 import '../controllers/premium_gate_controller.dart';
 import '../models/submitted_recipe.dart';
-import '../services/database_service.dart';
+import '../services/database_service_core.dart';
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
 import '../pages/user_profile_page.dart';
@@ -272,7 +277,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         }
       }
 
-      final recipes = await DatabaseService.getSubmittedRecipes();
+      final recipes = await SubmittedRecipesService.getSubmittedRecipes();
       await _cacheRecipes(recipes);
 
       if (mounted) {
@@ -310,7 +315,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
 
     try {
-      await DatabaseService.deleteSubmittedRecipe(recipeId);
+      await DatabaseServiceCore.deleteSubmittedRecipe(recipeId);
       await _invalidateRecipesCache();
 
       if (mounted) {
@@ -373,7 +378,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         }
       }
 
-      final pictures = await DatabaseService.getCurrentUserPictures();
+      final pictures = await PictureService.getCurrentUserPictures();
       await _cachePictures(pictures);
 
       if (mounted) {
@@ -436,7 +441,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
       final imageFile = File(pickedFile.path);
 
-      await DatabaseService.uploadPicture(imageFile);
+      await PictureService.uploadPicture(imageFile);
 
       await _invalidatePicturesCache();
       await _loadPictures(forceRefresh: true);
@@ -494,7 +499,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       });
 
       try {
-        await DatabaseService.deletePicture(pictureUrl);
+        await PictureService.deletePicture(pictureUrl);
         await _invalidatePicturesCache();
         await _loadPictures(forceRefresh: true);
 
@@ -558,7 +563,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
 
     try {
-      await DatabaseService.setPictureAsProfilePicture(pictureUrl);
+      await PictureService.setPictureAsProfilePicture(pictureUrl);
 
       // Update local state
       setState(() {
@@ -701,7 +706,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         final cachedFriends = await _getCachedFriends();
 
         if (cachedFriends != null) {
-          final visibility = await DatabaseService.getFriendsListVisibility();
+          final visibility = await FriendsVisibilityService.getFriendsListVisibility();
 
           if (mounted) {
             setState(() {
@@ -714,8 +719,8 @@ class _ProfileScreenState extends State<ProfileScreen>
         }
       }
 
-      final friends = await DatabaseService.getUserFriends(currentUserId);
-      final visibility = await DatabaseService.getFriendsListVisibility();
+      final friends = await FriendsVisibilityService.getUserFriends(currentUserId);
+      final visibility = await FriendsVisibilityService.getFriendsListVisibility();
       await _cacheFriends(friends);
 
       if (mounted) {
@@ -750,7 +755,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   Future<void> _toggleFriendsVisibility(bool isVisible) async {
     try {
-      await DatabaseService.updateFriendsListVisibility(isVisible);
+      await FriendsVisibilityService.updateFriendsListVisibility(isVisible);
       if (mounted) {
         setState(() {
           _friendsListVisible = isVisible;
@@ -810,7 +815,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     try {
       // ✅ Call the DatabaseService method that handles everything
-      await DatabaseService.deleteAccountCompletely();
+      await AccountDeletionService.deleteAccountCompletely();
 
       if (!mounted) return;
 
@@ -918,7 +923,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       final prefs = await SharedPreferences.getInstance();
 
       // Load from database
-      final profile = await DatabaseService.getCurrentUserProfile();
+      final profile = await ProfileService.getCurrentUserProfile();
 
       if (profile != null && mounted) {
         final userName = profile['username'] ?? 'User';
@@ -1024,7 +1029,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
       final imageFile = File(pickedFile.path);
 
-      final url = await DatabaseService.uploadProfilePicture(imageFile);
+      final url = await PictureService.uploadProfilePicture(imageFile);
 
       if (mounted) {
         setState(() {
@@ -1070,7 +1075,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
       final imageFile = File(pickedFile.path);
 
-      final url = await DatabaseService.uploadBackgroundPicture(imageFile);
+      final url = await PictureService.uploadBackgroundPicture(imageFile);
 
       if (mounted) {
         setState(() {
@@ -1103,7 +1108,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         _isLoading = true;
       });
 
-      await DatabaseService.removeBackgroundPicture();
+      await DatabaseServiceCore.removeBackgroundPicture();
 
       if (mounted) {
         setState(() {
@@ -1140,7 +1145,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
 
     try {
-      await DatabaseService.updateProfile(
+      await ProfileService.updateProfile(
         username: _nameController.text.trim(),
       );
 
@@ -1193,7 +1198,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     });
 
     try {
-      await DatabaseService.updateProfile(email: email);
+      await ProfileService.updateProfile(email: email);
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user_email', email);

@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/submitted_recipe.dart';
-import '../services/database_service.dart';
+import '../services/submitted_recipes_service.dart';
 import '../services/error_handling_service.dart';
 
 class EditRecipePage extends StatefulWidget {
@@ -77,7 +77,7 @@ class _EditRecipePageState extends State<EditRecipePage> {
     });
 
     try {
-      await DatabaseService.updateSubmittedRecipe(
+      await SubmittedRecipesService.updateRecipe(
         recipeId: widget.recipe.id!,
         recipeName: _nameController.text.trim(),
         ingredients: _ingredientsController.text.trim(),

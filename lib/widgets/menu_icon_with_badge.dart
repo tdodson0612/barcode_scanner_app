@@ -1,7 +1,8 @@
 // lib/widgets/menu_icon_with_badge.dart - OPTIMIZED: Local caching to reduce database egress
 import 'package:flutter/material.dart';
+import 'package:liver_wise/services/messaging_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/database_service.dart';
+import '../services/database_service_core.dart';
 
 class MenuIconWithBadge extends StatefulWidget {
   const MenuIconWithBadge({super.key});
@@ -44,7 +45,7 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> {
       }
       
       // Cache is stale or doesn't exist, fetch from database
-      final count = await DatabaseService.getUnreadMessageCount();
+      final count = await MessagingService.getUnreadMessageCount();
       
       // Save to cache
       await prefs.setInt(_cacheKey, count);

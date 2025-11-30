@@ -2,9 +2,15 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import '../services/database_service.dart';
+
+import '../services/profile_service.dart';
+import '../services/friends_service.dart';
+import '../services/messaging_service.dart';
+import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
+
 import 'chat_page.dart';
+
 
 class UserProfilePage extends StatefulWidget {
   final String userId;
@@ -67,8 +73,8 @@ class _UserProfilePageState extends State<UserProfilePage> {
       
       // Fetch fresh data
       final results = await Future.wait([
-        DatabaseService.getUserProfile(widget.userId),
-        DatabaseService.checkFriendshipStatus(widget.userId),
+        ProfileService.getUserProfile(widget.userId),
+        FriendsService.checkFriendshipStatus(widget.userId),
       ]);
       
       // Cache the results
@@ -208,12 +214,12 @@ class _UserProfilePageState extends State<UserProfilePage> {
     try {
       setState(() => isActionLoading = true);
       
-      await DatabaseService.sendFriendRequest(widget.userId);
+      await FriendsService.sendFriendRequest(widget.userId);
       
       // Invalidate cache before fetching fresh data
       await _invalidateFriendshipCache();
       
-      final status = await DatabaseService.checkFriendshipStatus(widget.userId);
+      final status = await FriendsService.checkFriendshipStatus(widget.userId);
       final prefs = await SharedPreferences.getInstance();
       await _cacheFriendship(prefs, status);
       
@@ -246,10 +252,10 @@ class _UserProfilePageState extends State<UserProfilePage> {
     try {
       setState(() => isActionLoading = true);
       
-      await DatabaseService.cancelFriendRequest(widget.userId);
+      await FriendsService.cancelFriendRequest(widget.userId);
       await _invalidateFriendshipCache();
       
-      final status = await DatabaseService.checkFriendshipStatus(widget.userId);
+      final status = await FriendsService.checkFriendshipStatus(widget.userId);
       final prefs = await SharedPreferences.getInstance();
       await _cacheFriendship(prefs, status);
       
@@ -282,10 +288,10 @@ class _UserProfilePageState extends State<UserProfilePage> {
     try {
       setState(() => isActionLoading = true);
       
-      await DatabaseService.acceptFriendRequest(friendshipStatus!['requestId']);
+      await FriendsService.acceptFriendRequest(friendshipStatus!['requestId']);
       await _invalidateFriendshipCache();
       
-      final status = await DatabaseService.checkFriendshipStatus(widget.userId);
+      final status = await FriendsService.checkFriendshipStatus(widget.userId);
       final prefs = await SharedPreferences.getInstance();
       await _cacheFriendship(prefs, status);
       
@@ -339,10 +345,10 @@ class _UserProfilePageState extends State<UserProfilePage> {
     try {
       setState(() => isActionLoading = true);
       
-      await DatabaseService.declineFriendRequest(friendshipStatus!['requestId']);
+      await FriendsService.declineFriendRequest(friendshipStatus!['requestId']);
       await _invalidateFriendshipCache();
       
-      final status = await DatabaseService.checkFriendshipStatus(widget.userId);
+      final status = await FriendsService.checkFriendshipStatus(widget.userId);
       final prefs = await SharedPreferences.getInstance();
       await _cacheFriendship(prefs, status);
       
@@ -398,10 +404,10 @@ class _UserProfilePageState extends State<UserProfilePage> {
     try {
       setState(() => isActionLoading = true);
       
-      await DatabaseService.removeFriend(widget.userId);
+      await FriendsService.removeFriend(widget.userId);
       await _invalidateFriendshipCache();
       
-      final status = await DatabaseService.checkFriendshipStatus(widget.userId);
+      final status = await FriendsService.checkFriendshipStatus(widget.userId);
       final prefs = await SharedPreferences.getInstance();
       await _cacheFriendship(prefs, status);
       

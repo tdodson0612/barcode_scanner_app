@@ -1,9 +1,11 @@
-// lib/pages/grocery_list_page.dart - FIXED: Added missing orderIndex parameter
+// lib/pages/grocery_list.dart - FIXED: Uses AuthService + GroceryService
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import '../services/database_service.dart';
+
+import '../services/auth_service.dart';
+import '../services/grocery_service.dart';
 import '../models/grocery_item.dart';
 
 class GroceryListPage extends StatefulWidget {
@@ -35,7 +37,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
     });
 
     try {
-      DatabaseService.ensureUserAuthenticated();
+      AuthService.ensureUserAuthenticated();
       await _loadGroceryList();
       
       if (widget.initialItem != null && widget.initialItem!.isNotEmpty) {
@@ -188,8 +190,8 @@ class _GroceryListPageState extends State<GroceryListPage> {
         }
       }
 
-      // Cache miss or force refresh, fetch from database
-      final List<GroceryItem> groceryItems = await DatabaseService.getGroceryList();
+      // Cache miss or force refresh, fetch from service
+      final List<GroceryItem> groceryItems = await GroceryService.getGroceryList();
       
       // Cache the results
       await _cacheGroceryList(groceryItems);
@@ -332,16 +334,16 @@ class _GroceryListPageState extends State<GroceryListPage> {
           })
           .toList();
           
-      await DatabaseService.saveGroceryList(items);
+      await GroceryService.saveGroceryList(items);
       
       await _invalidateGroceryListCache();
       
-      // FIXED: Added orderIndex parameter using asMap().entries
+      // Rebuild objects for cache
       final groceryItems = items.asMap().entries.map((entry) => GroceryItem(
         id: null,
-        userId: DatabaseService.currentUserId ?? '',
+        userId: AuthService.currentUserId ?? '',
         item: entry.value,
-        orderIndex: entry.key, // This is the fix - was missing before
+        orderIndex: entry.key,
         createdAt: DateTime.now(),
       )).toList();
       
@@ -388,7 +390,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
             onPressed: () async {
               Navigator.pop(context);
               try {
-                await DatabaseService.clearGroceryList();
+                await GroceryService.clearGroceryList();
                 
                 await _invalidateGroceryListCache();
                 
