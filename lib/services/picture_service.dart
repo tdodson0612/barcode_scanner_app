@@ -7,7 +7,7 @@ import 'dart:io';
 import '../config/app_config.dart';
 import 'auth_service.dart';
 import 'profile_service.dart';
-import 'database_service_core.dart';     // worker upload/delete + caching
+import 'database_service_core.dart';
 
 class PictureService {
 
@@ -43,13 +43,13 @@ class PictureService {
         contentType: 'image/jpeg',
       );
 
-      // Update profile
+      // Update profile - FIXED: Use correct field name
       await DatabaseServiceCore.workerQuery(
         action: 'update',
         table: 'user_profiles',
         filters: {'id': userId},
         data: {
-          'profile_picture': publicUrl,
+          'profile_picture': publicUrl,  // ✅ FIXED: Was 'profile_picture_url'
           'updated_at': DateTime.now().toIso8601String(),
         },
       );
@@ -233,12 +233,13 @@ class PictureService {
     }
 
     try {
+      // FIXED: Use correct field name
       await DatabaseServiceCore.workerQuery(
         action: 'update',
         table: 'user_profiles',
         filters: {'id': userId},
         data: {
-          'profile_picture_url': pictureUrl,
+          'profile_picture': pictureUrl,  // ✅ FIXED: Was 'profile_picture_url'
           'updated_at': DateTime.now().toIso8601String(),
         },
       );

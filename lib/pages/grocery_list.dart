@@ -371,58 +371,61 @@ class _GroceryListPageState extends State<GroceryListPage> {
   }
 
   Future<void> _clearGroceryList() async {
-    showDialog(
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Clear Grocery List'),
         content: const Text('Are you sure you want to clear your entire grocery list?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                await GroceryService.clearGroceryList();
-                
-                await _invalidateGroceryListCache();
-                
-                if (mounted) {
-                  setState(() {
-                    for (var controllers in itemControllers) {
-                      controllers['name']!.dispose();
-                      controllers['quantity']!.dispose();
-                    }
-                    itemControllers = [{
-                      'name': TextEditingController(),
-                      'quantity': TextEditingController(),
-                    }];
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Grocery list cleared!'),
-                      backgroundColor: Colors.orange,
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Error clearing grocery list: $e'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              }
-            },
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Clear'),
           ),
         ],
       ),
     );
+
+    // Only proceed if user confirmed
+    if (confirmed != true) return;
+
+    try {
+      await GroceryService.clearGroceryList();
+      
+      await _invalidateGroceryListCache();
+      
+      if (mounted) {
+        setState(() {
+          for (var controllers in itemControllers) {
+            controllers['name']!.dispose();
+            controllers['quantity']!.dispose();
+          }
+          itemControllers = [{
+            'name': TextEditingController(),
+            'quantity': TextEditingController(),
+          }];
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Grocery list cleared!'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error clearing grocery list: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   @override

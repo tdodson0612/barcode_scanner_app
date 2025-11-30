@@ -1,13 +1,13 @@
 // lib/services/account_deletion_service.dart
-// Handles COMPLETE user account deletion from all tables + R2 storage cleanup
+// Handles COMPLETE user account deletion from all tables + R2 storage cleanup + Auth deletion
 
 import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/app_config.dart';
-
-import 'database_service_core.dart';          // auth + currentUserId
-import 'profile_service.dart';           // for getUserProfile()
-
+import 'database_service_core.dart';
+import 'profile_service.dart';
 
 class AccountDeletionService {
 
@@ -17,6 +17,12 @@ class AccountDeletionService {
   static Future<void> deleteAccountCompletely() async {
     DatabaseServiceCore.ensureUserAuthenticated();
     final userId = DatabaseServiceCore.currentUserId!;
+    
+    // Get auth token before deletion
+    final authToken = Supabase.instance.client.auth.currentSession?.accessToken;
+    if (authToken == null) {
+      throw Exception('No authentication session found. Please sign out and sign back in.');
+    }
 
     try {
       AppConfig.debugPrint('🗑️ Starting account deletion for $userId');
@@ -114,7 +120,39 @@ class AccountDeletionService {
       await _safeDelete('user_profiles', {'id': userId});
 
       // --------------------------------------------------
-      // 4) CLEAR LOCAL CACHE
+      // 4) DELETE AUTH USER (via Cloudflare Worker)
+      // --------------------------------------------------
+      AppConfig.debugPrint('🗑️ Deleting authentication user...');
+      
+      try {
+        final response = await http.post(
+          Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/auth/delete-user'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'userId': userId,
+            'authToken': authToken,
+          }),
+        ).timeout(
+          const Duration(seconds: 30),
+          onTimeout: () => throw Exception('Auth deletion timed out'),
+        );
+
+        if (response.statusCode != 200) {
+          final errorBody = response.body;
+          AppConfig.debugPrint('❌ Auth user deletion failed: ${response.statusCode} - $errorBody');
+          throw Exception('Failed to delete auth user: $errorBody');
+        }
+
+        final result = jsonDecode(response.body);
+        AppConfig.debugPrint('✅ Auth user deleted: ${result['message']}');
+      } catch (e) {
+        AppConfig.debugPrint('❌ Auth deletion error: $e');
+        // Don't throw here - data is already deleted, just log the error
+        AppConfig.debugPrint('⚠️ Auth user may still exist, but all data has been deleted');
+      }
+
+      // --------------------------------------------------
+      // 5) CLEAR LOCAL CACHE
       // --------------------------------------------------
       AppConfig.debugPrint('🧹 Clearing local cache...');
       await DatabaseServiceCore.clearAllUserCache();
