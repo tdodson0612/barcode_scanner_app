@@ -334,20 +334,15 @@ class _GroceryListPageState extends State<GroceryListPage> {
           })
           .toList();
           
+      // Save to database
       await GroceryService.saveGroceryList(items);
       
+      // Invalidate old cache
       await _invalidateGroceryListCache();
       
-      // Rebuild objects for cache
-      final groceryItems = items.asMap().entries.map((entry) => GroceryItem(
-        id: null,
-        userId: AuthService.currentUserId ?? '',
-        item: entry.value,
-        orderIndex: entry.key,
-        createdAt: DateTime.now(),
-      )).toList();
-      
-      await _cacheGroceryList(groceryItems);
+      // Fetch fresh data from database to cache it properly
+      final freshItems = await GroceryService.getGroceryList();
+      await _cacheGroceryList(freshItems);
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

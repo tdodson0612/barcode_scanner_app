@@ -524,38 +524,98 @@ class _AppDrawerState extends State<AppDrawer> {
   void _showSignOutDialog(BuildContext context) {
     showDialog(
       context: context,
-      barrierDismissible: false, // Prevent dismissing by tapping outside
+      barrierDismissible: true, // Allow dismissing by tapping outside
       builder: (dialogContext) => AlertDialog(
         title: Text('Sign Out'),
         content: Text('Are you sure you want to sign out?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () async {
-              // Close dialog first
-              Navigator.pop(dialogContext);
+              // Close confirmation dialog first
+              Navigator.of(dialogContext).pop();
               
-              // Show loading indicator
-              showDialog(
-                context: context,
-                barrierDismissible: false,
-                builder: (ctx) => Center(
-                  child: CircularProgressIndicator(),
-                ),
-              );
-              
-              // Perform logout
-              await _logout(context);
+              // Perform logout with loading indicator
+              await _performLogout(context);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: Text('Sign Out', style: TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: Text('Sign Out'),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _performLogout(BuildContext context) async {
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (loadingContext) => WillPopScope(
+        onWillPop: () async => false, // Prevent back button
+        child: Center(
+          child: Card(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Signing out...'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    
+    try {
+      // Clear the saved route BEFORE logging out
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('last_route');
+      
+      // Sign out from Supabase
+      await AuthService.signOut();
+      
+      // Clear all preferences
+      await prefs.clear();
+      
+      // Clear database cache
+      await DatabaseServiceCore.clearAllUserCache();
+      
+      // Dismiss loading dialog if still mounted
+      if (context.mounted) {
+        Navigator.of(context).pop();
+      }
+      
+      // Navigate to login and clear all routes
+      if (context.mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+      }
+    } catch (e) {
+      print('Error during logout: $e');
+      
+      // Dismiss loading dialog
+      if (context.mounted) {
+        Navigator.of(context).pop();
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error signing out. Please try again.'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _logout(BuildContext context) async {
