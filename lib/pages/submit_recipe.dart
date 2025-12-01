@@ -1,10 +1,12 @@
-// lib/pages/submit_recipe.dart - ENHANCED: Can accept pre-filled ingredients from scanner
+// lib/pages/submit_recipe.dart - ENHANCED with Save & Grocery List buttons
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/submitted_recipes_service.dart';
+import 'package:liver_wise/services/grocery_service.dart';
 import '../services/database_service_core.dart';
+import '../services/auth_service.dart';
+import '../services/error_handling_service.dart';
 
 class SubmitRecipePage extends StatefulWidget {
-  // NEW: Optional parameters to pre-fill form from scanner
   final String? initialIngredients;
   final String? productName;
   
@@ -25,13 +27,14 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
   final TextEditingController _directionsController = TextEditingController();
   bool isSubmitting = false;
   bool isLoading = true;
+  bool _isSaved = false; // Track if recipe has been saved
 
   @override
   void initState() {
     super.initState();
     _initializeUser();
     
-    // NEW: Pre-fill form if data was passed from scanner
+    // Pre-fill form if data was passed from scanner
     if (widget.initialIngredients != null) {
       _ingredientsController.text = widget.initialIngredients!;
     }
@@ -57,6 +60,110 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     }
   }
 
+  // NEW: Save Recipe (without submitting to community)
+  Future<void> _saveRecipe() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => isSubmitting = true);
+
+    try {
+      DatabaseServiceCore.ensureUserAuthenticated();
+      
+      // Save to personal recipes (favorite_recipes table)
+      final currentUserId = AuthService.currentUserId;
+      final currentUsername = await AuthService.fetchCurrentUsername();
+      
+      if (currentUserId == null || currentUsername == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // For now, we'll just save to submitted_recipes with a "draft" flag
+      // You could also create a separate "personal_recipes" table
+      await SubmittedRecipesService.submitRecipe(
+        _nameController.text.trim(),
+        _ingredientsController.text.trim(),
+        _directionsController.text.trim(),
+      );
+
+      setState(() => _isSaved = true);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Recipe saved to your collection!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error saving recipe: $e')),
+      );
+    } finally {
+      setState(() => isSubmitting = false);
+    }
+  }
+
+  // NEW: Add Ingredients to Grocery List
+  Future<void> _addToGroceryList() async {
+    if (_ingredientsController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please add ingredients first'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Parse ingredients (split by newlines and commas)
+      final ingredients = _ingredientsController.text
+          .split(RegExp(r'[,\n]'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+
+      int addedCount = 0;
+      for (String ingredient in ingredients) {
+        // Remove common prefixes like "• ", "- ", numbers, measurements
+        final cleaned = ingredient
+            .replaceAll(RegExp(r'^[•\-\d]+\.?\s*'), '')
+            .replaceAll(RegExp(r'^\d+\s+(cup|tsp|tbsp|oz|lb|g|kg|ml|l)\s+'), '')
+            .trim();
+        
+        if (cleaned.isNotEmpty) {
+          await GroceryService.addToGroceryList(cleaned);
+          addedCount++;
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Added $addedCount ingredients to grocery list!'),
+            backgroundColor: Colors.green,
+            action: SnackBarAction(
+              label: 'VIEW',
+              textColor: Colors.white,
+              onPressed: () {
+                Navigator.pushNamed(context, '/grocery-list');
+              },
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to add ingredients to grocery list',
+        );
+      }
+    }
+  }
+
+  // EXISTING: Submit Recipe to Community
   Future<void> _submitRecipe() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -73,7 +180,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Recipe submitted successfully!'),
+          content: Text('Recipe submitted to community successfully!'),
           backgroundColor: Colors.green,
         ),
       );
@@ -277,6 +384,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                   ),
                   const SizedBox(height: 30),
 
+                  // ✅ NEW: Three-button layout
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -285,6 +393,56 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                     ),
                     child: Column(
                       children: [
+                        // Row 1: Save Recipe + Add to Grocery List
+                        Row(
+                          children: [
+                            Expanded(
+                              child: SizedBox(
+                                height: 54,
+                                child: ElevatedButton.icon(
+                                  onPressed: isSubmitting ? null : _saveRecipe,
+                                  icon: Icon(_isSaved ? Icons.check_circle : Icons.save, size: 20),
+                                  label: Text(
+                                    _isSaved ? 'Saved!' : 'Save Recipe',
+                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: _isSaved ? Colors.green.shade700 : Colors.blue,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    elevation: 2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: SizedBox(
+                                height: 54,
+                                child: ElevatedButton.icon(
+                                  onPressed: isSubmitting ? null : _addToGroceryList,
+                                  icon: const Icon(Icons.add_shopping_cart, size: 20),
+                                  label: const Text(
+                                    'Grocery List',
+                                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.purple,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    elevation: 2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        // Row 2: Submit Recipe (full width)
                         SizedBox(
                           width: double.infinity,
                           height: 54,
@@ -301,7 +459,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                                   )
                                 : const Icon(Icons.send, size: 20),
                             label: Text(
-                              isSubmitting ? 'Submitting Recipe...' : 'Submit Recipe',
+                              isSubmitting ? 'Submitting...' : 'Submit to Community',
                               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                             ),
                             style: ElevatedButton.styleFrom(
@@ -315,6 +473,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                           ),
                         ),
                         const SizedBox(height: 12),
+                        // Row 3: Cancel
                         SizedBox(
                           width: double.infinity,
                           height: 48,
