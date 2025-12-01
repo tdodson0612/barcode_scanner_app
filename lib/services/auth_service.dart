@@ -1,4 +1,4 @@
-// lib/services/auth_service.dart - FINAL: Handle profile creation failures gracefully
+// lib/services/auth_service.dart - FINAL + FCM SUPPORT
 
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -7,6 +7,9 @@ import '../config/app_config.dart';
 // NEW: correct imports
 import 'profile_service.dart';
 import 'database_service_core.dart';
+
+// 🔥 Firebase Messaging
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 class AuthService {
   static final SupabaseClient _supabase = Supabase.instance.client;
@@ -19,23 +22,22 @@ class AuthService {
   static bool get isLoggedIn => _supabase.auth.currentUser != null;
   static User? get currentUser => _supabase.auth.currentUser;
   static String? get currentUserId => currentUser?.id;
-  
+
   static String? get currentUsername {
     final username = currentUser?.userMetadata?['username'] as String?;
     if (username != null) return username;
     return null;
   }
-  
+
   static void ensureLoggedIn() {
     if (!isLoggedIn || currentUserId == null) {
       throw Exception('User must be logged in to perform this action.');
     }
   }
 
-
   static Future<String?> fetchCurrentUsername() async {
     if (currentUserId == null) return null;
-    
+
     try {
       final profile = await ProfileService.getUserProfile(currentUserId!);
       return profile?['username'] as String?;
@@ -45,14 +47,61 @@ class AuthService {
     }
   }
 
-  static Stream<AuthState> get authStateChanges => _supabase.auth.onAuthStateChange;
+  static Stream<AuthState> get authStateChanges =>
+      _supabase.auth.onAuthStateChange;
 
   static bool _isDefaultPremiumEmail(String email) {
     final normalizedEmail = email.trim().toLowerCase();
     return _premiumEmails.contains(normalizedEmail);
   }
 
-  // SIGN UP - Direct Supabase with profile creation
+  // --------------------------------------------------------
+  // 🔥 STORE / UPDATE FCM TOKEN
+  // --------------------------------------------------------
+  static Future<void> _saveFcmToken(String userId) async {
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+
+      if (token == null) {
+        AppConfig.debugPrint("⚠️ FCM token is null, cannot save.");
+        return;
+      }
+
+      AppConfig.debugPrint("📱 Saving FCM token: $token");
+
+      await DatabaseServiceCore.workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'fcm_token': token,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
+    } catch (e) {
+      AppConfig.debugPrint("❌ Failed to save FCM token: $e");
+    }
+  }
+
+  static void _listenForFcmTokenRefresh(String userId) {
+    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+      AppConfig.debugPrint("🔄 FCM token refreshed: $newToken");
+
+      await DatabaseServiceCore.workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'fcm_token': newToken,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
+    });
+  }
+
+  // --------------------------------------------------------
+  // SIGN UP
+  // --------------------------------------------------------
   static Future<AuthResponse> signUp({
     required String email,
     required String password,
@@ -68,33 +117,29 @@ class AuthService {
         final isPremium = _isDefaultPremiumEmail(normalizedEmail);
         final userId = response.user!.id;
 
-        // ✅ WAIT for session to establish
+        // Delay for session
         await Future.delayed(const Duration(seconds: 1));
 
-        // Verify auth token exists
-        final session = _supabase.auth.currentSession;
-        if (session == null) {
-          AppConfig.debugPrint('⚠️ Warning: No session established yet');
-        }
-
         try {
-          // ✅ Try to create profile
           await ProfileService.createUserProfile(
             userId,
             email,
             isPremium: isPremium,
           );
-          AppConfig.debugPrint('✅ Profile created successfully during signup');
+
+          AppConfig.debugPrint('✅ Profile created during signup');
         } catch (profileError) {
-          AppConfig.debugPrint('⚠️ Profile creation failed during signup: $profileError');
-          
-          // ✅ NEW: Mark that this user needs profile creation on next login
-          // This is a safety net - profile will be auto-created on first login if it doesn't exist
-          AppConfig.debugPrint('📝 User will have profile created on first login');
-          
-          // Don't block signup - re-throw so user knows there was an issue
-          throw Exception('Signup succeeded but profile setup had an issue. Please try signing in.');
+          AppConfig.debugPrint('⚠️ Profile creation failed: $profileError');
+
+          throw Exception(
+              'Signup succeeded but profile setup failed. Please sign in.');
         }
+
+        // 🔥 Save FCM token after profile creation
+        await _saveFcmToken(userId);
+
+        // 🔄 Listen for token refresh
+        _listenForFcmTokenRefresh(userId);
       }
 
       return response;
@@ -103,7 +148,9 @@ class AuthService {
     }
   }
 
-  // SIGN IN - Direct Supabase with profile safety check
+  // --------------------------------------------------------
+  // SIGN IN
+  // --------------------------------------------------------
   static Future<AuthResponse> signIn({
     required String email,
     required String password,
@@ -117,24 +164,26 @@ class AuthService {
       if (response.user != null) {
         final userId = response.user!.id;
         final normalizedEmail = email.trim().toLowerCase();
-        
-        // ✅ NEW: Safety check - ensure profile exists
+
         try {
           await _ensureUserProfileExists(userId, email);
         } catch (profileError) {
-          AppConfig.debugPrint('⚠️ Warning: Could not verify profile: $profileError');
-          // Don't block login - user can still proceed
-          // Profile will be created/fixed on next app restart or when accessing profile features
+          AppConfig.debugPrint('⚠️ Profile check failed: $profileError');
         }
-        
-        // Set premium status if applicable
+
         if (_isDefaultPremiumEmail(normalizedEmail)) {
           try {
             await _ensurePremiumStatus(userId);
           } catch (premiumError) {
-            AppConfig.debugPrint('⚠️ Warning: Could not set premium status: $premiumError');
+            AppConfig.debugPrint('⚠️ Premium setup failed: $premiumError');
           }
         }
+
+        // 🔥 Save FCM token after login
+        await _saveFcmToken(userId);
+
+        // 🔄 Listen for token refresh
+        _listenForFcmTokenRefresh(userId);
       }
 
       return response;
@@ -143,45 +192,47 @@ class AuthService {
     }
   }
 
-  /// ✅ NEW: Ensure user profile exists, create if missing
-  static Future<void> _ensureUserProfileExists(String userId, String email) async {
+  // --------------------------------------------------------
+  // Ensure user profile exists
+  // --------------------------------------------------------
+  static Future<void> _ensureUserProfileExists(
+      String userId, String email) async {
     try {
-      // Check if profile already exists
       final profile = await ProfileService.getUserProfile(userId);
-      
+
       if (profile == null) {
-        AppConfig.debugPrint('📝 Profile missing - creating now...');
-        
-        // Profile doesn't exist, create it
+        AppConfig.debugPrint('📝 Profile missing → creating');
         await ProfileService.createUserProfile(
           userId,
           email,
           isPremium: false,
         );
-        
-        AppConfig.debugPrint('✅ Profile created successfully on login');
-      } else {
-        AppConfig.debugPrint('✅ Profile already exists');
+        AppConfig.debugPrint('✅ Profile created on login');
       }
     } catch (e) {
-      AppConfig.debugPrint('❌ Error ensuring profile exists: $e');
+      AppConfig.debugPrint('❌ Ensure profile failed: $e');
       throw e;
     }
   }
 
+  // --------------------------------------------------------
+  // Ensure premium status
+  // --------------------------------------------------------
   static Future<void> _ensurePremiumStatus(String userId) async {
     try {
       final currentProfile = await ProfileService.getUserProfile(userId);
       if (currentProfile != null && currentProfile['is_premium'] != true) {
-        AppConfig.debugPrint('💎 Setting premium status for: $userId');
+        AppConfig.debugPrint('💎 Setting premium status: $userId');
         await ProfileService.setPremiumStatus(userId, true);
       }
     } catch (e) {
-      AppConfig.debugPrint('⚠️ Error ensuring premium status: $e');
+      AppConfig.debugPrint('⚠️ Premium ensure failed: $e');
     }
   }
 
-  // SIGN OUT - Direct Supabase
+  // --------------------------------------------------------
+  // SIGN OUT
+  // --------------------------------------------------------
   static Future<void> signOut() async {
     try {
       await DatabaseServiceCore.clearAllUserCache();
@@ -191,7 +242,9 @@ class AuthService {
     }
   }
 
-  // PASSWORD RESET - Direct Supabase
+  // --------------------------------------------------------
+  // RESET PASSWORD
+  // --------------------------------------------------------
   static Future<void> resetPassword(String email) async {
     try {
       await _supabase.auth.resetPasswordForEmail(
@@ -203,7 +256,9 @@ class AuthService {
     }
   }
 
-  // UPDATE PASSWORD - Direct Supabase
+  // --------------------------------------------------------
+  // UPDATE PASSWORD
+  // --------------------------------------------------------
   static Future<void> updatePassword(String newPassword) async {
     if (currentUserId == null) {
       throw Exception('No user logged in');
@@ -218,7 +273,9 @@ class AuthService {
     }
   }
 
-  // EMAIL VERIFICATION - Direct Supabase
+  // --------------------------------------------------------
+  // RESEND VERIFICATION EMAIL
+  // --------------------------------------------------------
   static Future<void> resendVerificationEmail() async {
     if (currentUser?.email == null) {
       throw Exception('No user email found');
@@ -233,10 +290,10 @@ class AuthService {
       throw Exception('Failed to resend verification email: $e');
     }
   }
+
   static void ensureUserAuthenticated() {
     if (!isLoggedIn) {
       throw Exception('User must be logged in');
     }
   }
-
 }

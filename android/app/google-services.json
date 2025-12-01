@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "557404820558",
+    "project_id": "liverwise-push",
+    "storage_bucket": "liverwise-push.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:557404820558:android:9dd96da1e2bec5d2a7df1f",
+        "android_client_info": {
+          "package_name": "com.wiseapps.liverwise"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDnM7d_oAm7uIwJDsAuJMxmcVkOXtA2H-s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

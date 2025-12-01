@@ -6,6 +6,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // ADD THIS LINE
 import 'config/app_config.dart';
 
+// 🔥 Firebase
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+
 // Screens and Pages
 import 'login.dart';
 import 'pages/premium_page.dart';
@@ -20,12 +24,25 @@ import 'contact_screen.dart';
 import 'home_screen.dart';
 import 'pages/reset_password_page.dart';
 
+/// 🔥 Background FCM handler (required for messages when app is terminated)
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  // Keep this lightweight – no heavy logic
+  debugPrint("🔥 Background message received: ${message.messageId}");
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
     // Load environment variables FIRST
     await dotenv.load(fileName: ".env"); // ADD THIS LINE
+
+    // 🔥 Initialize Firebase (before Supabase)
+    await Firebase.initializeApp();
+
+    // 🔥 Register background handler
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
     // Initialize Supabase with timeout
     await Supabase.initialize(

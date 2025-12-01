@@ -55,6 +55,9 @@ dependencies:
   # Cloud storage
   amplify_storage_s3_dart: ^0.4.11
   flutter_dotenv: ^6.0.0
+  firebase_core: ^4.2.1
+  firebase_messaging: ^16.0.4
+  flutter_local_notifications: ^19.5.0
 
 # Development dependencies
 dev_dependencies:
