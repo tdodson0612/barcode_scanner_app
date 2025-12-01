@@ -1019,6 +1019,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     }
   }
 
+  // Replace this method in home_screen.dart (around line 1071)
+
   Future<void> _addNutritionToGroceryList() async {
     if (_currentNutrition == null) {
       if (mounted) {
@@ -1031,30 +1033,16 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     }
 
     try {
-      // Use AI to extract food words
-      final foodWords = await FoodClassifierService.extractFoodWords(_currentNutrition!.productName);
+      // ✅ FIX: Add the ENTIRE product name as ONE item
+      final productName = _currentNutrition!.productName;
       
-      if (foodWords.isEmpty) {
-        if (mounted) {
-          ErrorHandlingService.showSimpleError(
-            context,
-            'No food items found in "${_currentNutrition!.productName}"',
-          );
-        }
-        return;
-      }
-
-      // ✅ USE addToGroceryList (appends without deleting)
-      int addedCount = 0;
-      for (String foodWord in foodWords) {
-        await GroceryService.addToGroceryList(foodWord);
-        addedCount++;
-      }
+      // Add the full product name to grocery list
+      await GroceryService.addToGroceryList(productName);
 
       if (mounted) {
         ErrorHandlingService.showSuccess(
           context,
-          'Added $addedCount item(s) to grocery list: ${foodWords.join(", ")}',
+          'Added "${productName}" to grocery list!',
         );
         Navigator.pushNamed(context, '/grocery-list');
       }
