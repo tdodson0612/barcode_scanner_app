@@ -29,7 +29,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   bool _isLoading = true;
   bool _isPurchasing = false;
   bool _isPremium = false;
-  bool _isTester = false;
   bool _isAvailable = false;
   int _dailyScans = 0;
   int _remainingScans = 0;
@@ -38,16 +37,12 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   bool _hasLoadError = false;
   bool _isRefreshing = false;
   
-  // Tester key functionality
-  final TextEditingController _testerKeyController = TextEditingController();
-  bool _showTesterKeyInput = false;
-  bool _isValidTesterKey = false;
-  static const String testerKey = '82125';
+
 
   // Product IDs
   static const String premiumProductId = '11.111.0000';
-  static const String testerProductId = 'Tester_Account';
-  static const Set<String> _productIds = {premiumProductId, testerProductId};
+  static const Set<String> _productIds = {premiumProductId};
+
 
   // Cache keys and expiration times
   static const String _premiumStatusCacheKey = 'cached_premium_status';
@@ -75,7 +70,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   void dispose() {
     _subscription?.cancel();
     _animationController.dispose();
-    _testerKeyController.dispose();
     super.dispose();
   }
 
@@ -155,7 +149,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       // Try to load from cache first
       bool useCache = !forceRefresh;
       bool premiumFromCache = false;
-      bool testerFromCache = false;
       int scansFromCache = 0;
       
       if (useCache) {
@@ -175,7 +168,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
               if (mounted) {
                 setState(() {
                   _isPremium = premiumFromCache;
-                  _isTester = testerFromCache;
                 });
               }
             }
@@ -219,7 +211,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       final premiumStatus = await PremiumService.isPremiumUser();
       final dailyScans = await ScanService.getDailyScanCount();
       final today = DateTime.now().toIso8601String().split('T')[0];
-      final localTester = prefs.getBool('isTesterUser') ?? false;
       
       // Cache the premium status
       final statusToCache = {
@@ -242,7 +233,6 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       if (mounted) {
         setState(() {
           _isPremium = premiumStatus;
-          _isTester = localTester && !premiumStatus;
           _dailyScans = dailyScans;
           _remainingScans = remainingScans;
           _isLoading = false;
@@ -439,109 +429,83 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   }
 
   Future<void> _handleSuccessfulPurchase(PurchaseDetails purchaseDetails) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final userId = AuthService.currentUserId;
-      
-      if (userId == null || userId.isEmpty) {
-        throw Exception('User not authenticated - invalid user ID');
-      }
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = AuthService.currentUserId;
+    
+    if (userId == null || userId.isEmpty) {
+      throw Exception('User not authenticated - invalid user ID');
+    }
 
-      String planName;
+    // We ONLY support Premium now
+    if (purchaseDetails.productID != premiumProductId) {
+      throw Exception('Unknown product ID: ${purchaseDetails.productID}');
+    }
 
-      if (purchaseDetails.productID == premiumProductId) {
-        await ProfileService.setPremiumStatus(userId, true);
-        await prefs.setBool('isPremiumUser', true);
-        await prefs.setBool('isTesterUser', false);
-        
-        // Invalidate premium cache after successful purchase
-        await invalidatePremiumCache();
-        
-        planName = 'Premium';
-        if (mounted) {
-          setState(() {
-            _isPremium = true;
-            _isTester = false;
-          });
-        }
-      } else if (purchaseDetails.productID == testerProductId) {
-        await prefs.setBool('isTesterUser', true);
-        await prefs.setBool('isPremiumUser', false);
-        
-        // Invalidate premium cache after successful purchase
-        await invalidatePremiumCache();
-        
-        planName = 'Tester';
-        if (mounted) {
-          setState(() {
-            _isTester = true;
-            _isPremium = false;
-          });
-        }
-      } else {
-        throw Exception('Unknown product ID: ${purchaseDetails.productID}');
-      }
+    // Mark user as premium in DB
+    await ProfileService.setPremiumStatus(userId, true);
+    await prefs.setBool('isPremiumUser', true);
 
-      await prefs.setString('purchaseDate', DateTime.now().toIso8601String());
-      final String computedPlan = _selectedPlan ?? (purchaseDetails.productID == premiumProductId
-          ? 'premium'
-          : (purchaseDetails.productID == testerProductId ? 'tester' : 'unknown'));
-      await prefs.setString('planType', computedPlan);
-      await prefs.setString('productId', purchaseDetails.productID);
-      await prefs.setString('transactionId', purchaseDetails.transactionDate ?? DateTime.now().millisecondsSinceEpoch.toString());
+    // Clear legacy tester flag just in case
+    await prefs.remove('isTesterUser');
 
-      await PremiumGateController().refresh();
-      
-      // Force refresh to update UI with latest data
-      await _checkPremiumStatus(forceRefresh: true);
+    // Invalidate premium cache so UI refreshes globally
+    await invalidatePremiumCache();
 
-      if (mounted) {
-        setState(() {
-          _remainingScans = -1;
-          _isPurchasing = false;
-        });
+    // Update local UI state
+    if (mounted) {
+      setState(() {
+        _isPremium = true;
+      });
+    }
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Welcome to $planName! Purchase successful.'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
-          ),
-        );
-        
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) {
-            Navigator.of(context).pop();
-          }
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isPurchasing = false);
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Purchase successful, but failed to update account. Please contact support.'),
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 5),
-          ),
-        );
-      }
+    // Save purchase metadata
+    await prefs.setString('purchaseDate', DateTime.now().toIso8601String());
+    await prefs.setString('planType', 'premium');
+    await prefs.setString('productId', purchaseDetails.productID);
+    await prefs.setString(
+        'transactionId',
+        purchaseDetails.transactionDate ??
+            DateTime.now().millisecondsSinceEpoch.toString(),
+    );
+
+    await PremiumGateController().refresh();
+
+    // Refresh page values
+    await _checkPremiumStatus(forceRefresh: true);
+
+    if (mounted) {
+      setState(() {
+        _remainingScans = -1; // unlimited scans
+        _isPurchasing = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Welcome to Premium! Purchase successful.'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 3),
+        ),
+      );
+
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) Navigator.of(context).pop();
+      });
+    }
+  } catch (e) {
+    if (mounted) {
+      setState(() => _isPurchasing = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Purchase succeeded, but updating your account failed. Please contact support.'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 5),
+        ),
+      );
     }
   }
-
-  void _selectPlan(String plan) {
-    setState(() {
-      _selectedPlan = plan;
-      if (plan == 'tester') {
-        _showTesterKeyInput = true;
-        _isValidTesterKey = false;
-      } else {
-        _showTesterKeyInput = false;
-        _isValidTesterKey = false;
-      }
-    });
-  }
+}
 
   void _validateTesterKey() {
     final enteredKey = _testerKeyController.text.trim();

@@ -1,4 +1,5 @@
 // lib/pages/profile_screen.dart
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -10,6 +11,7 @@ import 'package:liver_wise/services/submitted_recipes_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart'; 
 import 'dart:convert';
+
 
 // 🔥 NEW — listens to refresh_profile events
 import 'package:liver_wise/services/profile_events.dart';
@@ -97,6 +99,8 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   @override
   void dispose() {
+    _profileUpdateSub.cancel();
+
     _nameController.dispose();
     _emailController.dispose();
 
