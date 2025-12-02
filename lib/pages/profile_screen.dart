@@ -8,6 +8,7 @@ import 'package:liver_wise/services/picture_service.dart';
 import 'package:liver_wise/services/profile_service.dart';
 import 'package:liver_wise/services/submitted_recipes_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:permission_handler/permission_handler.dart'; 
 import 'dart:convert';
 
 import '../widgets/app_drawer.dart';
@@ -422,6 +423,26 @@ class _ProfileScreenState extends State<ProfileScreen>
     bool startedUpload = false;
 
     try {
+      // ✅ Request CORRECT permission
+      PermissionStatus status;
+      
+      if (source == ImageSource.camera) {
+        status = await Permission.camera.request();
+        if (!status.isGranted) {
+          _showPermissionError('Camera');
+          return;
+        }
+      } else {
+        status = await Permission.photos.request();
+        if (!status.isGranted) {
+          status = await Permission.storage.request();
+          if (!status.isGranted) {
+            _showPermissionError('Photos');
+            return;
+          }
+        }
+      }
+
       final picker = ImagePicker();
       final pickedFile = await picker.pickImage(
         source: source,
@@ -440,7 +461,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       startedUpload = true;
 
       final imageFile = File(pickedFile.path);
-
       await PictureService.uploadPicture(imageFile);
 
       await _invalidatePicturesCache();
@@ -680,6 +700,35 @@ class _ProfileScreenState extends State<ProfileScreen>
           ),
         );
       },
+    );
+  }
+
+  // Helper method for showing permission errors
+  void _showPermissionError(String permissionType) {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('$permissionType Access Required'),
+        content: Text(
+          'This app needs access to your $permissionType to upload pictures.\n\n'
+          'Please enable $permissionType access in your device settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              openAppSettings(); // Opens device settings
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1059,6 +1108,27 @@ class _ProfileScreenState extends State<ProfileScreen>
   // 🔧 Upload background to Supabase Storage and save URL to database
   Future<void> _pickBackgroundImage(ImageSource source) async {
     try {
+      // ✅ Request CORRECT permission based on source
+      PermissionStatus status;
+      
+      if (source == ImageSource.camera) {
+        status = await Permission.camera.request();
+        if (!status.isGranted) {
+          _showPermissionError('Camera');
+          return;
+        }
+      } else {
+        // Gallery requires storage/photos permission
+        status = await Permission.photos.request();
+        if (!status.isGranted) {
+          status = await Permission.storage.request();
+          if (!status.isGranted) {
+            _showPermissionError('Photos');
+            return;
+          }
+        }
+      }
+
       final picker = ImagePicker();
       final pickedFile = await picker.pickImage(
         source: source,
@@ -1074,7 +1144,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       });
 
       final imageFile = File(pickedFile.path);
-
       final url = await PictureService.uploadBackgroundPicture(imageFile);
 
       if (mounted) {

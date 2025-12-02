@@ -22,9 +22,11 @@ android {
     ndkVersion = "27.0.12077973"
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+    isCoreLibraryDesugaringEnabled = true   // ✅ Kotlin DSL syntax
     }
+
 
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_11.toString()
@@ -36,6 +38,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        multiDexEnabled = true   // optional but recommended
     }
 
     signingConfigs {
@@ -49,8 +52,9 @@ android {
 
     buildTypes {
         release {
-            // Sign with release keystore
             signingConfig = signingConfigs.getByName("release")
+            // shrinkResources = true  // enable if needed
+            // minifyEnabled = true    // enable if using ProGuard
         }
     }
 }
@@ -60,9 +64,7 @@ flutter {
 }
 
 dependencies {
-    // Firebase BOM (keeps libraries in sync)
     implementation(platform("com.google.firebase:firebase-bom:34.6.0"))
-
-    // Firebase Cloud Messaging
     implementation("com.google.firebase:firebase-messaging")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4") // ✅ Kotlin DSL
 }
