@@ -11,6 +11,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart'; 
 import 'dart:convert';
 
+// 🔥 NEW — listens to refresh_profile events
+import 'package:liver_wise/services/profile_events.dart';
+
 import '../widgets/app_drawer.dart';
 import '../widgets/premium_gate.dart';
 import '../widgets/recipe_card.dart';
@@ -35,6 +38,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen>
     with AutomaticKeepAliveClientMixin {
+
   // 🔧 URLs instead of local files
   String? _profileImageUrl;
   String? _backgroundImageUrl;
@@ -63,6 +67,9 @@ class _ProfileScreenState extends State<ProfileScreen>
   int _totalScansUsed = 0;
   bool _hasUsedAllFreeScans = false;
 
+  // 🔥 NEW — stream subscription
+  late final StreamSubscription _profileUpdateSub;
+
   // Cache configuration
   static const Duration _recipesCacheDuration = Duration(minutes: 5);
   static const Duration _picturesCacheDuration = Duration(minutes: 10);
@@ -74,17 +81,28 @@ class _ProfileScreenState extends State<ProfileScreen>
   @override
   void initState() {
     super.initState();
+
     _initializePremiumController();
     _loadProfile();
     _loadFriends();
     _loadPictures();
     _loadSubmittedRecipes();
+
+    // 🔥 Listen for background push-triggered profile refreshes
+    _profileUpdateSub = profileUpdateStreamController.stream.listen((_) async {
+      print("🔄 ProfileScreen: received refresh_profile event");
+      await _loadProfile();
+    });
   }
 
   @override
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
+
+    // 🔥 Cancel the listener
+    _profileUpdateSub.cancel();
+
     _premiumController.removeListener(_updatePremiumState);
     super.dispose();
   }
@@ -104,6 +122,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       });
     }
   }
+
 
   // ========== CACHING HELPERS ==========
 

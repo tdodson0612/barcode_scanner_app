@@ -35,6 +35,8 @@ class PictureService {
       final bytes = await imageFile.readAsBytes();
       final base64Image = base64Encode(bytes);
 
+      AppConfig.debugPrint('📤 Uploading profile picture to: profile-pictures/$filePath');
+
       // Upload to R2
       final publicUrl = await DatabaseServiceCore.workerStorageUpload(
         bucket: 'profile-pictures',
@@ -43,20 +45,25 @@ class PictureService {
         contentType: 'image/jpeg',
       );
 
-      // Update profile - FIXED: Use correct field name
+      AppConfig.debugPrint('✅ Profile picture uploaded: $publicUrl');
+
+      // Update profile with correct field name
       await DatabaseServiceCore.workerQuery(
         action: 'update',
         table: 'user_profiles',
         filters: {'id': userId},
         data: {
-          'profile_picture': publicUrl,  // ✅ FIXED: Was 'profile_picture_url'
-          'updated_at': DateTime.now().toIso8601String(),
+          'profile_picture': publicUrl,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
         },
       );
 
-      // Clear cache
+      // Clear all profile-related caches
       await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
       await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
+      await DatabaseServiceCore.clearCache('user_profile_$userId');
+
+      AppConfig.debugPrint('✅ Profile picture URL saved to database');
 
       return publicUrl;
     } catch (e) {
@@ -87,6 +94,8 @@ class PictureService {
       final bytes = await imageFile.readAsBytes();
       final base64Image = base64Encode(bytes);
 
+      AppConfig.debugPrint('📤 Uploading background picture to: background-pictures/$filePath');
+
       final publicUrl = await DatabaseServiceCore.workerStorageUpload(
         bucket: 'background-pictures',
         path: filePath,
@@ -94,18 +103,24 @@ class PictureService {
         contentType: 'image/jpeg',
       );
 
+      AppConfig.debugPrint('✅ Background picture uploaded: $publicUrl');
+
       await DatabaseServiceCore.workerQuery(
         action: 'update',
         table: 'user_profiles',
         filters: {'id': userId},
         data: {
           'profile_background': publicUrl,
-          'updated_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
         },
       );
 
+      // Clear all profile-related caches
       await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
       await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
+      await DatabaseServiceCore.clearCache('user_profile_$userId');
+
+      AppConfig.debugPrint('✅ Background picture URL saved to database');
 
       return publicUrl;
     } catch (e) {
@@ -136,6 +151,8 @@ class PictureService {
       final bytes = await imageFile.readAsBytes();
       final base64Image = base64Encode(bytes);
 
+      AppConfig.debugPrint('📤 Uploading gallery picture to: photo-album/$filePath');
+
       final publicUrl = await DatabaseServiceCore.workerStorageUpload(
         bucket: 'photo-album',
         path: filePath,
@@ -143,7 +160,9 @@ class PictureService {
         contentType: 'image/jpeg',
       );
 
-      // Get existing pictures
+      AppConfig.debugPrint('✅ Gallery picture uploaded: $publicUrl');
+
+      // Get existing pictures from database
       final profile = await ProfileService.getCurrentUserProfile();
       List<String> pictures = [];
 
@@ -151,24 +170,34 @@ class PictureService {
       if (existing != null && existing.isNotEmpty) {
         try {
           pictures = List<String>.from(jsonDecode(existing));
-        } catch (_) {}
+        } catch (e) {
+          AppConfig.debugPrint('⚠️ Failed to parse existing pictures: $e');
+          pictures = [];
+        }
       }
 
       pictures.add(publicUrl);
 
-      // Save updated picture list
+      AppConfig.debugPrint('💾 Saving ${pictures.length} pictures to database');
+
+      // Save updated picture list to database
       await DatabaseServiceCore.workerQuery(
         action: 'update',
         table: 'user_profiles',
         filters: {'id': userId},
         data: {
           'pictures': jsonEncode(pictures),
-          'updated_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
         },
       );
 
+      // Clear all profile-related caches
       await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
       await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
+      await DatabaseServiceCore.clearCache('user_profile_$userId');
+      await DatabaseServiceCore.clearCache('user_pictures'); // Also clear pictures cache
+
+      AppConfig.debugPrint('✅ Gallery picture saved to database');
 
       return publicUrl;
     } catch (e) {
@@ -188,36 +217,59 @@ class PictureService {
     }
 
     try {
-      // Delete file from bucket (Worker determines correct bucket)
+      AppConfig.debugPrint('🗑️ Deleting picture: $pictureUrl');
+
+      // Delete file from R2 storage (Worker determines correct bucket)
       try {
         await DatabaseServiceCore.deleteFileByPublicUrl(pictureUrl);
+        AppConfig.debugPrint('✅ Picture deleted from R2 storage');
       } catch (e) {
         AppConfig.debugPrint('⚠️ Failed to delete file from R2: $e');
-        // continue anyway
+        // Continue anyway to remove from database
       }
 
-      // Remove from pictures JSON
+      // Remove from pictures JSON array in database
       final profile = await ProfileService.getCurrentUserProfile();
       final picturesJson = profile?['pictures'];
 
       if (picturesJson != null && picturesJson.isNotEmpty) {
-        List<String> pictures = List<String>.from(jsonDecode(picturesJson));
+        List<String> pictures = [];
+        try {
+          pictures = List<String>.from(jsonDecode(picturesJson));
+        } catch (e) {
+          AppConfig.debugPrint('⚠️ Failed to parse pictures JSON: $e');
+          pictures = [];
+        }
+
+        final originalLength = pictures.length;
         pictures.remove(pictureUrl);
 
-        await DatabaseServiceCore.workerQuery(
-          action: 'update',
-          table: 'user_profiles',
-          filters: {'id': userId},
-          data: {
-            'pictures': jsonEncode(pictures),
-            'updated_at': DateTime.now().toIso8601String(),
-          },
-        );
+        if (pictures.length < originalLength) {
+          AppConfig.debugPrint('💾 Updating pictures list: ${pictures.length} remaining');
 
-        await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
-        await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
+          await DatabaseServiceCore.workerQuery(
+            action: 'update',
+            table: 'user_profiles',
+            filters: {'id': userId},
+            data: {
+              'pictures': jsonEncode(pictures),
+              'updated_at': DateTime.now().toUtc().toIso8601String(),
+            },
+          );
+
+          // Clear all profile-related caches
+          await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
+          await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
+          await DatabaseServiceCore.clearCache('user_profile_$userId');
+          await DatabaseServiceCore.clearCache('user_pictures');
+
+          AppConfig.debugPrint('✅ Picture removed from database');
+        } else {
+          AppConfig.debugPrint('⚠️ Picture URL not found in database');
+        }
       }
     } catch (e) {
+      AppConfig.debugPrint('❌ deletePicture error: $e');
       throw Exception('Failed to delete picture: $e');
     }
   }
@@ -233,20 +285,26 @@ class PictureService {
     }
 
     try {
-      // FIXED: Use correct field name
+      AppConfig.debugPrint('🖼️ Setting profile picture: $pictureUrl');
+
       await DatabaseServiceCore.workerQuery(
         action: 'update',
         table: 'user_profiles',
         filters: {'id': userId},
         data: {
-          'profile_picture': pictureUrl,  // ✅ FIXED: Was 'profile_picture_url'
-          'updated_at': DateTime.now().toIso8601String(),
+          'profile_picture': pictureUrl,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
         },
       );
 
+      // Clear all profile-related caches
       await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
       await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
+      await DatabaseServiceCore.clearCache('user_profile_$userId');
+
+      AppConfig.debugPrint('✅ Profile picture updated successfully');
     } catch (e) {
+      AppConfig.debugPrint('❌ setPictureAsProfilePicture error: $e');
       throw Exception('Failed to update profile picture: $e');
     }
   }
@@ -260,9 +318,16 @@ class PictureService {
       final profile = await ProfileService.getUserProfile(userId);
       final jsonText = profile?['pictures'];
 
-      if (jsonText == null || jsonText.isEmpty) return [];
-      return List<String>.from(jsonDecode(jsonText));
-    } catch (_) {
+      if (jsonText == null || jsonText.isEmpty) {
+        AppConfig.debugPrint('📭 No pictures found for user: $userId');
+        return [];
+      }
+
+      final pictures = List<String>.from(jsonDecode(jsonText));
+      AppConfig.debugPrint('📦 Loaded ${pictures.length} pictures for user: $userId');
+      return pictures;
+    } catch (e) {
+      AppConfig.debugPrint('❌ getUserPictures error: $e');
       return [];
     }
   }

@@ -61,7 +61,7 @@ class MessagingService {
           if (newMessages.isNotEmpty) {
             final combined = [...cachedList, ...newMessages];
             await DatabaseServiceCore.cacheData(cacheKey, jsonEncode(combined));
-            await DatabaseServiceCore.cacheData(lastKey, DateTime.now().toIso8601String());
+            await DatabaseServiceCore.cacheData(lastKey, DateTime.now().toUtc().toIso8601String());
             return combined;
           }
 
@@ -90,7 +90,7 @@ class MessagingService {
       }
 
       await DatabaseServiceCore.cacheData(cacheKey, jsonEncode(results));
-      await DatabaseServiceCore.cacheData(lastKey, DateTime.now().toIso8601String());
+      await DatabaseServiceCore.cacheData(lastKey, DateTime.now().toUtc().toIso8601String());
 
       return results;
     } catch (e) {
@@ -117,7 +117,7 @@ class MessagingService {
           'receiver': receiverId,
           'content': content,
           'is_read': false,
-          'created_at': DateTime.now().toIso8601String(),
+          'created_at': DateTime.now().toUtc().toIso8601String(), // FIXED: Always store as UTC
         },
       );
 

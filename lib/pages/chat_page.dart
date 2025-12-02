@@ -154,12 +154,12 @@ class _ChatPageState extends State<ChatPage> {
 
     // Create temporary message for optimistic UI update
     final tempMessage = {
-      'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
-      'sender': AuthService.currentUserId,
-      'receiver': widget.friendId,
-      'content': content,
-      'created_at': DateTime.now().toIso8601String(),
-      'is_temp': true,
+     'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
+     'sender': AuthService.currentUserId,
+     'receiver': widget.friendId,
+     'content': content,
+     'created_at': DateTime.now().toUtc().toIso8601String(), // Add .toUtc() here
+     'is_temp': true,
     };
 
     setState(() {
@@ -222,16 +222,20 @@ class _ChatPageState extends State<ChatPage> {
 
   String _formatMessageTime(String timestamp) {
     try {
-      final utcDateTime = DateTime.parse(timestamp);
+      // Parse as UTC and convert to local time
+      final utcDateTime = DateTime.parse(timestamp).toUtc();
       final localDateTime = utcDateTime.toLocal();
       final now = DateTime.now();
       final difference = now.difference(localDateTime);
+
+      // Debug: Log the conversion
+      print('UTC: $utcDateTime -> Local: $localDateTime (Diff: ${difference.inHours}h)');
 
       if (difference.inDays == 0 && localDateTime.day == now.day) {
         return DateFormat('h:mm a').format(localDateTime);
       }
       else if (difference.inDays == 1 || 
-               (localDateTime.day == now.day - 1 && localDateTime.month == now.month)) {
+              (localDateTime.day == now.day - 1 && localDateTime.month == now.month)) {
         return 'Yesterday ${DateFormat('h:mm a').format(localDateTime)}';
       }
       else if (difference.inDays < 7) {

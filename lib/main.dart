@@ -3,12 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // ADD THIS LINE
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'config/app_config.dart';
 
 // 🔥 Firebase
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+
+// 🔔 Stream controller for profile refresh events
+import 'services/profile_events.dart';
 
 // Screens and Pages
 import 'login.dart';
@@ -27,7 +30,6 @@ import 'pages/reset_password_page.dart';
 /// 🔥 Background FCM handler (required for messages when app is terminated)
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
-  // Keep this lightweight – no heavy logic
   debugPrint("🔥 Background message received: ${message.messageId}");
 }
 
@@ -36,13 +38,23 @@ void main() async {
 
   try {
     // Load environment variables FIRST
-    await dotenv.load(fileName: ".env"); // ADD THIS LINE
+    await dotenv.load(fileName: ".env");
 
     // 🔥 Initialize Firebase (before Supabase)
     await Firebase.initializeApp();
 
-    // 🔥 Register background handler
+    // 🔥 Register BACKGROUND handler (MUST be before runApp)
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    // 🔔 Register FOREGROUND FCM listener
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print("🔔 FCM onMessage: ${message.data}");
+
+      if (message.data['type'] == 'refresh_profile') {
+        print("🔄 Refresh profile triggered (FOREGROUND)");
+        profileUpdateStreamController.add(null);
+      }
+    });
 
     // Initialize Supabase with timeout
     await Supabase.initialize(
@@ -63,12 +75,9 @@ void main() async {
 
     runApp(const MyApp());
   } catch (e) {
-    // Log error for debugging but show user-friendly error screen
     if (AppConfig.enableDebugPrints) {
       print('❌ App initialization failed: $e');
     }
-
-    // Show user-friendly error screen (NO technical details)
     runApp(_buildErrorApp(e));
   }
 }
