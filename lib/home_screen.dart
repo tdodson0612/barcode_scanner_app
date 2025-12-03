@@ -1,4 +1,4 @@
-// lib/home_screen.dart - PART 1 OF 3
+// lib/home_screen.dart - PART 1 OF 5
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -113,11 +113,9 @@ class LiverHealthCalculator {
 }
 
 class RecipeGenerator {
-  // UPDATED: Now uses AI to extract food words with enhanced debug logging
   static Future<List<Recipe>> generateSuggestionsFromProduct(String productName) async {
     AppConfig.debugPrint('🔍 Product: $productName');
     
-    // Use AI-powered food word extraction
     final foodWords = await FoodClassifierService.extractFoodWords(productName);
     
     if (foodWords.isEmpty) {
@@ -127,7 +125,6 @@ class RecipeGenerator {
     
     AppConfig.debugPrint('✅ Food words detected: $foodWords');
     
-    // Try each food word until we find recipes
     for (String foodWord in foodWords) {
       try {
         AppConfig.debugPrint('🔍 Searching for recipes with: $foodWord');
@@ -283,6 +280,8 @@ class BarcodeScannerService {
     return await NutritionApiService.fetchNutritionInfo(barcode);
   }
 }
+// lib/home_screen.dart - PART 2 OF 5
+// This continues from Part 1
 
 class HomePage extends StatefulWidget {
   final bool isPremium;
@@ -315,7 +314,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
   bool _isRewardedAdReady = false;
   bool _isDisposed = false;
   final ImagePicker _picker = ImagePicker();
-
+  final TextEditingController _searchController = TextEditingController();
   @override
   bool get wantKeepAlive => true;
 
@@ -346,12 +345,13 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     }
   }
 
-  @override
+ @override
   void dispose() {
     _isDisposed = true;
     _premiumSubscription?.cancel();
     _interstitialAd?.dispose();
     _rewardedAd?.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -377,7 +377,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     try {
       await _premiumController.refresh();
       await _loadFavoriteRecipes();
-      // ✅ SYNC FAVORITES FROM DATABASE TO LOCAL CACHE
       await _syncFavoritesFromDatabase();
       _loadInterstitialAd();
       _loadRewardedAd();
@@ -394,13 +393,11 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     }
   }
 
-  /// ✅ SYNC FAVORITES FROM DATABASE TO LOCAL CACHE
   Future<void> _syncFavoritesFromDatabase() async {
     try {
       final currentUserId = AuthService.currentUserId;
       if (currentUserId == null) return;
 
-      // Fetch all favorites from database for current user
       final response = await http.post(
         Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
         headers: {'Content-Type': 'application/json'},
@@ -416,7 +413,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as List;
         
-        // Convert database records to FavoriteRecipe objects
         final favoriteRecipes = data.map((json) {
           return FavoriteRecipe(
             userId: json['user_id'] ?? '',
@@ -427,14 +423,12 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
           );
         }).toList();
 
-        // Update state
         if (mounted && !_isDisposed) {
           setState(() {
             _favoriteRecipes = favoriteRecipes;
           });
         }
 
-        // ✅ SAVE TO LOCAL CACHE
         await _saveFavoritesToLocalCache(favoriteRecipes);
         print('✅ Synced ${favoriteRecipes.length} favorites from database');
       }
@@ -524,7 +518,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     _isAdReady = false;
   }
 
-
   void _showRewardedAd() {
     if (_isDisposed) return;
     if (_isRewardedAdReady && _rewardedAd != null) {
@@ -605,7 +598,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     }
   }
 
-  /// ✅ Saves favorite recipes to SharedPreferences for offline access
   Future<void> _saveFavoritesToLocalCache(List<FavoriteRecipe> favorites) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -618,6 +610,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       print('⚠️ Error saving favorites to local cache: $e');
     }
   }
+// lib/home_screen.dart - PART 3 OF 5
+// This continues from Part 2
 
   Future<void> _toggleFavoriteRecipe(Recipe recipe) async {
     try {
@@ -630,7 +624,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
         return;
       }
 
-      // First, search for the recipe in the database to get its ID
       final searchResponse = await http.post(
         Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
         headers: {'Content-Type': 'application/json'},
@@ -659,7 +652,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
 
       final recipeId = recipes[0]['id'];
 
-      // Check if already favorited
       final checkResponse = await http.post(
         Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
         headers: {'Content-Type': 'application/json'},
@@ -676,7 +668,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       final existingFavorites = jsonDecode(checkResponse.body) as List;
 
       if (existingFavorites.isNotEmpty) {
-        // Remove from favorites
         final deleteResponse = await http.post(
           Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
           headers: {'Content-Type': 'application/json'},
@@ -689,12 +680,10 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
 
         if (deleteResponse.statusCode == 200) {
           if (mounted) {
-            // Update local state
             setState(() {
               _favoriteRecipes.removeWhere((fav) => fav.recipeName == recipe.title);
             });
             
-            // ✅ SYNC TO LOCAL CACHE
             await _saveFavoritesToLocalCache(_favoriteRecipes);
             
             ErrorHandlingService.showSuccess(
@@ -704,7 +693,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
           }
         }
       } else {
-        // Add to favorites WITH ALL RECIPE DETAILS
         final insertResponse = await http.post(
           Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
           headers: {'Content-Type': 'application/json'},
@@ -715,7 +703,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
               'user_id': currentUserId,
               'recipe_id': recipeId,
               'username': currentUsername,
-              // ✅ ADD ALL THE DETAIL COLUMNS
               'title': recipe.title,
               'description': recipe.description,
               'ingredients': recipe.ingredients.join(', '),
@@ -726,7 +713,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
 
         if (insertResponse.statusCode == 200 || insertResponse.statusCode == 201) {
           if (mounted) {
-            // Create FavoriteRecipe object WITH FULL DETAILS
             final favoriteRecipe = FavoriteRecipe(
               userId: currentUserId,
               recipeName: recipe.title,
@@ -739,7 +725,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
               _favoriteRecipes.add(favoriteRecipe);
             });
             
-            // ✅ SYNC TO LOCAL CACHE
             await _saveFavoritesToLocalCache(_favoriteRecipes);
             
             ErrorHandlingService.showSuccess(
@@ -1019,8 +1004,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     }
   }
 
-  // Replace this method in home_screen.dart (around line 1071)
-
   Future<void> _addNutritionToGroceryList() async {
     if (_currentNutrition == null) {
       if (mounted) {
@@ -1033,10 +1016,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     }
 
     try {
-      // ✅ FIX: Add the ENTIRE product name as ONE item
       final productName = _currentNutrition!.productName;
       
-      // Add the full product name to grocery list
       await GroceryService.addToGroceryList(productName);
 
       if (mounted) {
@@ -1063,11 +1044,9 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       List<String> ingredients = [];
 
       if (recipe is Recipe) {
-        // From AI / Nutrition suggestions
         ingredients = recipe.ingredients;
       } 
       else if (recipe is Map<String, String>) {
-        // From scanned quick recipes
         ingredients = recipe['ingredients']!
             .split(',')
             .map((e) => e.trim())
@@ -1159,114 +1138,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       }
     }
   }
-
-  Widget _buildSearchBar() {
-    final TextEditingController searchController = TextEditingController();
-    return Container(
-      margin: EdgeInsets.only(bottom: 20),
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withAlpha((0.95 * 255).toInt()),
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Icon(Icons.people, color: Colors.blue.shade700, size: 24),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Find Friends & Share Recipes',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blue.shade800,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: 4),
-          Text(
-            'Search by name, username, or email',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey.shade600,
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-          SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: searchController,
-                  decoration: InputDecoration(
-                    hintText: 'Try "John Smith" or "jsmith"...',
-                    hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
-                    prefixIcon: Icon(Icons.person_search, color: Colors.grey.shade600),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(25),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(25),
-                      borderSide: BorderSide(color: Colors.grey.shade300),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(25),
-                      borderSide: BorderSide(color: Colors.blue, width: 2),
-                    ),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    filled: true,
-                    fillColor: Colors.grey.shade50,
-                  ),
-                  textInputAction: TextInputAction.search,
-                  onSubmitted: (value) => _searchUsers(value),
-                ),
-              ),
-              SizedBox(width: 12),
-              ElevatedButton(
-                onPressed: () => _searchUsers(searchController.text),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                  shape: CircleBorder(),
-                  padding: EdgeInsets.all(14),
-                  elevation: 3,
-                ),
-                child: Icon(Icons.search, size: 24),
-              ),
-            ],
-          ),
-          SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.check_circle, size: 14, color: Colors.green),
-              SizedBox(width: 4),
-              Text(
-                'Search by Name, Username or Email!',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Colors.green.shade600,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+// lib/home_screen.dart - PART 4 OF 5
+// This continues from Part 3
 
   Widget _buildNutritionRecipeSuggestions() {
     if (_recipeSuggestions.isEmpty) return const SizedBox.shrink();
@@ -1306,8 +1179,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       ),
     );
   }
-// lib/home_screen.dart - PART 3 OF 3 (FINAL)
-// This continues from Part 2 - starts at line 1001
 
   Widget _buildNutritionRecipeCard(Recipe recipe) {
     final isFavorite = _isRecipeFavorited(recipe.title);
@@ -1443,7 +1314,6 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
           padding: EdgeInsets.all(16),
           child: Column(
             children: [
-              _buildSearchBar(),
               Container(
                 padding: EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -1539,15 +1409,15 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                       ),
                     ),
                     SizedBox(height: 20),
-                    Container(
-                      padding: EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withAlpha((0.9 * 255).toInt()),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        children: [
-                          if (!_isPremium) ...[
+                    if (!_isPremium)
+                      Container(
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          children: [
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
@@ -1562,14 +1432,10 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                                 ),
                                 SizedBox(width: 8),
                                 Text(
-                                  _premiumController.canAccessFeature(PremiumFeature.scan)
-                                      ? 'Free scans remaining: $_remainingScans/3'
-                                      : 'Daily scan limit reached!',
+                                  'Daily scans used: ${3 - _remainingScans}/3',
                                   style: TextStyle(
                                     fontSize: 16,
-                                    color: _premiumController.canAccessFeature(PremiumFeature.scan)
-                                        ? Colors.green.shade700
-                                        : Colors.red.shade700,
+                                    color: Colors.grey.shade700,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
@@ -1587,66 +1453,9 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                                 foregroundColor: Colors.white,
                               ),
                             ),
-                            SizedBox(height: 8),
-                            ElevatedButton.icon(
-                              onPressed: _showRewardedAd,
-                              icon: Icon(Icons.play_circle_fill),
-                              label: Text('Watch Ad for Bonus Scan'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.purple,
-                                foregroundColor: Colors.white,
-                              ),
-                            ),
-                          ] else ...[
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.star, color: Colors.amber, size: 20),
-                                SizedBox(width: 8),
-                                Text(
-                                  'Premium: Unlimited Scans',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.amber.shade700,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
                           ],
-                        ],
+                        ),
                       ),
-                    ),
-                    SizedBox(height: 20),
-                    ElevatedButton.icon(
-                      onPressed: _performScan,
-                      icon: Icon(Icons.qr_code_scanner),
-                      label: Text('Quick Scan Demo'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                    // TEST BUTTON - For testing AI Food Classifier
-                    SizedBox(height: 12),
-                    ElevatedButton.icon(
-                      onPressed: () async {
-                        print('🧪 Testing AI Food Classifier...');
-                        final foods = await FoodClassifierService.extractFoodWords('canned tomatoes');
-                        print('✅ Foods found: $foods');
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Test complete! Found: $foods')),
-                          );
-                        }
-                      },
-                      icon: Icon(Icons.science),
-                      label: Text('🧪 Test AI Food Detector'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.purple,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -1803,6 +1612,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
       ),
     );
   }
+// lib/home_screen.dart - PART 5 OF 5 (FINAL)
+// This continues from Part 4
 
   Widget _buildScanningView() {
     return Container(
@@ -1838,8 +1649,8 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
                   borderRadius: BorderRadius.circular(12),
                   child: Image.file(
                     _imageFile!,
-                    width: double.infinity, // FULL WIDTH instead of 200
-                    height: 300, // Larger height
+                    width: double.infinity,
+                    height: 300,
                     fit: BoxFit.cover,
                     errorBuilder: (context, error, stackTrace) {
                       return Container(
@@ -2066,6 +1877,7 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    
     return Scaffold(
       drawerEnableOpenDragGesture: false,
       appBar: AppBar(
@@ -2075,7 +1887,30 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        title: Text('Liver Food Scanner'),
+        title: Container(
+          height: 40,
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Search users...',
+              hintStyle: TextStyle(color: Colors.white70, fontSize: 14),
+              prefixIcon: Icon(Icons.person_search, color: Colors.white, size: 20),
+              suffixIcon: IconButton(
+                icon: Icon(Icons.search, color: Colors.white, size: 20),
+                onPressed: () => _searchUsers(_searchController.text),              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(25),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.2),
+            ),
+            style: TextStyle(color: Colors.white, fontSize: 14),
+            textInputAction: TextInputAction.search,
+            onSubmitted: (value) => _searchUsers(value),
+          ),
+        ),
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
         actions: [

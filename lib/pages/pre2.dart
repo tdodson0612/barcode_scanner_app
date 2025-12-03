@@ -1,4 +1,4 @@
-// lib/pages/premium_page.dart - OPTIMIZED: Local caching to reduce Supabase egress
+// lib/pages/premium_page.dart - Optimized & cleaned (no tester logic)
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/auth_service.dart';
 import 'package:liver_wise/services/premium_service.dart';
@@ -10,7 +10,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import '../services/database_service_core.dart';
-import '../services/error_handling_service.dart';
 import '../controllers/premium_gate_controller.dart';
 
 class PremiumPage extends StatefulWidget {
@@ -20,7 +19,8 @@ class PremiumPage extends StatefulWidget {
   State<PremiumPage> createState() => _PremiumPageState();
 }
 
-class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin {
+class _PremiumPageState extends State<PremiumPage>
+    with TickerProviderStateMixin {
   final InAppPurchase _inAppPurchase = InAppPurchase.instance;
   StreamSubscription<List<PurchaseDetails>>? _subscription;
 
@@ -35,17 +35,18 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
   int _dailyScans = 0;
   int _remainingScans = 0;
 
+  /// ⭐ Free tier is default, user must explicitly choose premium
   String? _selectedPlan;
-  List<ProductDetails> _products = <ProductDetails>[];
 
+  List<ProductDetails> _products = <ProductDetails>[];
   bool _hasLoadError = false;
   bool _isRefreshing = false;
 
-  // Product IDs — Premium only
+  // PREMIUM ONLY
   static const String premiumProductId = '11.111.0000';
   static const Set<String> _productIds = {premiumProductId};
 
-  // Cache keys and expiration times
+  // Cache keys
   static const String _premiumStatusCacheKey = 'cached_premium_status';
   static const String _premiumStatusTimestampKey = 'cached_premium_timestamp';
   static const String _scanCountCacheKey = 'cached_scan_count';
@@ -65,10 +66,7 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
     );
 
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: Curves.easeInOut,
-      ),
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
 
     _initializePremiumPage();
@@ -96,26 +94,15 @@ class _PremiumPageState extends State<PremiumPage> with TickerProviderStateMixin
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Unable to load premium details. You can still browse features.'),
+        const SnackBar(
+          content: Text(
+              'Unable to load premium details. You can still browse features.'),
           backgroundColor: Colors.orange,
-          duration: const Duration(seconds: 5),
-          action: SnackBarAction(
-            label: 'Retry',
-            textColor: Colors.white,
-            onPressed: () {
-              setState(() {
-                _isLoading = true;
-                _hasLoadError = false;
-              });
-              _initializePremiumPage();
-            },
-          ),
+          duration: Duration(seconds: 5),
         ),
       );
     }
   }
-//done from here and up
 /// Check if cached data is still valid
 Future<bool> _isCacheValid(String timestampKey, Duration expiry) async {
   try {
@@ -126,7 +113,7 @@ Future<bool> _isCacheValid(String timestampKey, Duration expiry) async {
     final timestamp = DateTime.parse(timestampStr);
     final age = DateTime.now().difference(timestamp);
     return age < expiry;
-  } catch (e) {
+  } catch (_) {
     return false;
   }
 }
@@ -138,7 +125,7 @@ Future<bool> _isNewDay() async {
     final cachedDate = prefs.getString(_scanCountDateKey);
     final today = DateTime.now().toIso8601String().split('T')[0];
     return cachedDate != today;
-  } catch (e) {
+  } catch (_) {
     return true;
   }
 }
@@ -154,13 +141,12 @@ Future<void> _checkPremiumStatus({bool forceRefresh = false}) async {
 
     final prefs = await SharedPreferences.getInstance();
 
-    // Try loading from cache
     bool useCache = !forceRefresh;
     bool premiumFromCache = false;
     int scansFromCache = 0;
 
+    // ---- PREMIUM CACHE ----
     if (useCache) {
-      // --- Premium cache check ---
       final premiumTimestampStr = prefs.getString(_premiumStatusTimestampKey);
 
       if (premiumTimestampStr != null) {
@@ -183,53 +169,57 @@ Future<void> _checkPremiumStatus({bool forceRefresh = false}) async {
       } else {
         useCache = false;
       }
+    }
 
-      // --- Scan cache check ---
-      if (useCache) {
-        final scanTimestampStr = prefs.getString(_scanCountTimestampKey);
-        final newDay = await _isNewDay();
+    // ---- SCAN CACHE ----
+    if (useCache) {
+      final scanTimestampStr = prefs.getString(_scanCountTimestampKey);
+      final newDay = await _isNewDay();
 
-        if (!newDay && scanTimestampStr != null) {
-          final scanTimestamp = DateTime.parse(scanTimestampStr);
-          final scanAge = DateTime.now().difference(scanTimestamp);
+      if (!newDay && scanTimestampStr != null) {
+        final storedTime = DateTime.parse(scanTimestampStr);
+        final age = DateTime.now().difference(storedTime);
 
-          if (scanAge < _scanCountCacheExpiry) {
-            scansFromCache = prefs.getInt(_scanCountCacheKey) ?? 0;
-            final remaining = premiumFromCache ? -1 : (3 - scansFromCache);
+        if (age < _scanCountCacheExpiry) {
+          scansFromCache = prefs.getInt(_scanCountCacheKey) ?? 0;
 
-            if (mounted) {
-              setState(() {
-                _dailyScans = scansFromCache;
-                _remainingScans = remaining;
-                _isLoading = false;
-              });
-            }
+          final remaining = premiumFromCache ? -1 : (3 - scansFromCache);
 
-            return; // Cache was used successfully
+          if (mounted) {
+            setState(() {
+              _dailyScans = scansFromCache;
+              _remainingScans = remaining;
+              _isLoading = false;
+            });
           }
+
+          return; // Used cache successfully
         }
       }
     }
 
-    // --- If no cache or refresh forced → fetch from DB ---
+    // ---- FETCH FROM DB (no cache) ----
     final premiumStatus = await PremiumService.isPremiumUser();
     final dailyScans = await ScanService.getDailyScanCount();
     final today = DateTime.now().toIso8601String().split('T')[0];
 
     // Cache premium status
-    final statusToCache = {
-      'isPremium': premiumStatus,
-    };
+    await prefs.setString(
+      _premiumStatusCacheKey,
+      json.encode({'isPremium': premiumStatus}),
+    );
+    await prefs.setString(
+      _premiumStatusTimestampKey,
+      DateTime.now().toIso8601String(),
+    );
 
-    await prefs.setString(_premiumStatusCacheKey, json.encode(statusToCache));
-    await prefs.setString(_premiumStatusTimestampKey, DateTime.now().toIso8601String());
-
-    // Cache scan data
+    // Cache scans
     await prefs.setInt(_scanCountCacheKey, dailyScans);
-    await prefs.setString(_scanCountTimestampKey, DateTime.now().toIso8601String());
+    await prefs.setString(
+        _scanCountTimestampKey, DateTime.now().toIso8601String());
     await prefs.setString(_scanCountDateKey, today);
 
-    // Update legacy flag
+    // Update legacy key
     await prefs.setBool('isPremiumUser', premiumStatus);
 
     final remainingScans = premiumStatus ? -1 : (3 - dailyScans);
@@ -252,22 +242,14 @@ Future<void> _checkPremiumStatus({bool forceRefresh = false}) async {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Unable to load account status'),
+        const SnackBar(
+          content: Text('Unable to load account status'),
           backgroundColor: Colors.orange,
-          action: SnackBarAction(
-            label: 'Retry',
-            textColor: Colors.white,
-            onPressed: () => _checkPremiumStatus(forceRefresh: true),
-          ),
         ),
       );
     }
   }
 }
-
-//done from here and up
-
 /// Manually refresh premium status (bypasses cache)
 Future<void> _refreshPremiumStatus() async {
   setState(() => _isRefreshing = true);
@@ -280,9 +262,7 @@ static Future<void> invalidateScanCache() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_scanCountCacheKey);
     await prefs.remove(_scanCountTimestampKey);
-  } catch (e) {
-    // Silent fail - cache will naturally refresh
-  }
+  } catch (_) {}
 }
 
 /// Invalidate cache when user purchases premium
@@ -291,9 +271,7 @@ static Future<void> invalidatePremiumCache() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_premiumStatusCacheKey);
     await prefs.remove(_premiumStatusTimestampKey);
-  } catch (e) {
-    // Silent fail - cache will naturally refresh
-  }
+  } catch (_) {}
 }
 
 Future<void> _initializeInAppPurchase() async {
@@ -319,13 +297,14 @@ Future<void> _initializeInAppPurchase() async {
       return;
     }
 
+    // 🔥 Listen to purchase updates
     final Stream<List<PurchaseDetails>> purchaseUpdated =
         _inAppPurchase.purchaseStream;
 
     _subscription = purchaseUpdated.listen(
       _onPurchaseUpdate,
       onDone: () => _subscription?.cancel(),
-      onError: (Object error) {
+      onError: (_) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -392,9 +371,7 @@ Future<void> _loadProducts() async {
     }
   }
 }
-
-//done from here and up
-  void _onPurchaseUpdate(List<PurchaseDetails> purchaseDetailsList) {
+void _onPurchaseUpdate(List<PurchaseDetails> purchaseDetailsList) {
   for (final PurchaseDetails purchaseDetails in purchaseDetailsList) {
     switch (purchaseDetails.status) {
       case PurchaseStatus.pending:
@@ -450,27 +427,25 @@ Future<void> _handleSuccessfulPurchase(PurchaseDetails purchaseDetails) async {
       throw Exception('User not authenticated - invalid user ID');
     }
 
-    // Only premium supported
+    // Only premium supported now
     if (purchaseDetails.productID != premiumProductId) {
       throw Exception('Unknown product ID: ${purchaseDetails.productID}');
     }
 
-    // Mark user as premium in DB
+    // Update database & local cache
     await ProfileService.setPremiumStatus(userId, true);
     await prefs.setBool('isPremiumUser', true);
 
-
-    // Clear old cache
+    // Invalidate old premium cache
     await invalidatePremiumCache();
 
-    // Update UI
     if (mounted) {
       setState(() {
         _isPremium = true;
       });
     }
 
-    // Save metadata
+    // Save purchase metadata
     await prefs.setString('purchaseDate', DateTime.now().toIso8601String());
     await prefs.setString('planType', 'premium');
     await prefs.setString('productId', purchaseDetails.productID);
@@ -480,14 +455,15 @@ Future<void> _handleSuccessfulPurchase(PurchaseDetails purchaseDetails) async {
           DateTime.now().millisecondsSinceEpoch.toString(),
     );
 
+    // Refresh system-wide premium gate
     await PremiumGateController().refresh();
 
-    // Refresh premium status display
+    // Refresh this page’s premium data
     await _checkPremiumStatus(forceRefresh: true);
 
     if (mounted) {
       setState(() {
-        _remainingScans = -1;
+        _remainingScans = -1; // Unlimited scans
         _isPurchasing = false;
       });
 
@@ -499,6 +475,7 @@ Future<void> _handleSuccessfulPurchase(PurchaseDetails purchaseDetails) async {
         ),
       );
 
+      // Pop after success
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) Navigator.of(context).pop();
       });
@@ -521,7 +498,6 @@ Future<void> _handleSuccessfulPurchase(PurchaseDetails purchaseDetails) async {
 }
 
 Future<void> _purchasePlan() async {
-  // Only one plan exists now
   if (_selectedPlan == null) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -581,9 +557,7 @@ Future<void> _purchasePlan() async {
     }
   }
 }
-
-//done from here and up
-  Future<void> _restorePurchases() async {
+Future<void> _restorePurchases() async {
   if (!_isAvailable) return;
 
   setState(() => _isPurchasing = true);
@@ -627,7 +601,7 @@ String _getProductPrice(String productId) {
     final product = _products.firstWhere((p) => p.id == productId);
     return product.price;
   } catch (e) {
-    return '\$9.99'; // fallback for premium price
+    return '\$9.99'; // fallback price
   }
 }
 
@@ -700,10 +674,13 @@ Widget _buildStatusCard() {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: _remainingScans <= 0 ? Colors.red.shade50 : Colors.blue.shade50,
+              color:
+                  _remainingScans <= 0 ? Colors.red.shade50 : Colors.blue.shade50,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: _remainingScans <= 0 ? Colors.red.shade200 : Colors.blue.shade200,
+                color: _remainingScans <= 0
+                    ? Colors.red.shade200
+                    : Colors.blue.shade200,
               ),
             ),
             child: Column(
@@ -712,7 +689,9 @@ Widget _buildStatusCard() {
                   'Free Account Limits',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    color: _remainingScans <= 0 ? Colors.red.shade700 : Colors.blue.shade700,
+                    color: _remainingScans <= 0
+                        ? Colors.red.shade700
+                        : Colors.blue.shade700,
                     fontSize: 16,
                   ),
                 ),
@@ -720,7 +699,9 @@ Widget _buildStatusCard() {
                 Text(
                   'Daily scans used: $_dailyScans/3',
                   style: TextStyle(
-                    color: _remainingScans <= 0 ? Colors.red.shade600 : Colors.blue.shade600,
+                    color: _remainingScans <= 0
+                        ? Colors.red.shade600
+                        : Colors.blue.shade600,
                     fontSize: 14,
                   ),
                 ),
@@ -787,7 +768,9 @@ Widget _buildFeaturesCard() {
             child: Row(
               children: [
                 Icon(
-                  _isPremium ? Icons.check_circle : Icons.check_circle_outline,
+                  _isPremium
+                      ? Icons.check_circle
+                      : Icons.check_circle_outline,
                   color: _isPremium ? Colors.green : Colors.amber,
                   size: 24,
                 ),
@@ -810,14 +793,7 @@ Widget _buildFeaturesCard() {
   );
 }
 
-//done from here and up
-void _selectPlan(String plan) {
-  setState(() {
-    _selectedPlan = plan;
-  });
-}
-
- Widget _buildPlanSelection() {
+Widget _buildPlanSelection() {
   if (_isPremium) return const SizedBox.shrink();
 
   if (_hasLoadError) {
@@ -897,12 +873,12 @@ void _selectPlan(String plan) {
         ),
         const SizedBox(height: 20),
 
-        // 🔥 PREMIUM ONLY
+        // 🔥 ONLY PREMIUM PLAN
         Card(
           elevation: _selectedPlan == 'premium' ? 8 : 2,
           color: _selectedPlan == 'premium' ? Colors.amber.shade50 : null,
           child: InkWell(
-            onTap: () => _selectPlan('premium'),
+            onTap: () => setState(() => _selectedPlan = 'premium'),
             child: Padding(
               padding: const EdgeInsets.all(20),
               child: Row(
@@ -910,7 +886,7 @@ void _selectPlan(String plan) {
                   Radio<String>(
                     value: 'premium',
                     groupValue: _selectedPlan,
-                    onChanged: (value) => _selectPlan(value!),
+                    onChanged: (value) => setState(() => _selectedPlan = value),
                     activeColor: Colors.amber.shade600,
                   ),
                   const Expanded(
@@ -1038,7 +1014,6 @@ Widget _buildAlreadyPurchasedCard() {
   );
 }
 
-//done from here and up
 @override
 Widget build(BuildContext context) {
   if (_isLoading) {
@@ -1063,7 +1038,6 @@ Widget build(BuildContext context) {
       foregroundColor: Colors.white,
       elevation: 0,
       actions: [
-        // Only show "Restore" when user is NOT premium and IAP is available
         if (!_isPremium && _isAvailable)
           TextButton(
             onPressed: _restorePurchases,
