@@ -1,14 +1,14 @@
-// lib/services/auth_service.dart - FINAL + FCM SUPPORT
+// lib/services/auth_service.dart - FINAL + FCM SUPPORT (no circular deps)
 
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/app_config.dart';
 
-// NEW: correct imports
-import 'profile_service.dart';
-import 'database_service_core.dart';
+// ✅ NEW: Replaces ProfileService imports
+import 'profile_data_access.dart';
 
-// 🔥 Firebase Messaging
+// KEEP: Database service + FCM
+import 'database_service_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 class AuthService {
@@ -35,11 +35,14 @@ class AuthService {
     }
   }
 
+  // --------------------------------------------------------
+  // FETCH CURRENT USERNAME
+  // --------------------------------------------------------
   static Future<String?> fetchCurrentUsername() async {
     if (currentUserId == null) return null;
 
     try {
-      final profile = await ProfileService.getUserProfile(currentUserId!);
+      final profile = await ProfileDataAccess.getUserProfile(currentUserId!);
       return profile?['username'] as String?;
     } catch (e) {
       print('Error fetching username: $e');
@@ -117,11 +120,10 @@ class AuthService {
         final isPremium = _isDefaultPremiumEmail(normalizedEmail);
         final userId = response.user!.id;
 
-        // Delay for session
         await Future.delayed(const Duration(seconds: 1));
 
         try {
-          await ProfileService.createUserProfile(
+          await ProfileDataAccess.createUserProfile(
             userId,
             email,
             isPremium: isPremium,
@@ -173,7 +175,7 @@ class AuthService {
 
         if (_isDefaultPremiumEmail(normalizedEmail)) {
           try {
-            await _ensurePremiumStatus(userId);
+            await ProfileDataAccess.setPremium(userId, true);
           } catch (premiumError) {
             AppConfig.debugPrint('⚠️ Premium setup failed: $premiumError');
           }
@@ -198,11 +200,11 @@ class AuthService {
   static Future<void> _ensureUserProfileExists(
       String userId, String email) async {
     try {
-      final profile = await ProfileService.getUserProfile(userId);
+      final profile = await ProfileDataAccess.getUserProfile(userId);
 
       if (profile == null) {
         AppConfig.debugPrint('📝 Profile missing → creating');
-        await ProfileService.createUserProfile(
+        await ProfileDataAccess.createUserProfile(
           userId,
           email,
           isPremium: false,
@@ -212,21 +214,6 @@ class AuthService {
     } catch (e) {
       AppConfig.debugPrint('❌ Ensure profile failed: $e');
       throw e;
-    }
-  }
-
-  // --------------------------------------------------------
-  // Ensure premium status
-  // --------------------------------------------------------
-  static Future<void> _ensurePremiumStatus(String userId) async {
-    try {
-      final currentProfile = await ProfileService.getUserProfile(userId);
-      if (currentProfile != null && currentProfile['is_premium'] != true) {
-        AppConfig.debugPrint('💎 Setting premium status: $userId');
-        await ProfileService.setPremiumStatus(userId, true);
-      }
-    } catch (e) {
-      AppConfig.debugPrint('⚠️ Premium ensure failed: $e');
     }
   }
 

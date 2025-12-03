@@ -4,7 +4,7 @@
 import 'dart:convert';
 import '../config/app_config.dart';         // auth + user profile
 import 'database_service_core.dart';     // workerQuery + cache
-import 'xp_service.dart';                // XP rewards
+import 'xp_reward_service.dart';
 
 
 class AchievementsService {
@@ -122,17 +122,17 @@ class AchievementsService {
         filters: {'id': badgeId},
         limit: 1,
       );
-
       if (badgeData != null &&
           (badgeData as List).isNotEmpty &&
           badgeData[0]['xp_reward'] != null &&
           badgeData[0]['xp_reward'] > 0) {
 
-        await XPService.addXP(
+        await XpRewardService.rewardXPFromBadge(
           badgeData[0]['xp_reward'],
-          reason: 'Badge: $badgeId',
+          badgeId,
         );
       }
+
 
       return true;
     } catch (e) {

@@ -4,9 +4,9 @@
 import 'dart:convert';
 import '../config/app_config.dart';
 
-import 'auth_service.dart';
 import 'database_service_core.dart';
-import 'achievements_service.dart';     // awardBadge moved here
+import 'achievements_service.dart'; // awardBadge
+import 'profile_data_access.dart'; // NEW: replaces all AuthService/profile DB loops
 
 
 class ProfileService {
@@ -61,22 +61,15 @@ class ProfileService {
 
   static Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     try {
-      final result = await DatabaseServiceCore.workerQuery(
-        action: 'select',
-        table: 'user_profiles',
-        filters: {'id': userId},
-        limit: 1,
-      );
-
-      if (result == null || (result as List).isEmpty) return null;
-      return result[0];
+      final result = await ProfileDataAccess.getUserProfile(userId);
+      return result;
     } catch (e) {
       throw Exception('Failed to get user profile: $e');
     }
   }
 
   static Future<Map<String, dynamic>?> getCurrentUserProfile() async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId; // FIX: removed AuthService
     if (userId == null) return null;
     return getUserProfile(userId);
   }
@@ -93,7 +86,7 @@ class ProfileService {
     String? avatarUrl,
     String? profilePicture,
   }) async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId; // FIX
     if (userId == null) throw Exception('Please sign in');
 
     try {
@@ -131,20 +124,13 @@ class ProfileService {
   // ==================================================
 
   static Future<void> setPremiumStatus(String userId, bool isPremium) async {
-    if (AuthService.currentUserId == null) {
+    final currentUser = DatabaseServiceCore.currentUserId; // FIX
+    if (currentUser == null) {
       throw Exception('Please sign in');
     }
 
     try {
-      await DatabaseServiceCore.workerQuery(
-        action: 'update',
-        table: 'user_profiles',
-        filters: {'id': userId},
-        data: {
-          'is_premium': isPremium,
-          'updated_at': DateTime.now().toIso8601String(),
-        },
-      );
+      await ProfileDataAccess.setPremium(userId, isPremium);
 
       await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
       await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
@@ -154,7 +140,7 @@ class ProfileService {
   }
 
   static Future<bool> isPremiumUser() async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId; // FIX
     if (userId == null) return false;
 
     try {
@@ -180,7 +166,7 @@ class ProfileService {
   }
 
   static Future<String?> getCurrentProfilePicture() async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId; // FIX
     if (userId == null) return null;
     return getProfilePicture(userId);
   }
@@ -196,7 +182,7 @@ class ProfileService {
   }
 
   static Future<String?> getCurrentBackgroundPicture() async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId; // FIX
     if (userId == null) return null;
     return getBackgroundPicture(userId);
   }
