@@ -277,6 +277,38 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+// ======================================================
+// FIXED RUNTIME PERMISSIONS FOR ANDROID + iOS
+// ======================================================
+Future<bool> requestImagePermission(ImageSource source) async {
+  if (source == ImageSource.camera) {
+    final cam = await Permission.camera.request();
+    return cam.isGranted;
+  }
+
+  // ---- GALLERY ----
+  if (Platform.isAndroid) {
+    // ANDROID 13+ → READ_MEDIA_IMAGES = Permission.photos
+    final media = await Permission.photos.request();
+    if (media.isGranted) return true;
+
+    // ANDROID 10–12 fallback
+    final storage = await Permission.storage.request();
+    return storage.isGranted;
+  }
+
+  // iOS photo picker
+  final photos = await Permission.photos.request();
+  return photos.isGranted;
+}
+
+
+
+
+
+
+
+
   // ========== LOAD FUNCTIONS WITH CACHING ==========
 
   Future<void> _loadSubmittedRecipes({bool forceRefresh = false}) async {
@@ -1085,6 +1117,13 @@ class _ProfileScreenState extends State<ProfileScreen>
   // 🔧 Upload profile picture to Supabase Storage and save URL to database
   Future<void> _pickImage(ImageSource source) async {
     try {
+      // 🔥 Request correct runtime permission
+      final allowed = await requestImagePermission(source);
+      if (!allowed) {
+        _showPermissionError(source == ImageSource.camera ? 'Camera' : 'Photos');
+        return;
+      }
+
       final picker = ImagePicker();
       final pickedFile = await picker.pickImage(
         source: source,
@@ -1100,7 +1139,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       });
 
       final imageFile = File(pickedFile.path);
-
       final url = await PictureService.uploadProfilePicture(imageFile);
 
       if (mounted) {
@@ -1131,25 +1169,11 @@ class _ProfileScreenState extends State<ProfileScreen>
   // 🔧 Upload background to Supabase Storage and save URL to database
   Future<void> _pickBackgroundImage(ImageSource source) async {
     try {
-      // ✅ Request CORRECT permission based on source
-      PermissionStatus status;
-      
-      if (source == ImageSource.camera) {
-        status = await Permission.camera.request();
-        if (!status.isGranted) {
-          _showPermissionError('Camera');
-          return;
-        }
-      } else {
-        // Gallery requires storage/photos permission
-        status = await Permission.photos.request();
-        if (!status.isGranted) {
-          status = await Permission.storage.request();
-          if (!status.isGranted) {
-            _showPermissionError('Photos');
-            return;
-          }
-        }
+      // 🔥 Request correct runtime permission
+      final allowed = await requestImagePermission(source);
+      if (!allowed) {
+        _showPermissionError(source == ImageSource.camera ? 'Camera' : 'Photos');
+        return;
       }
 
       final picker = ImagePicker();
