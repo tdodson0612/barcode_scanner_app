@@ -323,8 +323,19 @@ class _HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin 
     super.initState();
     _initializePremiumController();
     _initializeAsync();
-    _precacheImages();
   }
+
+  bool _didPrecache = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_didPrecache) {
+      _didPrecache = true;
+      _precacheImages();   // ✅ Safe place
+    }
+  }
+
 
   Future<void> _precacheImages() async {
     await precacheImage(

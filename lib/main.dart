@@ -32,7 +32,6 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   debugPrint("🔥 Background message received: ${message.messageId}");
 }
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -43,18 +42,31 @@ void main() async {
     // 🔥 Initialize Firebase (before Supabase)
     await Firebase.initializeApp();
 
-    // 🔥 Register BACKGROUND handler (MUST be before runApp)
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
-    // 🔔 Register FOREGROUND FCM listener
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print("🔔 FCM onMessage: ${message.data}");
-
-      if (message.data['type'] == 'refresh_profile') {
-        print("🔄 Refresh profile triggered (FOREGROUND)");
-        profileUpdateStreamController.add(null);
+    // 🔥 Register BACKGROUND handler (safe)
+    try {
+      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    } catch (e) {
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('Failed to register background FCM: $e');
       }
-    });
+    }
+
+    // 🔔 Register FOREGROUND FCM listener (safe)
+    try {
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        print("🔔 FCM onMessage: ${message.data}");
+
+        if (message.data['type'] == 'refresh_profile') {
+          print("🔄 Refresh profile triggered (FOREGROUND)");
+          profileUpdateStreamController.add(null);
+        }
+      });
+    } catch (e) {
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('Failed to register foreground FCM: $e');
+      }
+    }
+
 
     // Initialize Supabase with timeout
     await Supabase.initialize(
@@ -81,17 +93,17 @@ void main() async {
     runApp(_buildErrorApp(e));
   }
 }
-
+/// Build user-friendly error app when initialization fails
 /// Build user-friendly error app when initialization fails
 Widget _buildErrorApp(dynamic error) {
   final errorString = error.toString().toLowerCase();
-  
+
   // Determine user-friendly message
   String title = 'Unable to Start App';
   String message = 'Please check your internet connection and try again.';
   IconData icon = Icons.cloud_off_rounded;
   Color iconColor = Colors.orange;
-  
+
   if (errorString.contains('timeout') || errorString.contains('network')) {
     title = 'Connection Problem';
     message = 'Please check your internet connection and try again.';
@@ -133,8 +145,9 @@ Widget _buildErrorApp(dynamic error) {
                     color: iconColor,
                   ),
                 ),
+
                 const SizedBox(height: 32),
-                
+
                 // Title
                 Text(
                   title,
@@ -144,9 +157,10 @@ Widget _buildErrorApp(dynamic error) {
                   ),
                   textAlign: TextAlign.center,
                 ),
+
                 const SizedBox(height: 12),
-                
-                // User-friendly message (NO technical details)
+
+                // Message
                 Text(
                   message,
                   style: TextStyle(
@@ -156,16 +170,16 @@ Widget _buildErrorApp(dynamic error) {
                   ),
                   textAlign: TextAlign.center,
                 ),
+
                 const SizedBox(height: 40),
-                
+
                 // Retry button
                 SizedBox(
                   width: 200,
                   height: 50,
                   child: ElevatedButton.icon(
                     onPressed: () {
-                      // Restart the app
-                      main();
+                      main(); // retry init
                     },
                     icon: const Icon(Icons.refresh),
                     label: const Text(
@@ -184,8 +198,9 @@ Widget _buildErrorApp(dynamic error) {
                     ),
                   ),
                 ),
+
                 const SizedBox(height: 24),
-                
+
                 // Help text
                 Container(
                   padding: const EdgeInsets.all(16),
@@ -214,6 +229,20 @@ Widget _buildErrorApp(dynamic error) {
                     ],
                   ),
                 ),
+
+                // Debug details
+                if (AppConfig.enableDebugPrints)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 16),
+                    child: Text(
+                      'Debug: $error',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -222,6 +251,8 @@ Widget _buildErrorApp(dynamic error) {
     ),
   );
 }
+
+
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
