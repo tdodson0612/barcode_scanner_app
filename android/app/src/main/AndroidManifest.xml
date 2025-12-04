@@ -4,16 +4,6 @@
     <!-- Permissions -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
-    
-    <!-- ✅ UPDATED: Gallery/Photo permissions for Android 13+ -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-    
-    <!-- ✅ Legacy storage permissions for Android 12 and below -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" 
-        android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="29" />
 
     <!-- Device features -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -24,8 +14,7 @@
     <application
         android:label="LiverWise"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
-        android:requestLegacyExternalStorage="true">
+        android:icon="@mipmap/ic_launcher">
 
         <!-- Google Ads -->
         <meta-data
@@ -42,13 +31,11 @@
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
 
-            <!-- Deep Link for Password Reset (FIXED) -->
+            <!-- Deep Link for Password Reset -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
-
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-
                 <data
                     android:scheme="com.terrydodson.liverWiseApp"
                     android:host="reset-password"
