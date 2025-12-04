@@ -280,33 +280,46 @@ class _ProfileScreenState extends State<ProfileScreen>
 // ======================================================
 // FIXED RUNTIME PERMISSIONS FOR ANDROID + iOS
 // ======================================================
-Future<bool> requestImagePermission(ImageSource source) async {
-  if (source == ImageSource.camera) {
-    final cam = await Permission.camera.request();
-    return cam.isGranted;
+  Future<bool> requestImagePermission(ImageSource source) async {
+    if (source == ImageSource.camera) {
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (status.isPermanentlyDenied) {
+          openAppSettings();
+        }
+        return false;
+      }
+      return true;
+    }
+
+    // ---- GALLERY ----
+    if (Platform.isAndroid) {
+      // Try photos permission first (Android 13+)
+      var status = await Permission.photos.request();
+      
+      if (status.isGranted) return true;
+      
+      // If denied, try storage permission (Android 10-12)
+      if (status.isDenied) {
+        status = await Permission.storage.request();
+        if (status.isGranted) return true;
+      }
+      
+      // If permanently denied, open settings
+      if (status.isPermanentlyDenied) {
+        openAppSettings();
+      }
+      
+      return false;
+    }
+
+    // iOS
+    final status = await Permission.photos.request();
+    if (!status.isGranted && status.isPermanentlyDenied) {
+      openAppSettings();
+    }
+    return status.isGranted;
   }
-
-  // ---- GALLERY ----
-  if (Platform.isAndroid) {
-    // ANDROID 13+ → READ_MEDIA_IMAGES = Permission.photos
-    final media = await Permission.photos.request();
-    if (media.isGranted) return true;
-
-    // ANDROID 10–12 fallback
-    final storage = await Permission.storage.request();
-    return storage.isGranted;
-  }
-
-  // iOS photo picker
-  final photos = await Permission.photos.request();
-  return photos.isGranted;
-}
-
-
-
-
-
-
 
 
   // ========== LOAD FUNCTIONS WITH CACHING ==========
@@ -478,24 +491,11 @@ Future<bool> requestImagePermission(ImageSource source) async {
     bool startedUpload = false;
 
     try {
-      // ✅ Request CORRECT permission
-      PermissionStatus status;
-      
-      if (source == ImageSource.camera) {
-        status = await Permission.camera.request();
-        if (!status.isGranted) {
-          _showPermissionError('Camera');
-          return;
-        }
-      } else {
-        status = await Permission.photos.request();
-        if (!status.isGranted) {
-          status = await Permission.storage.request();
-          if (!status.isGranted) {
-            _showPermissionError('Photos');
-            return;
-          }
-        }
+      // ✅ Request permission using the helper function
+      final allowed = await requestImagePermission(source);
+      if (!allowed) {
+        _showPermissionError(source == ImageSource.camera ? 'Camera' : 'Photos');
+        return;
       }
 
       final picker = ImagePicker();

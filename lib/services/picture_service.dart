@@ -72,7 +72,7 @@ class PictureService {
     }
   }
 
-  // ==================================================
+ // ==================================================
   // UPLOAD BACKGROUND PICTURE
   // ==================================================
 
@@ -93,6 +93,15 @@ class PictureService {
 
       final bytes = await imageFile.readAsBytes();
       final base64Image = base64Encode(bytes);
+
+      // 🔥 DEBUG CODE - Background Picture
+      print('🔍 DEBUG uploadBackgroundPicture:');
+      print('   userId: $userId');
+      print('   fileName: $fileName');
+      print('   filePath: $filePath');
+      print('   bucket: background-pictures');
+      print('   fileSize: $fileSize bytes');
+      print('   base64 length: ${base64Image.length} chars');
 
       AppConfig.debugPrint('📤 Uploading background picture to: background-pictures/$filePath');
 
@@ -125,6 +134,7 @@ class PictureService {
       return publicUrl;
     } catch (e) {
       AppConfig.debugPrint('❌ uploadBackgroundPicture error: $e');
+      print('❌ FULL ERROR: $e'); // 🔥 Extra debug
       throw Exception('Failed to upload background picture: $e');
     }
   }
@@ -150,6 +160,15 @@ class PictureService {
 
       final bytes = await imageFile.readAsBytes();
       final base64Image = base64Encode(bytes);
+
+      // 🔥 DEBUG CODE - Gallery Picture
+      print('🔍 DEBUG uploadPicture (gallery):');
+      print('   userId: $userId');
+      print('   fileName: $fileName');
+      print('   filePath: $filePath');
+      print('   bucket: photo-album');
+      print('   fileSize: $fileSize bytes');
+      print('   base64 length: ${base64Image.length} chars');
 
       AppConfig.debugPrint('📤 Uploading gallery picture to: photo-album/$filePath');
 
@@ -202,10 +221,10 @@ class PictureService {
       return publicUrl;
     } catch (e) {
       AppConfig.debugPrint('❌ uploadPicture error: $e');
+      print('❌ FULL ERROR: $e'); // 🔥 Extra debug
       throw Exception('Failed to upload picture: $e');
     }
   }
-
   // ==================================================
   // DELETE PICTURE (Gallery, Profile, OR Background)
   // ==================================================
