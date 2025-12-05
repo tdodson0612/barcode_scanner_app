@@ -53,34 +53,33 @@ class FavoriteRecipesService {
   // --------------------------------------------------
   // ADD FAVORITE RECIPE
   // --------------------------------------------------
-  static Future<void> addFavoriteRecipe(
+  static Future<FavoriteRecipe> addFavoriteRecipe(
     String recipeName,
     String ingredients,
     String directions,
   ) async {
-    // Replace ensureUserAuthenticated
     if (AuthService.currentUserId == null) {
       throw Exception('Please sign in to continue');
     }
 
-    try {
-      await DatabaseServiceCore.workerQuery(
-        action: 'insert',
-        table: 'favorite_recipes',
-        data: {
-          'user_id': AuthService.currentUserId!,
-          'recipe_name': recipeName,
-          'ingredients': ingredients,
-          'directions': directions,
-          'created_at': DateTime.now().toIso8601String(),
-        },
-      );
+    final response = await DatabaseServiceCore.workerQuery(
+      action: 'insert',
+      table: 'favorite_recipes',
+      data: {
+        'user_id': AuthService.currentUserId!,
+        'recipe_name': recipeName,
+        'ingredients': ingredients,
+        'directions': directions,
+        'created_at': DateTime.now().toIso8601String(),
+      },
+    );
 
-      // Invalidate cache
-      await DatabaseServiceCore.clearCache(_CACHE_KEY);
-    } catch (e) {
-      throw Exception('Failed to add favorite recipe: $e');
-    }
+    // Worker returns list
+    final row = (response as List).first;
+
+    await DatabaseServiceCore.clearCache(_CACHE_KEY);
+
+    return FavoriteRecipe.fromJson(row);
   }
 
   // --------------------------------------------------

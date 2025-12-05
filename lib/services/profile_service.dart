@@ -11,50 +11,7 @@ import 'profile_data_access.dart'; // NEW: replaces all AuthService/profile DB l
 
 class ProfileService {
 
-  // ==================================================
-  // CREATE USER PROFILE
-  // ==================================================
-
-  static Future<void> createUserProfile(
-    String userId,
-    String email, {
-    bool isPremium = false,
-  }) async {
-    try {
-      AppConfig.debugPrint('👤 Creating user profile for: $userId');
-
-      await DatabaseServiceCore.workerQuery(
-        action: 'insert',
-        table: 'user_profiles',
-        requireAuth: true,
-        data: {
-          'id': userId,
-          'email': email,
-          'is_premium': isPremium,
-          'daily_scans_used': 0,
-          'last_scan_date': DateTime.now().toIso8601String().split('T')[0],
-          'created_at': DateTime.now().toIso8601String(),
-          'username': email.split('@')[0],
-          'friends_list_visible': true,
-          'xp': 0,
-          'level': 1,
-        },
-      );
-
-      AppConfig.debugPrint('✅ User profile created: $userId');
-
-      // Award badge (non-blocking)
-      try {
-        await AchievementsService.awardBadge('early_adopter');
-      } catch (e) {
-        AppConfig.debugPrint('⚠️ Badge award failed: $e');
-      }
-    } catch (e) {
-      AppConfig.debugPrint('❌ Failed to create user profile: $e');
-      throw Exception('Profile creation failed: $e');
-    }
-  }
-
+  
   // ==================================================
   // FETCH PROFILE
   // ==================================================
@@ -122,22 +79,6 @@ class ProfileService {
   // ==================================================
   // PREMIUM STATUS
   // ==================================================
-
-  static Future<void> setPremiumStatus(String userId, bool isPremium) async {
-    final currentUser = DatabaseServiceCore.currentUserId; // FIX
-    if (currentUser == null) {
-      throw Exception('Please sign in');
-    }
-
-    try {
-      await ProfileDataAccess.setPremium(userId, isPremium);
-
-      await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
-      await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
-    } catch (e) {
-      throw Exception('Failed to update premium status: $e');
-    }
-  }
 
   static Future<bool> isPremiumUser() async {
     final userId = DatabaseServiceCore.currentUserId; // FIX
