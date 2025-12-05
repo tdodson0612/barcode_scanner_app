@@ -1,10 +1,10 @@
 // lib/services/premium_service.dart
 
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'profile_service.dart';
 import 'auth_service.dart';
-import 'profile_service.dart';          // NEW: replaces DatabaseService
 import 'database_service_core.dart';    // For workerQuery when updating DB (via ProfileService indirectly)
+import 'profile_data_access.dart'; // NEW: replaces direct DB access
 
 class PremiumService {
   static const int FREE_DAILY_SCANS = 3;
@@ -42,7 +42,7 @@ class PremiumService {
       throw Exception('User must be logged in to set premium status');
     }
 
-    await ProfileService.setPremiumStatus(AuthService.currentUserId!, isPremium);
+    await ProfileDataAccess.setPremium(AuthService.currentUserId!, isPremium);
   }
 
   // ==================================================

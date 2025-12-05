@@ -283,4 +283,23 @@ class AuthService {
       throw Exception('User must be logged in');
     }
   }
+  // --------------------------------------------------------
+  // ⭐ PUBLIC METHOD TO SET PREMIUM (Used by PremiumPage + PremiumService)
+  // --------------------------------------------------------
+  static Future<void> markUserAsPremium(String userId) async {
+    try {
+      // Update premium flag in DB
+      await ProfileDataAccess.setPremium(userId, true);
+
+      AppConfig.debugPrint("🌟 User upgraded to premium: $userId");
+
+      // Refresh FCM token for this user (optional but helpful)
+      if (currentUserId == userId) {
+        await _saveFcmToken(userId);
+      }
+    } catch (e) {
+      throw Exception("Failed to set premium status: $e");
+    }
+  }
+
 }

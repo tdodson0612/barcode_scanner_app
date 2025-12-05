@@ -433,7 +433,7 @@ Future<void> _handleSuccessfulPurchase(PurchaseDetails purchaseDetails) async {
     }
 
     // Update database & local cache
-    await ProfileService.setPremiumStatus(userId, true);
+    await AuthService.markUserAsPremium(userId);
     await prefs.setBool('isPremiumUser', true);
 
     // Invalidate old premium cache
