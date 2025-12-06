@@ -765,45 +765,75 @@ class _HomePageState extends State<HomePage>
     }
   }
 
+  // PASTE THIS INTO home_screen.dart
+  // REPLACE your existing _toggleFavoriteRecipe() method (around line 684)
+
   Future<void> _toggleFavoriteRecipe(Recipe recipe) async {
     try {
       final name = recipe.title;
       final ingredients = recipe.ingredients.join(', ');
       final directions = recipe.instructions;
 
-      final isFav = _favoriteRecipes.any((r) => r.recipeName == name);
+      // ⭐ FIXED: Check if already favorited using improved service
+      final existing = await FavoriteRecipesService.findExistingFavorite(
+        recipeName: name,
+      );
 
-      if (isFav) {
-        final fav = _favoriteRecipes.firstWhere((r) => r.recipeName == name);
-
-        if (fav.id == null) {
+      if (existing != null) {
+        // Recipe is favorited - remove it
+        if (existing.id == null) {
           throw Exception('Favorite recipe has no ID — cannot remove');
         }
 
-        await FavoriteRecipesService.removeFavoriteRecipe(fav.id!);
+        await FavoriteRecipesService.removeFavoriteRecipe(existing.id!);
 
         setState(() {
           _favoriteRecipes.removeWhere((r) => r.recipeName == name);
         });
 
-        ErrorHandlingService.showSuccess(context, 'Removed from favorites');
+        if (mounted) {
+          ErrorHandlingService.showSuccess(context, 'Removed from favorites');
+        }
       } else {
-        final created = await FavoriteRecipesService.addFavoriteRecipe(
-          name,
-          ingredients,
-          directions,
-        );
+        // Recipe is not favorited - add it
+        try {
+          final created = await FavoriteRecipesService.addFavoriteRecipe(
+            name,
+            ingredients,
+            directions,
+            // ⭐ TODO: If you have recipe.id from recipe_master, pass it here:
+            // recipeId: recipe.id,
+          );
 
-        setState(() => _favoriteRecipes.add(created));
-        await _saveFavoritesToLocalCache(_favoriteRecipes);
+          setState(() => _favoriteRecipes.add(created));
+          await _saveFavoritesToLocalCache(_favoriteRecipes);
+
+          if (mounted) {
+            ErrorHandlingService.showSuccess(context, 'Added to favorites!');
+          }
+        } catch (e) {
+          if (e.toString().contains('already in your favorites')) {
+            // Handle duplicate error gracefully
+            if (mounted) {
+              ErrorHandlingService.showSimpleError(
+                context,
+                'This recipe is already in your favorites',
+              );
+            }
+            return;
+          }
+          rethrow; // Other errors bubble up
+        }
       }
     } catch (e) {
-      await ErrorHandlingService.handleError(
-        context: context,
-        error: e,
-        category: ErrorHandlingService.databaseError,
-        customMessage: 'Error saving recipe',
-      );
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Error saving recipe',
+        );
+      }
     }
   }
 
@@ -1025,8 +1055,13 @@ class _HomePageState extends State<HomePage>
         calories: nutrition.calories,
       );
 
-      // NEW — generate ingredient keyword buttons from product name
+      // Generate ingredient keyword buttons from product name
       _initKeywordButtonsFromProductName(nutrition.productName);
+
+      // Auto-search recipes based on keywords
+      if (_keywordTokens.isNotEmpty) {
+        _searchRecipesBySelectedKeywords();
+      }
 
       if (mounted && !_isDisposed) {
         setState(() {
@@ -1034,15 +1069,19 @@ class _HomePageState extends State<HomePage>
           _liverHealthScore = score;
           _showLiverBar = true;
           _isLoading = false;
-
-          _recipeSuggestions = []; // user manually triggers search
           _currentNutrition = nutrition;
         });
 
-        ErrorHandlingService.showSuccess(
-          context,
-          'Analysis successful! ${_premiumController.remainingScans} scans remaining today.',
-        );
+        // ⭐ FIXED: Better scan remaining message
+        String message;
+        if (_premiumController.isPremium) {
+          message = 'Analysis successful! You have unlimited scans.';
+        } else {
+          final remaining = _premiumController.remainingScans.clamp(0, 3);
+          message = 'Analysis successful! $remaining scan${remaining == 1 ? '' : 's'} remaining today.';
+        }
+        
+        ErrorHandlingService.showSuccess(context, message);
       }
 
     } catch (e) {
@@ -1063,7 +1102,6 @@ class _HomePageState extends State<HomePage>
       }
     }
   }
-
   // -----------------------------
   // SUPPORT UTILITIES
   // -----------------------------
