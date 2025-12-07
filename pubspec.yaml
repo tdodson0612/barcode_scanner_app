@@ -4,7 +4,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 # App version - increment for each App Store submission
 # Format: MAJOR.MINOR.PATCH+BUILD_NUMBER
-version: 1.0.3+34
+version: 1.0.3+41
 
 # Flutter SDK constraints
 environment:
@@ -27,12 +27,10 @@ dependencies:
   logger: ^2.0.2
   
   # Media handling
-  # video_player: ^2.8.2
   image_picker: ^1.0.7
-  # video_thumbnail: ^0.5.3
   
-  # Barcode scanning
-  google_mlkit_barcode_scanning: ^0.14.1
+  # Barcode scanning (last version that supports iOS 14)
+  google_mlkit_barcode_scanning: 0.7.0
   
   # Networking
   http: ^1.2.1
@@ -43,8 +41,8 @@ dependencies:
   # Backend & authentication
   supabase_flutter: ^2.3.4
   
-  # Monetization
-  google_mobile_ads: ^6.0.0
+  # Monetization (iOS 14 compatible)
+  google_mobile_ads: 5.3.1
   in_app_purchase: ^3.1.13
   
   # Utilities
@@ -55,8 +53,12 @@ dependencies:
   # Cloud storage
   amplify_storage_s3_dart: ^0.4.11
   flutter_dotenv: ^6.0.0
-  firebase_core: ^4.2.1
-  firebase_messaging: ^16.0.4
+
+  # Firebase (versions compatible with iOS 14)
+  firebase_core: 2.16.0
+  firebase_messaging: 14.6.8
+
+  # Local notifications + permissions
   flutter_local_notifications: ^19.5.0
   permission_handler: ^12.0.1
 
@@ -83,7 +85,6 @@ flutter:
   
   # Asset configuration
   assets:
-    # New organized backgrounds
     - .env
     - assets/backgrounds/splash_screen.png
     - assets/backgrounds/login_background.png
@@ -103,22 +104,14 @@ flutter_launcher_icons:
   ios: true
   image_path: "assets/icon/liverlogo.png"
   
-  # iOS-specific configuration
   ios_config:
-    # Generate all required iOS icon sizes
     generate: true
     image_path: "assets/icon/liverlogo.png"
   
-  # Android-specific configuration  
   android_config:
-    # Generate adaptive icons for Android
     generate: true
     image_path: "assets/icon/liverlogo.png"
-    # Optional: Add adaptive icon background
-    # adaptive_icon_background: "#4CAF50"
-    # adaptive_icon_foreground: "assets/icon/liverlogo_foreground.png"
   
-  # Remove old Flutter logo
   remove_alpha_ios: true
 
 # Native splash screen configuration
@@ -140,7 +133,6 @@ flutter_native_splash:
   # Android-specific settings
   android_gravity: center
   android_12:
-    # Android 12+ splash screen
     image: assets/backgrounds/splash_screen.png
     color: "#1B5E20"
   

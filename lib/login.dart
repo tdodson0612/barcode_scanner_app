@@ -1,10 +1,8 @@
-// lib/login.dart - COMPLETE: Cloudflare Worker for signup profile creation
+// lib/login.dart - FIXED: Removed duplicate profile creation
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'services/auth_service.dart';
 import 'services/error_handling_service.dart';
 import 'config/app_config.dart';
@@ -205,6 +203,8 @@ class _LoginPageState extends State<LoginPage> {
       
       AppConfig.debugPrint('Sign up attempt for: $trimmedEmail');
       
+      // ✅ FIXED: AuthService.signUp() now handles profile creation
+      // No need to create profile here anymore
       final response = await AuthService.signUp(
         email: trimmedEmail,
         password: _password,
@@ -217,9 +217,6 @@ class _LoginPageState extends State<LoginPage> {
       
       if (response.user != null) {
         AppConfig.debugPrint('✅ Sign up successful: ${response.user?.email}');
-        
-        // ✅ Create user profile with Cloudflare Worker (bypasses RLS)
-        await _createUserProfile(response.user!);
         
         if (_rememberMe) {
           await _saveCredentials();
@@ -257,57 +254,6 @@ class _LoginPageState extends State<LoginPage> {
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  /// ✅ FIXED: Use Cloudflare Worker to create user profile (bypasses RLS)
-  Future<void> _createUserProfile(User user) async {
-    try {
-      AppConfig.debugPrint('Creating user profile for: ${user.email}');
-      
-      // Use Cloudflare Worker (has service_role key, bypasses RLS)
-      final response = await http.post(
-        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'insert',
-          'table': 'user_profiles',
-          'data': {
-            'id': user.id,
-            'email': user.email ?? 'user',
-            'username': (user.email ?? 'user').split('@')[0],
-            'is_premium': false,
-            'daily_scans_used': 0,
-            'last_scan_date': DateTime.now().toIso8601String().split('T')[0],
-            'created_at': DateTime.now().toIso8601String(),
-            'friends_list_visible': true,
-            'xp': 0,
-            'level': 1,
-          },
-        }),
-      ).timeout(
-        const Duration(seconds: 10),
-        onTimeout: () {
-          throw Exception('Profile creation timed out');
-        },
-      );
-
-      if (response.statusCode == 200) {
-        AppConfig.debugPrint('✅ User profile created successfully via Cloudflare Worker');
-      } else {
-        final errorData = jsonDecode(response.body);
-        AppConfig.debugPrint('⚠️ Profile creation failed: ${errorData['error'] ?? 'Unknown error'}');
-        throw Exception('Profile creation failed: ${errorData['error'] ?? 'Unknown error'}');
-      }
-    } catch (e) {
-      AppConfig.debugPrint('⚠️ Error creating user profile: $e');
-      // Don't block signup - profile can be created later
-      if (mounted) {
-        ErrorHandlingService.showSimpleError(
-          context,
-          'Account created! Profile setup will complete on first login.'
-        );
       }
     }
   }
@@ -458,11 +404,9 @@ class _LoginPageState extends State<LoginPage> {
       _confirmPassword = '';
     });
   }
-
   bool _isValidEmail(String email) {
-    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email.trim());
+    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email.trim());  // ✅ CORRECT
   }
-
   String? _validateEmail(String? value) {
     if (value == null || value.trim().isEmpty) {
       return 'Email is required';

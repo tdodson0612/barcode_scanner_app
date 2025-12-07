@@ -37,8 +37,15 @@
 				</array>
 			</dict>
 		</array>
+		
+		<!-- 🔥 Firebase Configuration -->
+		<key>FirebaseAppDelegateProxyEnabled</key>
+		<false/>
+		
+		<!-- 📱 Google Ads -->
 		<key>GADApplicationIdentifier</key>
 		<string>ca-app-pub-5184516182162781~4277184838</string>
+		
 		<key>LSRequiresIPhoneOS</key>
 		<true/>
 
@@ -52,6 +59,7 @@
 		<key>NSUserTrackingUsageDescription</key>
 		<string>LiverWise uses this to support notifications and relevant app experiences.</string>
 
+		<!-- SKAdNetwork Configuration -->
 		<key>SKAdNetworkItems</key>
 		<array>
 			<dict>

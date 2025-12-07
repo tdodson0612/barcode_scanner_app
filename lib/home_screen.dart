@@ -1460,11 +1460,123 @@ class _HomePageState extends State<HomePage>
                   ],
                 ),
               ),
+// Add this code in _buildInitialView() where it says:
+// SizedBox(height: 30),
+// 
+// // SCAN BUTTON SECTION ...
+// // (unchanged — preserving your functionality)
 
               SizedBox(height: 30),
 
-              // SCAN BUTTON SECTION ...
-              // (unchanged — preserving your functionality)
+              // SCAN BUTTON SECTION
+              Container(
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha((0.95 * 255).toInt()),
+                  borderRadius: BorderRadius.circular(15),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 10,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    // Scan Status Display
+                    if (!_isPremium)
+                      Container(
+                        padding: EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: _hasUsedAllFreeScans
+                              ? Colors.red.shade50
+                              : Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: _hasUsedAllFreeScans
+                                ? Colors.red.shade200
+                                : Colors.blue.shade200,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _hasUsedAllFreeScans
+                                  ? Icons.warning_rounded
+                                  : Icons.info_outline,
+                              color: _hasUsedAllFreeScans
+                                  ? Colors.red.shade700
+                                  : Colors.blue.shade700,
+                            ),
+                            SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                _hasUsedAllFreeScans
+                                    ? 'Daily free scans used. Upgrade for unlimited!'
+                                    : '$_remainingScans free scan${_remainingScans == 1 ? '' : 's'} remaining today',
+                                style: TextStyle(
+                                  color: _hasUsedAllFreeScans
+                                      ? Colors.red.shade900
+                                      : Colors.blue.shade900,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    SizedBox(height: 16),
+
+                    // Camera Button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 56,
+                      child: ElevatedButton.icon(
+                        onPressed: _isScanning ? null : _takePhoto,
+                        icon: _isScanning
+                            ? SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2.5,
+                                ),
+                              )
+                            : Icon(Icons.camera_alt, size: 28),
+                        label: Text(
+                          _isScanning ? 'Scanning...' : 'Scan Food Product',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green.shade600,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 2,
+                        ),
+                      ),
+                    ),
+
+                    SizedBox(height: 12),
+
+                    // Info text
+                    Text(
+                      'Take a photo of the product barcode',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade600,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
 
               SizedBox(height: 30),
 

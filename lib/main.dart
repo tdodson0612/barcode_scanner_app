@@ -1,4 +1,4 @@
-// main.dart - Apple-compliant, iPad-optimized, no technical error screens
+// main.dart - FIXED: Firebase auto-initialized by plugin (no manual init)
 import 'package:flutter/material.dart';
 import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,7 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'config/app_config.dart';
 
-// 🔥 Firebase
+// 🔥 Firebase - Import but DO NOT manually initialize!
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
@@ -28,10 +28,13 @@ import 'home_screen.dart';
 import 'pages/reset_password_page.dart';
 
 /// 🔥 Background FCM handler (required for messages when app is terminated)
+@pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
+  // ⚠️ Firebase is already initialized by GeneratedPluginRegistrant
+  // DO NOT call Firebase.initializeApp() here!
   debugPrint("🔥 Background message received: ${message.messageId}");
 }
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -39,20 +42,20 @@ void main() async {
     // Load environment variables FIRST
     await dotenv.load(fileName: ".env");
 
-    // 🔥 Initialize Firebase (before Supabase)
-    await Firebase.initializeApp();
-
-    // 🔥 Register BACKGROUND handler (safe)
+    // 🔥 CRITICAL: Firebase is AUTO-INITIALIZED by GeneratedPluginRegistrant in AppDelegate
+    // DO NOT call Firebase.initializeApp() here - it will cause a crash!
+    // The plugin system handles Firebase initialization automatically.
+    
+    // ✅ Just register FCM handlers (Firebase already initialized by iOS native code)
     try {
+      // Register background message handler
       FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-    } catch (e) {
+      
       if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('Failed to register background FCM: $e');
+        AppConfig.debugPrint('✅ Background FCM handler registered');
       }
-    }
 
-    // 🔔 Register FOREGROUND FCM listener (safe)
-    try {
+      // 🔔 Register FOREGROUND FCM listener
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         print("🔔 FCM onMessage: ${message.data}");
 
@@ -61,14 +64,38 @@ void main() async {
           profileUpdateStreamController.add(null);
         }
       });
-    } catch (e) {
+      
       if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('Failed to register foreground FCM: $e');
+        AppConfig.debugPrint('✅ Foreground FCM listener registered');
       }
+
+      // Request notification permissions on iOS
+      final messaging = FirebaseMessaging.instance;
+      final settings = await messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      );
+      
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('📱 Notification permission: ${settings.authorizationStatus}');
+      }
+
+      // Get FCM token for debugging
+      final token = await messaging.getToken();
+      if (AppConfig.enableDebugPrints && token != null) {
+        AppConfig.debugPrint('🔑 FCM Token: ${token.substring(0, 20)}...');
+      }
+    } catch (fcmError) {
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('⚠️ FCM setup failed: $fcmError');
+        AppConfig.debugPrint('App will continue without push notifications');
+      }
+      // Continue without FCM - not critical for app function
     }
 
-
-    // Initialize Supabase with timeout
+    // Initialize Supabase with timeout (critical for app function)
     await Supabase.initialize(
       url: AppConfig.supabaseUrl,
       anonKey: AppConfig.supabaseAnonKey,
@@ -80,20 +107,21 @@ void main() async {
     );
 
     if (AppConfig.enableDebugPrints) {
-      AppConfig.debugPrint('✅ App initialization completed successfully');
+      AppConfig.debugPrint('✅ Supabase initialized successfully');
       AppConfig.debugPrint('Supabase URL: ${AppConfig.supabaseUrl}');
       AppConfig.debugPrint('App Name: ${AppConfig.appName}');
+      AppConfig.debugPrint('🔥 Firebase Status: Auto-initialized by iOS plugin system');
     }
 
     runApp(const MyApp());
   } catch (e) {
     if (AppConfig.enableDebugPrints) {
-      print('❌ App initialization failed: $e');
+      print('❌ Critical app initialization failed: $e');
     }
     runApp(_buildErrorApp(e));
   }
 }
-/// Build user-friendly error app when initialization fails
+
 /// Build user-friendly error app when initialization fails
 Widget _buildErrorApp(dynamic error) {
   final errorString = error.toString().toLowerCase();
@@ -179,7 +207,9 @@ Widget _buildErrorApp(dynamic error) {
                   height: 50,
                   child: ElevatedButton.icon(
                     onPressed: () {
-                      main(); // retry init
+                      // Force app restart by calling main again
+                      WidgetsFlutterBinding.ensureInitialized();
+                      main();
                     },
                     icon: const Icon(Icons.refresh),
                     label: const Text(
@@ -251,8 +281,6 @@ Widget _buildErrorApp(dynamic error) {
     ),
   );
 }
-
-
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
