@@ -144,117 +144,65 @@ class RecipeGenerator {
       return _getHealthyRecipes();
     }
 
-    // Map key → Recipe (we’ll key by normalized title)
-    final Map<String, Recipe> recipeByKey = {};
-    // Map key → how many different keywords matched this recipe
-    final Map<String, int> matchCountByKey = {};
+    try {
+      AppConfig.debugPrint('📡 Sending multi-keyword search: $keywords');
 
-    for (final keyword in keywords) {
-      try {
-        AppConfig.debugPrint('📡 Searching recipes for keyword: "$keyword"');
-
-        final response = await http.post(
-          Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'action': 'search_recipes',
-            'keyword': keyword, // Worker does ingredients=ilike.*keyword*
-            'limit': 10,
-          }),
-        );
-
-        AppConfig.debugPrint(
-          '📡 Response status for "$keyword": ${response.statusCode}',
-        );
-        AppConfig.debugPrint(
-          '📡 Response body for "$keyword": ${response.body}',
-        );
-
-        if (response.statusCode != 200) {
-          AppConfig.debugPrint(
-            '❌ Non-200 status for "$keyword": ${response.statusCode}',
-          );
-          continue;
-        }
-
-        final data = jsonDecode(response.body);
-        if (data is! List) {
-          AppConfig.debugPrint(
-            '⚠️ Unexpected response type for "$keyword": ${data.runtimeType}',
-          );
-          continue;
-        }
-
-        for (final item in data) {
-          final recipe = Recipe.fromJson(item as Map<String, dynamic>);
-          final key = recipe.title.trim().toLowerCase();
-
-          if (key.isEmpty) continue;
-
-          // Store recipe if first time seeing this title
-          recipeByKey[key] = recipeByKey[key] ?? recipe;
-
-          // Increment match count for this recipe
-          matchCountByKey[key] = (matchCountByKey[key] ?? 0) + 1;
-        }
-      } catch (e) {
-        AppConfig.debugPrint('❌ Error searching for "$keyword": $e');
-      }
-    }
-
-    if (recipeByKey.isEmpty) {
-      AppConfig.debugPrint(
-        '⚠️ No recipes found for any keywords, falling back to healthy defaults.',
+      // Send ALL keywords to worker in one request
+      final response = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'search_recipes',
+          'keyword': keywords, // Worker handles array now
+          'limit': 50,
+        }),
       );
+
+      AppConfig.debugPrint('📡 Response status: ${response.statusCode}');
+      AppConfig.debugPrint('📡 Response body: ${response.body}');
+
+      if (response.statusCode != 200) {
+        AppConfig.debugPrint('❌ Non-200 status: ${response.statusCode}');
+        return _getHealthyRecipes();
+      }
+
+      final data = jsonDecode(response.body);
+
+      // Handle new worker response format
+      if (data is Map<String, dynamic>) {
+        final results = data['results'] as List? ?? [];
+        final matchType = data['matchType'] ?? 'UNKNOWN';
+        final searchedKeywords = data['searchedKeywords'] as List? ?? [];
+        final totalResults = data['totalResults'] ?? 0;
+
+        AppConfig.debugPrint(
+          '✅ Search complete: $matchType match, $totalResults total results',
+        );
+        AppConfig.debugPrint('🔍 Searched keywords: $searchedKeywords');
+
+        if (results.isEmpty) {
+          AppConfig.debugPrint('⚠️ No recipes found, using healthy defaults');
+          return _getHealthyRecipes();
+        }
+
+        final recipes = results
+            .map((item) => Recipe.fromJson(item as Map<String, dynamic>))
+            .where((r) => r.title.isNotEmpty)
+            .toList();
+
+        AppConfig.debugPrint('✅ Parsed ${recipes.length} recipes');
+        return recipes;
+      }
+
+      // Fallback for old response format (shouldn't happen)
+      AppConfig.debugPrint('⚠️ Unexpected response format, using defaults');
+      return _getHealthyRecipes();
+
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error searching recipes: $e');
       return _getHealthyRecipes();
     }
-
-    final totalKeywords = keywords.length;
-
-    // AND-matches: recipes that matched *all* keywords
-    final andKeys = matchCountByKey.keys
-        .where((k) => matchCountByKey[k] == totalKeywords)
-        .toList();
-
-    // Sort by match count (desc) then title
-    int compareKeys(String a, String b) {
-      final countA = matchCountByKey[a] ?? 0;
-      final countB = matchCountByKey[b] ?? 0;
-      final diff = countB.compareTo(countA);
-      if (diff != 0) return diff;
-      return a.compareTo(b);
-    }
-
-    andKeys.sort(compareKeys);
-
-    if (andKeys.isNotEmpty) {
-      AppConfig.debugPrint(
-        '✅ AND match found for all keywords. Count: ${andKeys.length}',
-      );
-      return andKeys.take(2).map((k) => recipeByKey[k]!).toList();
-    }
-
-    // OR-matches (any keyword)
-    final orKeys = matchCountByKey.keys.toList();
-    orKeys.sort(compareKeys);
-
-    AppConfig.debugPrint(
-      'ℹ️ Using OR match. Recipes matched: ${orKeys.length}',
-    );
-
-    final orResults = orKeys.take(2).map((k) => recipeByKey[k]!).toList();
-
-    if (orResults.isNotEmpty) {
-      return orResults;
-    }
-
-    // Final fallback
-    AppConfig.debugPrint(
-      '⚠️ No OR matches either, returning healthy defaults.',
-    );
-    return _getHealthyRecipes();
   }
-
   /// Still available if you use liverHealthScore → static suggestions anywhere.
   static List<Recipe> generateSuggestions(int liverHealthScore) {
     if (liverHealthScore >= 75) {
@@ -438,6 +386,9 @@ class _HomePageState extends State<HomePage>
   List<String> _keywordTokens = [];
   Set<String> _selectedKeywords = {};
   bool _isSearchingRecipes = false;
+
+  int _currentRecipeIndex = 0;
+  static const int _recipesPerPage = 2;
 
   @override
   bool get wantKeepAlive => true;
@@ -699,7 +650,10 @@ class _HomePageState extends State<HomePage>
     }
 
     try {
-      setState(() => _isSearchingRecipes = true);
+      setState(() {
+        _isSearchingRecipes = true;
+        _currentRecipeIndex = 0; // ⭐ RESET pagination on new search
+      });
 
       final recipes =
           await RecipeGenerator.searchByKeywords(_selectedKeywords.toList());
@@ -730,7 +684,27 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // -----------------------------------------------------
+// Add these methods AFTER _searchRecipesBySelectedKeywords()
+
+  void _loadNextRecipeSuggestions() {
+    if (_recipeSuggestions.isEmpty) return;
+    
+    setState(() {
+      _currentRecipeIndex += _recipesPerPage;
+      if (_currentRecipeIndex >= _recipeSuggestions.length) {
+        _currentRecipeIndex = 0; // Loop back to start
+      }
+    });
+  }
+
+  List<Recipe> _getCurrentPageRecipes() {
+    if (_recipeSuggestions.isEmpty) return [];
+    
+    final endIndex = (_currentRecipeIndex + _recipesPerPage)
+        .clamp(0, _recipeSuggestions.length);
+    
+    return _recipeSuggestions.sublist(_currentRecipeIndex, endIndex);
+  }
 
   Future<void> _loadFavoriteRecipes() async {
     try {
@@ -856,6 +830,7 @@ class _HomePageState extends State<HomePage>
       _currentNutrition = null;
       _keywordTokens = [];
       _selectedKeywords = {};
+      _currentRecipeIndex = 0;
     });
   }
 
@@ -1801,18 +1776,32 @@ Widget _buildNutritionRecipeSuggestions() {
               runSpacing: 8,
               children: _keywordTokens.map((word) {
                 final selected = _selectedKeywords.contains(word);
-                return FilterChip(
-                  label: Text(
-                    word,
-                    style: TextStyle(
-                      color: selected ? Colors.white : Colors.white70,
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _toggleKeyword(word),
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: selected 
+                            ? Colors.green 
+                            : Colors.white.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: selected ? Colors.white : Colors.white30,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Text(
+                        word,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
                     ),
                   ),
-                  selected: selected,
-                  selectedColor: Colors.green,
-                  backgroundColor: Colors.white.withOpacity(0.15),
-                  showCheckmark: false,
-                  onSelected: (_) => _toggleKeyword(word),
                 );
               }).toList(),
             ),
@@ -1853,11 +1842,43 @@ Widget _buildNutritionRecipeSuggestions() {
           ],
 
           // ---------------------------
-          // RESULTS LIST
+          // RESULTS LIST (with pagination)
           // ---------------------------
           if (hasRecipes) ...[
             const SizedBox(height: 8),
-            ..._recipeSuggestions.map((r) => _buildNutritionRecipeCard(r)),
+            
+            // Show current page recipes
+            ..._getCurrentPageRecipes().map((r) => _buildNutritionRecipeCard(r)),
+            
+            // Pagination controls
+            if (_recipeSuggestions.length > _recipesPerPage) ...[
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Showing ${_currentRecipeIndex + 1}-${(_currentRecipeIndex + _recipesPerPage).clamp(0, _recipeSuggestions.length)} of ${_recipeSuggestions.length} recipes',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.white70,
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _loadNextRecipeSuggestions,
+                    icon: const Icon(Icons.arrow_forward, size: 16),
+                    label: const Text('Next Suggestions'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ],
       ),
