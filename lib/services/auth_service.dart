@@ -1,4 +1,4 @@
-// lib/services/auth_service.dart - FINAL + FCM SUPPORT (no circular deps)
+// lib/services/auth_service.dart - FIXED: Session clear before login
 
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -151,13 +151,26 @@ class AuthService {
   }
 
   // --------------------------------------------------------
-  // SIGN IN
+  // 🔥 SIGN IN (FIXED: Clear stale session first)
   // --------------------------------------------------------
   static Future<AuthResponse> signIn({
     required String email,
     required String password,
   }) async {
     try {
+      // ⭐ CRITICAL FIX: Clear any existing session first to prevent conflicts
+      AppConfig.debugPrint('🔓 Clearing any stale session before login...');
+      try {
+        await _supabase.auth.signOut();
+        await Future.delayed(const Duration(milliseconds: 300));
+        AppConfig.debugPrint('✅ Stale session cleared');
+      } catch (signOutError) {
+        // Ignore - no session to clear, which is fine
+        AppConfig.debugPrint('⚠️ No session to clear (expected): $signOutError');
+      }
+
+      AppConfig.debugPrint('🔐 Attempting fresh login for: ${email.trim().toLowerCase()}');
+
       final response = await _supabase.auth.signInWithPassword(
         email: email,
         password: password,
@@ -166,6 +179,8 @@ class AuthService {
       if (response.user != null) {
         final userId = response.user!.id;
         final normalizedEmail = email.trim().toLowerCase();
+
+        AppConfig.debugPrint('✅ Login successful for user: $userId');
 
         try {
           await _ensureUserProfileExists(userId, email);
@@ -176,6 +191,7 @@ class AuthService {
         if (_isDefaultPremiumEmail(normalizedEmail)) {
           try {
             await ProfileDataAccess.setPremium(userId, true);
+            AppConfig.debugPrint('✅ Premium status set for: $normalizedEmail');
           } catch (premiumError) {
             AppConfig.debugPrint('⚠️ Premium setup failed: $premiumError');
           }
@@ -190,6 +206,7 @@ class AuthService {
 
       return response;
     } catch (e) {
+      AppConfig.debugPrint('❌ Sign in failed: $e');
       throw Exception('Sign in failed: $e');
     }
   }
@@ -210,6 +227,8 @@ class AuthService {
           isPremium: false,
         );
         AppConfig.debugPrint('✅ Profile created on login');
+      } else {
+        AppConfig.debugPrint('✅ Profile exists for user: $userId');
       }
     } catch (e) {
       AppConfig.debugPrint('❌ Ensure profile failed: $e');
@@ -222,9 +241,12 @@ class AuthService {
   // --------------------------------------------------------
   static Future<void> signOut() async {
     try {
+      AppConfig.debugPrint('🔓 Signing out user...');
       await DatabaseServiceCore.clearAllUserCache();
       await _supabase.auth.signOut();
+      AppConfig.debugPrint('✅ User signed out successfully');
     } catch (e) {
+      AppConfig.debugPrint('❌ Sign out error: $e');
       throw Exception('Sign out failed: $e');
     }
   }
@@ -238,7 +260,9 @@ class AuthService {
         email,
         redirectTo: 'com.terrydodson.liverWiseApp://reset-password',
       );
+      AppConfig.debugPrint('✅ Password reset email sent to: $email');
     } catch (e) {
+      AppConfig.debugPrint('❌ Password reset failed: $e');
       throw Exception('Password reset failed: $e');
     }
   }
@@ -255,7 +279,9 @@ class AuthService {
       await _supabase.auth.updateUser(
         UserAttributes(password: newPassword),
       );
+      AppConfig.debugPrint('✅ Password updated for user: $currentUserId');
     } catch (e) {
+      AppConfig.debugPrint('❌ Password update failed: $e');
       throw Exception('Password update failed: $e');
     }
   }
@@ -273,7 +299,9 @@ class AuthService {
         type: OtpType.signup,
         email: currentUser!.email!,
       );
+      AppConfig.debugPrint('✅ Verification email resent to: ${currentUser!.email}');
     } catch (e) {
+      AppConfig.debugPrint('❌ Failed to resend verification email: $e');
       throw Exception('Failed to resend verification email: $e');
     }
   }
@@ -283,6 +311,7 @@ class AuthService {
       throw Exception('User must be logged in');
     }
   }
+
   // --------------------------------------------------------
   // ⭐ PUBLIC METHOD TO SET PREMIUM (Used by PremiumPage + PremiumService)
   // --------------------------------------------------------
@@ -298,8 +327,8 @@ class AuthService {
         await _saveFcmToken(userId);
       }
     } catch (e) {
+      AppConfig.debugPrint("❌ Failed to set premium status: $e");
       throw Exception("Failed to set premium status: $e");
     }
   }
-
 }
