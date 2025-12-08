@@ -158,15 +158,26 @@ class AuthService {
     required String password,
   }) async {
     try {
-      // ⭐ CRITICAL FIX: Clear any existing session first to prevent conflicts
-      AppConfig.debugPrint('🔓 Clearing any stale session before login...');
-      try {
-        await _supabase.auth.signOut();
-        await Future.delayed(const Duration(milliseconds: 300));
-        AppConfig.debugPrint('✅ Stale session cleared');
-      } catch (signOutError) {
-        // Ignore - no session to clear, which is fine
-        AppConfig.debugPrint('⚠️ No session to clear (expected): $signOutError');
+      // ⭐ SMARTER FIX: Only clear if there's an invalid/expired session
+      final currentSession = _supabase.auth.currentSession;
+      
+      if (currentSession != null) {
+        // Check if session is expired
+        final expiresAt = currentSession.expiresAt;
+        if (expiresAt != null && DateTime.now().isAfter(DateTime.fromMillisecondsSinceEpoch(expiresAt * 1000))) {
+          AppConfig.debugPrint('🔓 Clearing expired session before login...');
+          try {
+            await _supabase.auth.signOut();
+            await Future.delayed(const Duration(milliseconds: 200));
+            AppConfig.debugPrint('✅ Expired session cleared');
+          } catch (signOutError) {
+            AppConfig.debugPrint('⚠️ Could not clear expired session: $signOutError');
+          }
+        } else {
+          AppConfig.debugPrint('⚠️ Valid session exists, attempting logout first');
+          await _supabase.auth.signOut();
+          await Future.delayed(const Duration(milliseconds: 200));
+        }
       }
 
       AppConfig.debugPrint('🔐 Attempting fresh login for: ${email.trim().toLowerCase()}');
