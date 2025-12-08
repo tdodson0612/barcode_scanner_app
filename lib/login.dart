@@ -1,4 +1,5 @@
-// lib/login.dart - FIXED: Removed duplicate profile creation
+// lib/login.dart - COMPLETE (Works with fixed AuthService)
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -20,6 +21,7 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  
   StreamSubscription? _authSub;
   
   String _email = '';
@@ -52,7 +54,7 @@ class _LoginPageState extends State<LoginPage> {
       final prefs = await SharedPreferences.getInstance();
       final rememberMe = prefs.getBool('remember_me') ?? true;
       final savedEmail = prefs.getString('saved_email') ?? '';
-      
+
       if (mounted) {
         setState(() {
           _rememberMe = rememberMe;
@@ -110,7 +112,7 @@ class _LoginPageState extends State<LoginPage> {
   void _handleAuthError(dynamic error) {
     String errorMessage = error.toString();
     String userFriendlyMessage;
-    
+
     if (errorMessage.contains('Invalid login credentials') || 
         errorMessage.contains('Invalid email or password')) {
       userFriendlyMessage = 'Incorrect email or password. Please try again.';
@@ -129,7 +131,7 @@ class _LoginPageState extends State<LoginPage> {
     } else {
       userFriendlyMessage = 'Unable to sign in right now. Please try again.';
     }
-    
+
     ErrorHandlingService.handleError(
       context: context,
       error: error,
@@ -147,13 +149,14 @@ class _LoginPageState extends State<LoginPage> {
       if (trimmedEmail.isEmpty) {
         throw Exception('Please enter your email address');
       }
-      
-      AppConfig.debugPrint('Login attempt for: $trimmedEmail');
-      
+
+      AppConfig.debugPrint('🔐 Login attempt for: $trimmedEmail');
+
       if (_rememberMe) {
         await _saveCredentials();
       }
-      
+
+      // ⭐ AuthService now handles session clearing internally
       final response = await AuthService.signIn(
         email: trimmedEmail,
         password: _password,
@@ -163,13 +166,12 @@ class _LoginPageState extends State<LoginPage> {
           throw Exception('Connection timed out. Please try again.');
         },
       );
-      
+
       if (response.user != null && response.session != null) {
         AppConfig.debugPrint('✅ Login successful: ${response.user?.email}');
         
         if (mounted) {
           ErrorHandlingService.showSuccess(context, 'Welcome back!');
-          
           await Future.delayed(const Duration(milliseconds: 500));
           
           if (mounted) {
@@ -193,7 +195,7 @@ class _LoginPageState extends State<LoginPage> {
     if (_password != _confirmPassword) {
       throw Exception('Passwords do not match');
     }
-    
+
     if (_password.length < 6) {
       throw Exception('Password should be at least 6 characters');
     }
@@ -201,10 +203,8 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final trimmedEmail = _email.trim().toLowerCase();
       
-      AppConfig.debugPrint('Sign up attempt for: $trimmedEmail');
-      
-      // ✅ FIXED: AuthService.signUp() now handles profile creation
-      // No need to create profile here anymore
+      AppConfig.debugPrint('📝 Sign up attempt for: $trimmedEmail');
+
       final response = await AuthService.signUp(
         email: trimmedEmail,
         password: _password,
@@ -214,14 +214,14 @@ class _LoginPageState extends State<LoginPage> {
           throw Exception('Connection timed out. Please try again.');
         },
       );
-      
+
       if (response.user != null) {
         AppConfig.debugPrint('✅ Sign up successful: ${response.user?.email}');
         
         if (_rememberMe) {
           await _saveCredentials();
         }
-        
+
         if (mounted) {
           if (response.session == null) {
             ErrorHandlingService.showSuccess(
@@ -230,6 +230,7 @@ class _LoginPageState extends State<LoginPage> {
             );
             
             await Future.delayed(const Duration(seconds: 2));
+            
             if (mounted) {
               setState(() {
                 _isLogin = true;
@@ -238,8 +239,8 @@ class _LoginPageState extends State<LoginPage> {
             }
           } else {
             ErrorHandlingService.showSuccess(context, 'Welcome to Liver Food Scanner!');
-            
             await Future.delayed(const Duration(milliseconds: 500));
+            
             if (mounted) {
               Navigator.pushReplacementNamed(context, '/home');
             }
@@ -260,16 +261,16 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _sendPasswordResetEmail() async {
     String resetEmail = _emailController.text.trim().toLowerCase();
-    
+
     if (resetEmail.isEmpty) {
       resetEmail = await _showEmailInputDialog() ?? '';
     }
-    
+
     if (resetEmail.isEmpty) {
       ErrorHandlingService.showSimpleError(context, 'Please enter your email address');
       return;
     }
-    
+
     if (!_isValidEmail(resetEmail)) {
       ErrorHandlingService.showSimpleError(context, 'Please enter a valid email address');
       return;
@@ -282,7 +283,7 @@ class _LoginPageState extends State<LoginPage> {
           throw Exception('Request timed out. Please try again.');
         },
       );
-      
+
       if (mounted) {
         ErrorHandlingService.showSuccess(
           context,
@@ -304,7 +305,7 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<String?> _showEmailInputDialog() async {
     final controller = TextEditingController();
-    
+
     return showDialog<String>(
       context: context,
       barrierDismissible: true,
@@ -366,9 +367,9 @@ class _LoginPageState extends State<LoginPage> {
     _authSub = AuthService.authStateChanges.listen((data) {
       final event = data.event;
       final session = data.session;
-      
+
       if (!mounted) return;
-      
+
       switch (event) {
         case AuthChangeEvent.signedIn:
           AppConfig.debugPrint('🔐 User signed in: ${session?.user.email}');
@@ -404,9 +405,11 @@ class _LoginPageState extends State<LoginPage> {
       _confirmPassword = '';
     });
   }
+
   bool _isValidEmail(String email) {
-    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email.trim());  // ✅ CORRECT
+    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email.trim());
   }
+
   String? _validateEmail(String? value) {
     if (value == null || value.trim().isEmpty) {
       return 'Email is required';
@@ -444,7 +447,7 @@ class _LoginPageState extends State<LoginPage> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isTablet = screenWidth > 600;
     final maxWidth = isTablet ? 500.0 : screenWidth;
-    
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_isLogin ? 'Sign In' : 'Create Account'),
@@ -493,7 +496,6 @@ class _LoginPageState extends State<LoginPage> {
                               color: Colors.green.shade600,
                             ),
                             SizedBox(height: isTablet ? 24 : 16),
-                            
                             Text(
                               _isLogin ? 'Welcome Back!' : 'Create Your Account',
                               style: TextStyle(
@@ -506,8 +508,8 @@ class _LoginPageState extends State<LoginPage> {
                             SizedBox(height: 8),
                             Text(
                               _isLogin 
-                                ? 'Sign in to access your recipes'
-                                : 'Join to unlock all features',
+                                  ? 'Sign in to access your recipes'
+                                  : 'Join to unlock all features',
                               style: TextStyle(
                                 fontSize: (isTablet ? 16 : 14) * ScreenUtils.getFontSizeMultiplier(context),
                                 color: Colors.grey.shade600,
@@ -516,6 +518,7 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                             SizedBox(height: isTablet ? 40 : 32),
                             
+                            // Email Field
                             TextFormField(
                               controller: _emailController,
                               decoration: InputDecoration(
@@ -537,6 +540,7 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                             const SizedBox(height: 16),
                             
+                            // Password Field
                             TextFormField(
                               controller: _passwordController,
                               decoration: InputDecoration(
@@ -544,11 +548,11 @@ class _LoginPageState extends State<LoginPage> {
                                 prefixIcon: const Icon(Icons.lock_outline),
                                 suffixIcon: IconButton(
                                   icon: Icon(_obscurePassword 
-                                    ? Icons.visibility_outlined 
-                                    : Icons.visibility_off_outlined
+                                      ? Icons.visibility_outlined 
+                                      : Icons.visibility_off_outlined
                                   ),
                                   onPressed: () => setState(() => 
-                                    _obscurePassword = !_obscurePassword
+                                      _obscurePassword = !_obscurePassword
                                   ),
                                 ),
                                 border: OutlineInputBorder(
@@ -559,20 +563,21 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                               obscureText: _obscurePassword,
                               textInputAction: _isLogin 
-                                ? TextInputAction.done 
-                                : TextInputAction.next,
+                                  ? TextInputAction.done 
+                                  : TextInputAction.next,
                               validator: _validatePassword,
                               onSaved: (val) => _password = val ?? '',
                               autocorrect: false,
                               enableSuggestions: false,
                               autofillHints: _isLogin 
-                                ? const [AutofillHints.password]
-                                : const [AutofillHints.newPassword],
+                                  ? const [AutofillHints.password]
+                                  : const [AutofillHints.newPassword],
                               onFieldSubmitted: _isLogin 
-                                ? (_) => _submitForm() 
-                                : null,
+                                  ? (_) => _submitForm() 
+                                  : null,
                             ),
                             
+                            // Confirm Password (Sign Up Only)
                             if (!_isLogin) ...[
                               const SizedBox(height: 16),
                               TextFormField(
@@ -582,11 +587,11 @@ class _LoginPageState extends State<LoginPage> {
                                   prefixIcon: const Icon(Icons.lock_outline),
                                   suffixIcon: IconButton(
                                     icon: Icon(_obscureConfirmPassword 
-                                      ? Icons.visibility_outlined 
-                                      : Icons.visibility_off_outlined
+                                        ? Icons.visibility_outlined 
+                                        : Icons.visibility_off_outlined
                                     ),
                                     onPressed: () => setState(() => 
-                                      _obscureConfirmPassword = !_obscureConfirmPassword
+                                        _obscureConfirmPassword = !_obscureConfirmPassword
                                     ),
                                   ),
                                   border: OutlineInputBorder(
@@ -606,6 +611,7 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ],
                             
+                            // Remember Me (Login Only)
                             if (_isLogin) ...[
                               const SizedBox(height: 16),
                               InkWell(
@@ -618,7 +624,7 @@ class _LoginPageState extends State<LoginPage> {
                                       Checkbox(
                                         value: _rememberMe,
                                         onChanged: (value) => setState(() => 
-                                          _rememberMe = value ?? true
+                                            _rememberMe = value ?? true
                                         ),
                                         activeColor: Colors.green.shade600,
                                       ),
@@ -640,6 +646,7 @@ class _LoginPageState extends State<LoginPage> {
                             
                             SizedBox(height: isTablet ? 32 : 24),
                             
+                            // Submit Button
                             SizedBox(
                               height: ScreenUtils.getButtonHeight(context),
                               child: ElevatedButton(
@@ -654,36 +661,37 @@ class _LoginPageState extends State<LoginPage> {
                                   elevation: 2,
                                 ),
                                 child: _isLoading 
-                                  ? Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        const SizedBox(
-                                          width: 20,
-                                          height: 20,
-                                          child: CircularProgressIndicator(
-                                            color: Colors.white,
-                                            strokeWidth: 2,
+                                    ? Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          const SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              color: Colors.white,
+                                              strokeWidth: 2,
+                                            ),
                                           ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Text(
-                                          _isLogin ? 'Signing In...' : 'Creating Account...',
-                                          style: TextStyle(
-                                            fontSize: (isTablet ? 18 : 16) * ScreenUtils.getFontSizeMultiplier(context),
+                                          const SizedBox(width: 12),
+                                          Text(
+                                            _isLogin ? 'Signing In...' : 'Creating Account...',
+                                            style: TextStyle(
+                                              fontSize: (isTablet ? 18 : 16) * ScreenUtils.getFontSizeMultiplier(context),
+                                            ),
                                           ),
+                                        ],
+                                      )
+                                    : Text(
+                                        _isLogin ? 'Sign In' : 'Create Account',
+                                        style: TextStyle(
+                                          fontSize: (isTablet ? 18 : 16) * ScreenUtils.getFontSizeMultiplier(context),
+                                          fontWeight: FontWeight.w600,
                                         ),
-                                      ],
-                                    )
-                                  : Text(
-                                      _isLogin ? 'Sign In' : 'Create Account',
-                                      style: TextStyle(
-                                        fontSize: (isTablet ? 18 : 16) * ScreenUtils.getFontSizeMultiplier(context),
-                                        fontWeight: FontWeight.w600,
                                       ),
-                                    ),
                               ),
                             ),
                             
+                            // Forgot Password (Login Only)
                             if (_isLogin) ...[
                               const SizedBox(height: 16),
                               TextButton(
@@ -701,6 +709,7 @@ class _LoginPageState extends State<LoginPage> {
                             
                             SizedBox(height: isTablet ? 32 : 24),
                             
+                            // Divider
                             Row(
                               children: [
                                 const Expanded(child: Divider()),
@@ -721,6 +730,7 @@ class _LoginPageState extends State<LoginPage> {
                             
                             SizedBox(height: isTablet ? 32 : 24),
                             
+                            // Toggle Mode Button
                             TextButton(
                               onPressed: _isLoading ? null : _toggleMode,
                               child: RichText(
@@ -733,8 +743,8 @@ class _LoginPageState extends State<LoginPage> {
                                   children: [
                                     TextSpan(
                                       text: _isLogin 
-                                        ? "Don't have an account? "
-                                        : "Already have an account? ",
+                                          ? "Don't have an account? "
+                                          : "Already have an account? ",
                                     ),
                                     TextSpan(
                                       text: _isLogin ? 'Create one' : 'Sign in',
