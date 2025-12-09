@@ -1,4 +1,4 @@
-// lib/services/auth_service.dart - FINAL FIX: Smart session retry
+// lib/services/auth_service.dart - FINAL: Clean merge with smart retry
 
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -151,7 +151,7 @@ class AuthService {
   }
 
   // --------------------------------------------------------
-  // 🔥 SIGN IN (FIXED: Smart session retry only when needed)
+  // 🔥 SIGN IN (BEST OF BOTH: Direct login + smart retry)
   // --------------------------------------------------------
   static Future<AuthResponse> signIn({
     required String email,
@@ -160,7 +160,7 @@ class AuthService {
     try {
       AppConfig.debugPrint('🔐 Attempting login for: ${email.trim().toLowerCase()}');
 
-      // ✅ FIXED: Just sign in directly - Supabase handles session management
+      // Try direct login first (works for most cases)
       final response = await _supabase.auth.signInWithPassword(
         email: email,
         password: password,
@@ -200,12 +200,12 @@ class AuthService {
     } catch (e) {
       AppConfig.debugPrint('❌ Sign in failed: $e');
       
-<<<<<<< HEAD
-      // ⭐ SMART RETRY: Only if error is session-related
-      final errorMessage = e.toString().toLowerCase();
-      if (errorMessage.contains('session') || 
-          errorMessage.contains('expired') || 
-          errorMessage.contains('invalid')) {
+      final errorStr = e.toString().toLowerCase();
+      
+      // ⭐ SMART RETRY: Only for session-related errors
+      if (errorStr.contains('session') || 
+          errorStr.contains('expired') || 
+          errorStr.contains('invalid_grant')) {
         AppConfig.debugPrint('🔄 Session conflict detected, clearing and retrying once...');
         
         try {
@@ -238,11 +238,18 @@ class AuthService {
           return retryResponse;
         } catch (retryError) {
           AppConfig.debugPrint('❌ Retry login failed: $retryError');
+          
+          // Provide helpful error message
+          final retryErrorStr = retryError.toString().toLowerCase();
+          if (retryErrorStr.contains('invalid login credentials') || 
+              retryErrorStr.contains('invalid_grant')) {
+            throw Exception('Invalid email or password. Please try again.');
+          }
           throw Exception('Sign in failed after retry: $retryError');
         }
-=======
-      // Provide helpful error messages
-      final errorStr = e.toString().toLowerCase();
+      }
+      
+      // Provide helpful error messages for other cases
       if (errorStr.contains('invalid login credentials') || 
           errorStr.contains('invalid_grant')) {
         throw Exception('Invalid email or password. Please try again.');
@@ -250,7 +257,6 @@ class AuthService {
         throw Exception('Please verify your email before signing in.');
       } else if (errorStr.contains('network') || errorStr.contains('socket')) {
         throw Exception('Network error. Please check your internet connection.');
->>>>>>> 3bbfa66b2731de47c090b3c284cb805131aa345e
       }
       
       throw Exception('Sign in failed: $e');
