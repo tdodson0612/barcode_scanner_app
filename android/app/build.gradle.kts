@@ -21,12 +21,16 @@ android {
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
-    compileOptions {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
-    isCoreLibraryDesugaringEnabled = true   // ✅ Kotlin DSL syntax
+    // 🔧 FIX FOR FIREBASE — required in AGP 8+
+    buildFeatures {
+        buildConfig = true
     }
 
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+        isCoreLibraryDesugaringEnabled = true
+    }
 
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_11.toString()
@@ -38,23 +42,27 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        multiDexEnabled = true   // optional but recommended
+
+        multiDexEnabled = true
     }
 
     signingConfigs {
         create("release") {
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
-            storeFile = file(keystoreProperties["storeFile"] as String)
-            storePassword = keystoreProperties["storePassword"] as String
+            keyAlias = keystoreProperties["keyAlias"] as String?
+            keyPassword = keystoreProperties["keyPassword"] as String?
+            storeFile = keystoreProperties["storeFile"]?.let { file(it as String) }
+            storePassword = keystoreProperties["storePassword"] as String?
         }
     }
 
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
-            // shrinkResources = true  // enable if needed
-            // minifyEnabled = true    // enable if using ProGuard
+            // minifyEnabled = true
+            // shrinkResources = true
+        }
+        debug {
+            // Optional debug configs
         }
     }
 }
@@ -66,5 +74,7 @@ flutter {
 dependencies {
     implementation(platform("com.google.firebase:firebase-bom:34.6.0"))
     implementation("com.google.firebase:firebase-messaging")
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4") // ✅ Kotlin DSL
+
+    // Core library desugaring for Java 8+ APIs
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

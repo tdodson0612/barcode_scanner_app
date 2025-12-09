@@ -1,43 +1,68 @@
 // lib/services/picture_service.dart
-// Handles all picture uploads, deletes, and getters (profile, background, gallery)
+// IMPROVED: Better error handling and debugging
 
 import 'dart:convert';
 import 'dart:io';
-
 import '../config/app_config.dart';
 import 'auth_service.dart';
 import 'profile_service.dart';
 import 'database_service_core.dart';
 
 class PictureService {
-
+  
   // ==================================================
   // UPLOAD PROFILE PICTURE
   // ==================================================
-
   static Future<String> uploadProfilePicture(File imageFile) async {
     final userId = AuthService.currentUserId;
     if (userId == null) {
       throw Exception('Please sign in to continue');
     }
+
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final fileName = 'profile_$timestamp.jpg';
     final filePath = '$userId/$fileName';
 
     try {
-      // Validate size
-      final fileSize = await imageFile.length();
-      if (fileSize > 10 * 1024 * 1024) {
-        throw Exception('Image file too large. Max 10MB.');
+      // Validate file exists
+      if (!await imageFile.exists()) {
+        throw Exception('Image file not found');
       }
 
-      // Encode image
+      // Validate size
+      final fileSize = await imageFile.length();
+      AppConfig.debugPrint('📊 Profile picture file size: ${(fileSize / 1024 / 1024).toStringAsFixed(2)}MB');
+      
+      if (fileSize > 10 * 1024 * 1024) {
+        throw Exception('Image file too large (${(fileSize / 1024 / 1024).toStringAsFixed(1)}MB). Max 10MB.');
+      }
+
+      if (fileSize == 0) {
+        throw Exception('Image file is empty');
+      }
+
+      // Read and encode image
+      AppConfig.debugPrint('📖 Reading image file...');
       final bytes = await imageFile.readAsBytes();
+      
+      if (bytes.isEmpty) {
+        throw Exception('Failed to read image data');
+      }
+
+      AppConfig.debugPrint('🔄 Encoding to base64...');
       final base64Image = base64Encode(bytes);
+      
+      if (base64Image.isEmpty) {
+        throw Exception('Failed to encode image');
+      }
 
-      AppConfig.debugPrint('📤 Uploading profile picture to: profile-pictures/$filePath');
+      AppConfig.debugPrint('📤 Uploading profile picture:');
+      AppConfig.debugPrint('   Bucket: profile-pictures');
+      AppConfig.debugPrint('   Path: $filePath');
+      AppConfig.debugPrint('   Size: ${bytes.length} bytes');
+      AppConfig.debugPrint('   Base64 length: ${base64Image.length} chars');
 
-      // Upload to R2
+      // Upload to R2 via Worker
       final publicUrl = await DatabaseServiceCore.workerStorageUpload(
         bucket: 'profile-pictures',
         path: filePath,
@@ -47,7 +72,8 @@ class PictureService {
 
       AppConfig.debugPrint('✅ Profile picture uploaded: $publicUrl');
 
-      // Update profile with correct field name
+      // Update database
+      AppConfig.debugPrint('💾 Updating database with profile picture URL...');
       await DatabaseServiceCore.workerQuery(
         action: 'update',
         table: 'user_profiles',
@@ -58,50 +84,77 @@ class PictureService {
         },
       );
 
-      // Clear all profile-related caches
+      // Clear caches
       await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
       await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
       await DatabaseServiceCore.clearCache('user_profile_$userId');
 
-      AppConfig.debugPrint('✅ Profile picture URL saved to database');
+      AppConfig.debugPrint('✅ Profile picture updated successfully');
 
       return publicUrl;
+    } on FileSystemException catch (e) {
+      AppConfig.debugPrint('❌ File system error: $e');
+      throw Exception('Cannot access image file: ${e.message}');
+    } on FormatException catch (e) {
+      AppConfig.debugPrint('❌ Format error: $e');
+      throw Exception('Invalid image format: ${e.message}');
     } catch (e) {
       AppConfig.debugPrint('❌ uploadProfilePicture error: $e');
-      throw Exception('Failed to upload profile picture: $e');
+      
+      // Provide more helpful error messages
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('timeout')) {
+        throw Exception('Upload timeout. Please check your connection and try again.');
+      } else if (errorStr.contains('network') || errorStr.contains('socket')) {
+        throw Exception('Network error. Please check your internet connection.');
+      } else if (errorStr.contains('401') || errorStr.contains('authentication')) {
+        throw Exception('Session expired. Please sign out and sign back in.');
+      } else if (errorStr.contains('413') || errorStr.contains('too large')) {
+        throw Exception('Image too large. Please choose a smaller image.');
+      }
+      
+      rethrow;
     }
   }
 
- // ==================================================
+  // ==================================================
   // UPLOAD BACKGROUND PICTURE
   // ==================================================
-
   static Future<String> uploadBackgroundPicture(File imageFile) async {
     final userId = AuthService.currentUserId;
     if (userId == null) {
       throw Exception('Please sign in to continue');
     }
+
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final fileName = 'background_$timestamp.jpg';
     final filePath = '$userId/$fileName';
 
     try {
+      if (!await imageFile.exists()) {
+        throw Exception('Image file not found');
+      }
+
       final fileSize = await imageFile.length();
+      AppConfig.debugPrint('📊 Background picture file size: ${(fileSize / 1024 / 1024).toStringAsFixed(2)}MB');
+      
       if (fileSize > 10 * 1024 * 1024) {
         throw Exception('Image file too large. Max 10MB.');
       }
 
-      final bytes = await imageFile.readAsBytes();
-      final base64Image = base64Encode(bytes);
+      if (fileSize == 0) {
+        throw Exception('Image file is empty');
+      }
 
-      // 🔥 DEBUG CODE - Background Picture
-      print('🔍 DEBUG uploadBackgroundPicture:');
-      print('   userId: $userId');
-      print('   fileName: $fileName');
-      print('   filePath: $filePath');
-      print('   bucket: background-pictures');
-      print('   fileSize: $fileSize bytes');
-      print('   base64 length: ${base64Image.length} chars');
+      final bytes = await imageFile.readAsBytes();
+      if (bytes.isEmpty) {
+        throw Exception('Failed to read image data');
+      }
+
+      final base64Image = base64Encode(bytes);
+      if (base64Image.isEmpty) {
+        throw Exception('Failed to encode image');
+      }
 
       AppConfig.debugPrint('📤 Uploading background picture to: background-pictures/$filePath');
 
@@ -124,7 +177,6 @@ class PictureService {
         },
       );
 
-      // Clear all profile-related caches
       await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
       await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
       await DatabaseServiceCore.clearCache('user_profile_$userId');
@@ -134,44 +186,63 @@ class PictureService {
       return publicUrl;
     } catch (e) {
       AppConfig.debugPrint('❌ uploadBackgroundPicture error: $e');
-      print('❌ FULL ERROR: $e'); // 🔥 Extra debug
-      throw Exception('Failed to upload background picture: $e');
+      rethrow;
     }
   }
 
   // ==================================================
   // UPLOAD PICTURE TO PHOTO ALBUM
   // ==================================================
+// lib/services/picture_service.dart - FIXED GALLERY UPLOAD
+
+// Replace the uploadPicture method with this:
 
   static Future<String> uploadPicture(File imageFile) async {
     final userId = AuthService.currentUserId;
     if (userId == null) {
       throw Exception('Please sign in to continue');
     }
+
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final fileName = 'picture_$timestamp.jpg';
     final filePath = '$userId/$fileName';
 
     try {
-      final fileSize = await imageFile.length();
-      if (fileSize > 10 * 1024 * 1024) {
-        throw Exception('Image too large. Max 10MB.');
+      // Validate file exists
+      if (!await imageFile.exists()) {
+        throw Exception('Image file not found');
       }
 
-      final bytes = await imageFile.readAsBytes();
-      final base64Image = base64Encode(bytes);
+      // Validate size
+      final fileSize = await imageFile.length();
+      AppConfig.debugPrint('📊 Gallery picture file size: ${(fileSize / 1024 / 1024).toStringAsFixed(2)}MB');
+      
+      if (fileSize > 10 * 1024 * 1024) {
+        throw Exception('Image too large (${(fileSize / 1024 / 1024).toStringAsFixed(1)}MB). Max 10MB.');
+      }
 
-      // 🔥 DEBUG CODE - Gallery Picture
-      print('🔍 DEBUG uploadPicture (gallery):');
-      print('   userId: $userId');
-      print('   fileName: $fileName');
-      print('   filePath: $filePath');
-      print('   bucket: photo-album');
-      print('   fileSize: $fileSize bytes');
-      print('   base64 length: ${base64Image.length} chars');
+      if (fileSize == 0) {
+        throw Exception('Image file is empty');
+      }
+
+      // Read and encode image
+      AppConfig.debugPrint('📖 Reading gallery image file...');
+      final bytes = await imageFile.readAsBytes();
+      
+      if (bytes.isEmpty) {
+        throw Exception('Failed to read image data');
+      }
+
+      AppConfig.debugPrint('🔄 Encoding gallery image to base64...');
+      final base64Image = base64Encode(bytes);
+      
+      if (base64Image.isEmpty) {
+        throw Exception('Failed to encode image');
+      }
 
       AppConfig.debugPrint('📤 Uploading gallery picture to: photo-album/$filePath');
 
+      // Upload to R2 via Worker
       final publicUrl = await DatabaseServiceCore.workerStorageUpload(
         bucket: 'photo-album',
         path: filePath,
@@ -182,22 +253,31 @@ class PictureService {
       AppConfig.debugPrint('✅ Gallery picture uploaded: $publicUrl');
 
       // Get existing pictures from database
+      AppConfig.debugPrint('📥 Fetching current pictures list...');
       final profile = await ProfileService.getCurrentUserProfile();
       List<String> pictures = [];
 
       final existing = profile?['pictures'];
       if (existing != null && existing.isNotEmpty) {
         try {
-          pictures = List<String>.from(jsonDecode(existing));
+          // Handle both String (JSON) and List formats
+          if (existing is String) {
+            pictures = List<String>.from(jsonDecode(existing));
+          } else if (existing is List) {
+            pictures = List<String>.from(existing);
+          }
+          AppConfig.debugPrint('📦 Found ${pictures.length} existing pictures');
         } catch (e) {
           AppConfig.debugPrint('⚠️ Failed to parse existing pictures: $e');
           pictures = [];
         }
+      } else {
+        AppConfig.debugPrint('📭 No existing pictures found');
       }
 
+      // Add new picture
       pictures.add(publicUrl);
-
-      AppConfig.debugPrint('💾 Saving ${pictures.length} pictures to database');
+      AppConfig.debugPrint('💾 Saving ${pictures.length} pictures to database...');
 
       // Save updated picture list to database
       await DatabaseServiceCore.workerQuery(
@@ -214,17 +294,36 @@ class PictureService {
       await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
       await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
       await DatabaseServiceCore.clearCache('user_profile_$userId');
-      await DatabaseServiceCore.clearCache('user_pictures'); // Also clear pictures cache
+      await DatabaseServiceCore.clearCache('user_pictures');
 
-      AppConfig.debugPrint('✅ Gallery picture saved to database');
+      AppConfig.debugPrint('✅ Gallery picture saved to database (total: ${pictures.length})');
 
       return publicUrl;
+    } on FileSystemException catch (e) {
+      AppConfig.debugPrint('❌ File system error: $e');
+      throw Exception('Cannot access image file: ${e.message}');
+    } on FormatException catch (e) {
+      AppConfig.debugPrint('❌ Format error: $e');
+      throw Exception('Invalid image format: ${e.message}');
     } catch (e) {
-      AppConfig.debugPrint('❌ uploadPicture error: $e');
-      print('❌ FULL ERROR: $e'); // 🔥 Extra debug
-      throw Exception('Failed to upload picture: $e');
+      AppConfig.debugPrint('❌ uploadPicture (gallery) error: $e');
+      
+      // Provide more helpful error messages
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('session expired') || errorStr.contains('authentication')) {
+        throw Exception('Your session has expired. Please sign out and sign back in.');
+      } else if (errorStr.contains('timeout')) {
+        throw Exception('Upload timeout. Please check your connection and try again.');
+      } else if (errorStr.contains('network') || errorStr.contains('socket')) {
+        throw Exception('Network error. Please check your internet connection.');
+      } else if (errorStr.contains('413') || errorStr.contains('too large')) {
+        throw Exception('Image too large. Please choose a smaller image.');
+      }
+      
+      rethrow;
     }
   }
+
   // ==================================================
   // DELETE PICTURE (Gallery, Profile, OR Background)
   // ==================================================

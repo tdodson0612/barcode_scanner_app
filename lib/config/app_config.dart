@@ -1,4 +1,4 @@
-// lib/config/app_config.dart — Fully Updated
+// lib/config/app_config.dart — Verified Configuration
 
 class AppConfig {
   // ------------------------------------------------------------
@@ -18,11 +18,11 @@ class AppConfig {
   static const String cloudflareWorkerUrl =
       'https://shrill-paper-a8ce.terryd0612.workers.dev';
 
-  // Query endpoint
+  // Query endpoint (for database operations)
   static const String cloudflareWorkerQueryEndpoint =
       'https://shrill-paper-a8ce.terryd0612.workers.dev/query';
 
-  // Storage endpoint (your worker handles this)
+  // ✅ FIXED: Storage endpoint should be /storage (not /query/storage)
   static const String cloudflareWorkerStorageEndpoint =
       'https://shrill-paper-a8ce.terryd0612.workers.dev/storage';
 
