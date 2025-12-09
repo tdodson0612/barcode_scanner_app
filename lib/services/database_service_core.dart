@@ -221,6 +221,12 @@ class DatabaseServiceCore {
   }
 
   /// Upload file to R2 storage via Cloudflare Worker WITH auth token
+  // lib/services/database_service_core.dart
+// FIXED: Storage upload with better error handling
+
+// lib/services/database_service_core.dart
+// FIXED: Storage upload with better error handling
+
   static Future<String> _workerStorageUpload({
     required String bucket,
     required String path,
@@ -230,58 +236,94 @@ class DatabaseServiceCore {
     try {
       final authToken = _supabase.auth.currentSession?.accessToken;
 
-      // REQUIRE auth token
       if (authToken == null) {
         throw Exception('Session expired. Please sign out and sign back in.');
       }
 
       AppConfig.debugPrint('🔐 Storage upload with auth token');
       AppConfig.debugPrint('📦 Bucket: $bucket, Path: $path');
-      AppConfig.debugPrint('📊 Data size: ${base64Data.length} chars');
+
+      // Validate and clean base64 data
+      String cleanBase64 = base64Data.trim();
+      
+      // Remove any data URI prefix if present
+      if (cleanBase64.contains(',')) {
+        cleanBase64 = cleanBase64.split(',').last;
+      }
+      
+      // Remove any whitespace/newlines
+      cleanBase64 = cleanBase64.replaceAll(RegExp(r'\s'), '');
+      
+      AppConfig.debugPrint('📊 Cleaned base64 length: ${cleanBase64.length} chars');
 
       // Validate file size early
-      final estimatedMB = (base64Data.length * 0.75 / 1024 / 1024);
+      final estimatedMB = (cleanBase64.length * 0.75 / 1024 / 1024);
       if (estimatedMB > 10) {
         throw Exception(
-          'Image file too large. Please choose a smaller image (max 10MB).',
+          'Image file too large (${estimatedMB.toStringAsFixed(1)}MB). Please choose a smaller image (max 10MB).',
         );
       }
 
+      // 🔥 FIX: Use the correct storage endpoint
+      final storageUrl = '${AppConfig.cloudflareWorkerUrl}/storage';
+      
+      AppConfig.debugPrint('📡 Uploading to: $storageUrl');
+
       final response = await http
           .post(
-            Uri.parse('${AppConfig.cloudflareWorkerQueryEndpoint}/storage'),
-            headers: {'Content-Type': 'application/json'},
+            Uri.parse(storageUrl),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
             body: jsonEncode({
               'action': 'upload',
               'bucket': bucket,
               'path': path,
-              'data': base64Data,
+              'data': cleanBase64, // Send cleaned base64
               'contentType': contentType,
               'authToken': authToken,
             }),
           )
           .timeout(
-            const Duration(seconds: 60),
+            const Duration(seconds: 90), // Increased timeout for large uploads
             onTimeout: () {
               throw Exception(
-                'Upload timeout - connection too slow. Please try again.',
+                'Upload timeout - connection too slow. Please try again with a smaller image or better connection.',
               );
             },
           );
 
       AppConfig.debugPrint('📡 Response status: ${response.statusCode}');
+      AppConfig.debugPrint('📡 Response body preview: ${response.body.substring(0, response.body.length > 200 ? 200 : response.body.length)}');
 
       // Better error handling
       if (response.statusCode == 401 || response.statusCode == 403) {
         throw Exception('Authentication failed. Please sign out and sign back in.');
       }
 
+      if (response.statusCode == 413) {
+        throw Exception('Image too large. Please choose a smaller image.');
+      }
+
+      if (response.statusCode == 429) {
+        throw Exception('Too many uploads. Please wait a moment and try again.');
+      }
+
       if (response.statusCode != 200) {
         final errorBody = response.body;
         AppConfig.debugPrint('❌ Upload failed: $errorBody');
-        throw Exception(
-          'Upload failed: ${errorBody.length > 100 ? errorBody.substring(0, 100) : errorBody}',
-        );
+        
+        // Try to parse error message
+        try {
+          final errorJson = jsonDecode(errorBody);
+          final errorMsg = errorJson['error'] ?? errorBody;
+          throw Exception('Upload failed: $errorMsg');
+        } catch (_) {
+          throw Exception(
+            'Upload failed (${response.statusCode}): ${errorBody.length > 100 ? errorBody.substring(0, 100) : errorBody}',
+          );
+        }
       }
 
       final uploadResult = jsonDecode(response.body);
@@ -293,14 +335,21 @@ class DatabaseServiceCore {
 
       AppConfig.debugPrint('✅ Upload successful: $publicUrl');
       return publicUrl;
-    } on http.ClientException {
+    } on http.ClientException catch (e) {
       throw Exception(
-        'Network error: Unable to connect. Check your internet connection.',
+        'Network error: Unable to connect. Check your internet connection. ($e)',
       );
-    } on FormatException {
-      throw Exception('Invalid response from server. Please try again.');
+    } on FormatException catch (e) {
+      throw Exception('Invalid response from server. Please try again. ($e)');
     } catch (e) {
       AppConfig.debugPrint('❌ Storage upload error: $e');
+      
+      // Check if it's a timeout error
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('timeout')) {
+        throw Exception('Upload timeout. Please try with a smaller image or better connection.');
+      }
+      
       rethrow;
     }
   }

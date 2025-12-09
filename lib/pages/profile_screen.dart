@@ -479,6 +479,8 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+// lib/pages/profile_screen.dart - REPLACE _uploadPicture method
+
   Future<void> _uploadPicture(ImageSource source) async {
     if (_pictures.length >= _maxPictures) {
       ErrorHandlingService.showSimpleError(
@@ -507,8 +509,11 @@ class _ProfileScreenState extends State<ProfileScreen>
       );
 
       if (pickedFile == null || !mounted) {
+        AppConfig.debugPrint('⚠️ No image selected or widget unmounted');
         return;
       }
+
+      AppConfig.debugPrint('📸 Image picked: ${pickedFile.path}');
 
       setState(() {
         _isLoadingPictures = true;
@@ -516,8 +521,13 @@ class _ProfileScreenState extends State<ProfileScreen>
       startedUpload = true;
 
       final imageFile = File(pickedFile.path);
-      await PictureService.uploadPicture(imageFile);
+      
+      AppConfig.debugPrint('🚀 Starting gallery upload...');
+      final url = await PictureService.uploadPicture(imageFile);
+      
+      AppConfig.debugPrint('✅ Gallery upload complete: $url');
 
+      // Invalidate cache and reload
       await _invalidatePicturesCache();
       await _loadPictures(forceRefresh: true);
 
@@ -527,7 +537,62 @@ class _ProfileScreenState extends State<ProfileScreen>
           'Picture uploaded successfully!',
         );
       }
+    } on Exception catch (e) {
+      AppConfig.debugPrint('❌ Gallery upload exception: $e');
+      
+      if (mounted) {
+        final errorMsg = e.toString().replaceFirst('Exception: ', '');
+        
+        // Check for specific error types
+        if (errorMsg.contains('session expired') || errorMsg.contains('authentication')) {
+          // Show sign-out prompt
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Session Expired'),
+              content: const Text(
+                'Your session has expired. Please sign out and sign back in to continue.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    await AuthService.signOut();
+                    if (mounted) {
+                      Navigator.pushNamedAndRemoveUntil(
+                        context,
+                        '/login',
+                        (route) => false,
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Sign Out'),
+                ),
+              ],
+            ),
+          );
+        } else {
+          // Show regular error dialog
+          await ErrorHandlingService.handleError(
+            context: context,
+            error: e,
+            category: ErrorHandlingService.imageError,
+            customMessage: errorMsg,
+            onRetry: () => _uploadPicture(source),
+          );
+        }
+      }
     } catch (e) {
+      AppConfig.debugPrint('❌ Gallery upload error: $e');
+      
       if (mounted) {
         await ErrorHandlingService.handleError(
           context: context,

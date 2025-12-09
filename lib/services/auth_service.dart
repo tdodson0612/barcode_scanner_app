@@ -158,30 +158,9 @@ class AuthService {
     required String password,
   }) async {
     try {
-      // ⭐ SMARTER FIX: Only clear if there's an invalid/expired session
-      final currentSession = _supabase.auth.currentSession;
-      
-      if (currentSession != null) {
-        // Check if session is expired
-        final expiresAt = currentSession.expiresAt;
-        if (expiresAt != null && DateTime.now().isAfter(DateTime.fromMillisecondsSinceEpoch(expiresAt * 1000))) {
-          AppConfig.debugPrint('🔓 Clearing expired session before login...');
-          try {
-            await _supabase.auth.signOut();
-            await Future.delayed(const Duration(milliseconds: 200));
-            AppConfig.debugPrint('✅ Expired session cleared');
-          } catch (signOutError) {
-            AppConfig.debugPrint('⚠️ Could not clear expired session: $signOutError');
-          }
-        } else {
-          AppConfig.debugPrint('⚠️ Valid session exists, attempting logout first');
-          await _supabase.auth.signOut();
-          await Future.delayed(const Duration(milliseconds: 200));
-        }
-      }
+      AppConfig.debugPrint('🔐 Attempting login for: ${email.trim().toLowerCase()}');
 
-      AppConfig.debugPrint('🔐 Attempting fresh login for: ${email.trim().toLowerCase()}');
-
+      // ✅ FIXED: Just sign in directly - Supabase handles session management
       final response = await _supabase.auth.signInWithPassword(
         email: email,
         password: password,
@@ -193,12 +172,14 @@ class AuthService {
 
         AppConfig.debugPrint('✅ Login successful for user: $userId');
 
+        // Ensure profile exists
         try {
           await _ensureUserProfileExists(userId, email);
         } catch (profileError) {
           AppConfig.debugPrint('⚠️ Profile check failed: $profileError');
         }
 
+        // Set premium if applicable
         if (_isDefaultPremiumEmail(normalizedEmail)) {
           try {
             await ProfileDataAccess.setPremium(userId, true);
@@ -218,6 +199,18 @@ class AuthService {
       return response;
     } catch (e) {
       AppConfig.debugPrint('❌ Sign in failed: $e');
+      
+      // Provide helpful error messages
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('invalid login credentials') || 
+          errorStr.contains('invalid_grant')) {
+        throw Exception('Invalid email or password. Please try again.');
+      } else if (errorStr.contains('email not confirmed')) {
+        throw Exception('Please verify your email before signing in.');
+      } else if (errorStr.contains('network') || errorStr.contains('socket')) {
+        throw Exception('Network error. Please check your internet connection.');
+      }
+      
       throw Exception('Sign in failed: $e');
     }
   }
