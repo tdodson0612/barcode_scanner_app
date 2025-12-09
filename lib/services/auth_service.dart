@@ -1,4 +1,4 @@
-// lib/services/auth_service.dart - FIXED: Session clear before login
+// lib/services/auth_service.dart - FINAL FIX: Smart session retry
 
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -151,36 +151,14 @@ class AuthService {
   }
 
   // --------------------------------------------------------
-  // 🔥 SIGN IN (FIXED: Clear stale session first)
+  // 🔥 SIGN IN (FIXED: Smart session retry only when needed)
   // --------------------------------------------------------
   static Future<AuthResponse> signIn({
     required String email,
     required String password,
   }) async {
     try {
-      // ⭐ SMARTER FIX: Only clear if there's an invalid/expired session
-      final currentSession = _supabase.auth.currentSession;
-      
-      if (currentSession != null) {
-        // Check if session is expired
-        final expiresAt = currentSession.expiresAt;
-        if (expiresAt != null && DateTime.now().isAfter(DateTime.fromMillisecondsSinceEpoch(expiresAt * 1000))) {
-          AppConfig.debugPrint('🔓 Clearing expired session before login...');
-          try {
-            await _supabase.auth.signOut();
-            await Future.delayed(const Duration(milliseconds: 200));
-            AppConfig.debugPrint('✅ Expired session cleared');
-          } catch (signOutError) {
-            AppConfig.debugPrint('⚠️ Could not clear expired session: $signOutError');
-          }
-        } else {
-          AppConfig.debugPrint('⚠️ Valid session exists, attempting logout first');
-          await _supabase.auth.signOut();
-          await Future.delayed(const Duration(milliseconds: 200));
-        }
-      }
-
-      AppConfig.debugPrint('🔐 Attempting fresh login for: ${email.trim().toLowerCase()}');
+      AppConfig.debugPrint('🔐 Attempting login for: ${email.trim().toLowerCase()}');
 
       final response = await _supabase.auth.signInWithPassword(
         email: email,
@@ -218,6 +196,48 @@ class AuthService {
       return response;
     } catch (e) {
       AppConfig.debugPrint('❌ Sign in failed: $e');
+      
+      // ⭐ SMART RETRY: Only if error is session-related
+      final errorMessage = e.toString().toLowerCase();
+      if (errorMessage.contains('session') || 
+          errorMessage.contains('expired') || 
+          errorMessage.contains('invalid')) {
+        AppConfig.debugPrint('🔄 Session conflict detected, clearing and retrying once...');
+        
+        try {
+          await _supabase.auth.signOut();
+          await Future.delayed(const Duration(milliseconds: 300));
+          
+          // Retry login ONCE
+          AppConfig.debugPrint('🔐 Retrying login after session clear...');
+          final retryResponse = await _supabase.auth.signInWithPassword(
+            email: email,
+            password: password,
+          );
+          
+          if (retryResponse.user != null) {
+            final userId = retryResponse.user!.id;
+            final normalizedEmail = email.trim().toLowerCase();
+            
+            AppConfig.debugPrint('✅ Retry login successful for user: $userId');
+            
+            await _ensureUserProfileExists(userId, email);
+            
+            if (_isDefaultPremiumEmail(normalizedEmail)) {
+              await ProfileDataAccess.setPremium(userId, true);
+            }
+            
+            await _saveFcmToken(userId);
+            _listenForFcmTokenRefresh(userId);
+          }
+          
+          return retryResponse;
+        } catch (retryError) {
+          AppConfig.debugPrint('❌ Retry login failed: $retryError');
+          throw Exception('Sign in failed after retry: $retryError');
+        }
+      }
+      
       throw Exception('Sign in failed: $e');
     }
   }
