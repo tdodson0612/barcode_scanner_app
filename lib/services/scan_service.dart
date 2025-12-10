@@ -16,7 +16,7 @@ class ScanService {
   // ==================================================
 
   static Future<int> getDailyScanCount() async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId;
     if (userId == null) return 0;
 
     try {
@@ -71,7 +71,7 @@ class ScanService {
   // ==================================================
 
   static Future<void> incrementScanCount() async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId;
     if (userId == null) return;
 
     try {

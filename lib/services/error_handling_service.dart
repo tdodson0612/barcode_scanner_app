@@ -1,4 +1,5 @@
 // lib/services/error_handling_service.dart - IMPROVED: iPad-friendly, user-friendly error handling
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -64,7 +65,9 @@ class ErrorHandlingService {
       }
     } catch (e) {
       // Ultimate fallback - simple, clean message
-      debugPrint('Error handler failed: $e');
+      if (kDebugMode) {
+        debugPrint('Error handler failed: $e');
+      }
       if (context.mounted) {
         _showFallbackError(context);
       }
@@ -336,7 +339,9 @@ class ErrorHandlingService {
 
     // Don't show dialog for non-user-facing errors (like ads)
     if (!errorInfo.isUserFacingError) {
-      debugPrint('Silent error: ${errorInfo.category}');
+      if (kDebugMode) {
+        debugPrint('Silent error: ${errorInfo.category}');
+      }
       return;
     }
 
@@ -576,11 +581,13 @@ class ErrorHandlingService {
   static Future<void> _logError(ErrorInfo errorInfo, dynamic originalError) async {
     try {
       // Console logging for development
-      logger.e(
-        'Error [${errorInfo.category}]: ${errorInfo.title}',
-        error: originalError,
-        stackTrace: StackTrace.current,
-      );
+      if (kDebugMode) {
+        logger.e(
+          'Error [${errorInfo.category}]: ${errorInfo.title}',
+          error: originalError,
+          stackTrace: StackTrace.current,
+        );
+      }
 
       // Store locally for debugging (last 50 errors)
       final prefs = await SharedPreferences.getInstance();
@@ -600,7 +607,9 @@ class ErrorHandlingService {
       
       await prefs.setStringList('error_logs', logs);
     } catch (e) {
-      debugPrint('Failed to log error: $e');
+      if (kDebugMode) {
+        debugPrint('Failed to log error: $e');
+      }
       // Fail silently - don't compound errors
     }
   }
@@ -744,7 +753,9 @@ class ErrorHandlingService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('error_logs');
     } catch (e) {
-      debugPrint('Failed to clear logs: $e');
+      if (kDebugMode) {
+        debugPrint('Failed to clear logs: $e');
+      }
     }
   }
 }

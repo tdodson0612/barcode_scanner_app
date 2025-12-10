@@ -14,7 +14,7 @@ class PictureService {
   // UPLOAD PROFILE PICTURE
   // ==================================================
   static Future<String> uploadProfilePicture(File imageFile) async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId;
     if (userId == null) {
       throw Exception('Please sign in to continue');
     }
@@ -121,7 +121,7 @@ class PictureService {
   // UPLOAD BACKGROUND PICTURE
   // ==================================================
   static Future<String> uploadBackgroundPicture(File imageFile) async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId;
     if (userId == null) {
       throw Exception('Please sign in to continue');
     }
@@ -194,7 +194,7 @@ class PictureService {
   // UPLOAD PICTURE TO PHOTO ALBUM
   // ==================================================
   static Future<String> uploadPicture(File imageFile) async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId;
     if (userId == null) {
       throw Exception('Please sign in to continue');
     }
@@ -336,7 +336,7 @@ class PictureService {
   // ==================================================
 
   static Future<void> deletePicture(String pictureUrl) async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId;
     if (userId == null) {
       throw Exception('Please sign in to continue');
     }
@@ -404,7 +404,7 @@ class PictureService {
   // ==================================================
 
   static Future<void> setPictureAsProfilePicture(String pictureUrl) async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId;
     if (userId == null) {
       throw Exception('Please sign in to continue');
     }
@@ -458,7 +458,7 @@ class PictureService {
   }
 
   static Future<List<String>> getCurrentUserPictures() async {
-    final userId = AuthService.currentUserId;
+    final userId = DatabaseServiceCore.currentUserId;
     if (userId == null) return [];
     return getUserPictures(userId);
   }

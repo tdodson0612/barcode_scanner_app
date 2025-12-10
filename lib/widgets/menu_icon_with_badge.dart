@@ -1,4 +1,4 @@
-// lib/widgets/menu_icon_with_badge.dart - OPTIMIZED: Local caching to reduce database egress
+// lib/widgets/menu_icon_with_badge.dart - OPTIMIZED: Local caching with proper invalidation
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/messaging_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,12 +9,28 @@ class MenuIconWithBadge extends StatefulWidget {
 
   @override
   State<MenuIconWithBadge> createState() => _MenuIconWithBadgeState();
+  
+  // Shared cache keys - used by both MenuIconWithBadge and AppDrawer
+  static const String _cacheKey = 'cached_unread_count';
+  static const String _cacheTimeKey = 'cached_unread_count_time';
+  
+  /// Invalidate cache - call this when messages are read or sent
+  /// This is a static method so it can be called from anywhere in the app
+  static Future<void> invalidateCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_cacheKey);
+      await prefs.remove(_cacheTimeKey);
+      print('🔄 Unread message cache invalidated');
+    } catch (e) {
+      print('Error invalidating cache: $e');
+    }
+  }
 }
 
 class _MenuIconWithBadgeState extends State<MenuIconWithBadge> {
   int _unreadCount = 0;
-  static const String _cacheKey = 'cached_unread_count';
-  static const String _cacheTimeKey = 'cached_unread_count_time';
+  
   static const Duration _cacheDuration = Duration(seconds: 30);
 
   @override
@@ -28,8 +44,8 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> {
       final prefs = await SharedPreferences.getInstance();
       
       // Try to load from cache first
-      final cachedCount = prefs.getInt(_cacheKey);
-      final cachedTime = prefs.getInt(_cacheTimeKey);
+      final cachedCount = prefs.getInt(MenuIconWithBadge._cacheKey);
+      final cachedTime = prefs.getInt(MenuIconWithBadge._cacheTimeKey);
       
       if (cachedCount != null && cachedTime != null) {
         final cacheAge = DateTime.now().millisecondsSinceEpoch - cachedTime;
@@ -48,8 +64,8 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> {
       final count = await MessagingService.getUnreadMessageCount();
       
       // Save to cache
-      await prefs.setInt(_cacheKey, count);
-      await prefs.setInt(_cacheTimeKey, DateTime.now().millisecondsSinceEpoch);
+      await prefs.setInt(MenuIconWithBadge._cacheKey, count);
+      await prefs.setInt(MenuIconWithBadge._cacheTimeKey, DateTime.now().millisecondsSinceEpoch);
       
       if (mounted) {
         setState(() => _unreadCount = count);
@@ -58,24 +74,21 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> {
       print('Error loading unread count: $e');
       
       // On error, try to use cached value even if stale
-      final prefs = await SharedPreferences.getInstance();
-      final cachedCount = prefs.getInt(_cacheKey);
-      if (cachedCount != null && mounted) {
-        setState(() => _unreadCount = cachedCount);
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final cachedCount = prefs.getInt(MenuIconWithBadge._cacheKey);
+        if (cachedCount != null && mounted) {
+          setState(() => _unreadCount = cachedCount);
+        }
+      } catch (_) {
+        // Fail silently
       }
     }
   }
 
-  /// Call this method when user opens messages or when you know count has changed
-  static Future<void> invalidateCache() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_cacheKey);
-    await prefs.remove(_cacheTimeKey);
-  }
-
   /// Manual refresh method - can be called from parent widgets
   Future<void> refresh() async {
-    await invalidateCache();
+    await MenuIconWithBadge.invalidateCache();
     await _loadUnreadCount();
   }
 

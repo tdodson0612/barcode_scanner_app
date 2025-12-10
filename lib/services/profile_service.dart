@@ -56,7 +56,7 @@ class ProfileService {
       if (firstName != null) updates['first_name'] = firstName;
       if (lastName != null) updates['last_name'] = lastName;
       if (avatarUrl != null) updates['avatar_url'] = avatarUrl;
-      if (profilePicture != null) updates['profile_picture_url'] = profilePicture;
+      if (profilePicture != null) updates['profile_picture'] = profilePicture;
 
       await DatabaseServiceCore.workerQuery(
         action: 'update',

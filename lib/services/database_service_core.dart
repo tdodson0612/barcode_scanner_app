@@ -157,6 +157,20 @@ class DatabaseServiceCore {
     }
   }
 
+  /// 🆕 HELPER: Clear all profile-related caches for a user
+  /// Consolidates the 3-4 cache clears that happen after profile updates
+  static Future<void> clearUserProfileCaches([String? userId]) async {
+    final targetUserId = userId ?? currentUserId;
+    if (targetUserId == null) return;
+    
+    await clearCache('$_CACHE_USER_PROFILE$targetUserId');
+    await clearCache('$_CACHE_PROFILE_TIMESTAMP$targetUserId');
+    await clearCache('user_profile_$targetUserId'); // Legacy key
+    await clearCache('user_pictures'); // Picture gallery cache
+    
+    AppConfig.debugPrint('✅ Cleared all profile caches for user: $targetUserId');
+  }
+
   // ==================================================
   // CLOUDFLARE WORKER HELPER METHODS - WITH AUTH TOKEN
   // ==================================================
@@ -221,12 +235,6 @@ class DatabaseServiceCore {
   }
 
   /// Upload file to R2 storage via Cloudflare Worker WITH auth token
-  // lib/services/database_service_core.dart
-// FIXED: Storage upload with better error handling
-
-// lib/services/database_service_core.dart
-// FIXED: Storage upload with better error handling
-
   static Future<String> _workerStorageUpload({
     required String bucket,
     required String path,
@@ -451,6 +459,7 @@ class DatabaseServiceCore {
     final prefs = await _getPrefs();
     await prefs.remove(key);
   }
+
   static Future<void> removeBackgroundPicture() async {
     ensureUserAuthenticated();
     
@@ -468,15 +477,15 @@ class DatabaseServiceCore {
         },
       );
       
-      // Clear cache
-      await _clearCache('$_CACHE_USER_PROFILE$userId');
-      await _clearCache('$_CACHE_PROFILE_TIMESTAMP$userId');
+      // Use new helper to clear all profile caches
+      await clearUserProfileCaches(userId);
       
       AppConfig.debugPrint('✅ Background picture removed');
     } catch (e) {
       throw Exception('Failed to remove background picture: $e');
     }
   }
+
   static Future<void> deleteSubmittedRecipe(int recipeId) async {
     ensureUserAuthenticated();
 

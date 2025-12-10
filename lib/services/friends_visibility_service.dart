@@ -1,6 +1,7 @@
 // lib/services/friends_visibility_service.dart
 // Handles friend list visibility + fetching a user's friends list
 
+import '../config/app_config.dart';
 import 'database_service_core.dart';
 import 'auth_service.dart';
 import 'profile_service.dart';
@@ -19,37 +20,50 @@ class FriendsVisibilityService {
         filters: {'status': 'accepted'},
       );
 
+      // Safety check: ensure response is a List
+      if (response is! List) {
+        AppConfig.debugPrint('⚠️ getUserFriends: response is not a List');
+        return [];
+      }
+
       final friends = <Map<String, dynamic>>[];
 
-      for (var row in response as List) {
-        if (row['sender'] == userId || row['receiver'] == userId) {
-          final friendId =
-              row['sender'] == userId ? row['receiver'] : row['sender'];
+      for (var row in response) {
+        try {
+          if (row['sender'] == userId || row['receiver'] == userId) {
+            final friendId =
+                row['sender'] == userId ? row['receiver'] : row['sender'];
 
-          final friendProfile = await DatabaseServiceCore.workerQuery(
-            action: 'select',
-            table: 'user_profiles',
-            columns: [
-              'id',
-              'email',
-              'username',
-              'first_name',
-              'last_name',
-              'avatar_url'
-            ],
-            filters: {'id': friendId},
-            limit: 1,
-          );
+            final friendProfile = await DatabaseServiceCore.workerQuery(
+              action: 'select',
+              table: 'user_profiles',
+              columns: [
+                'id',
+                'email',
+                'username',
+                'first_name',
+                'last_name',
+                'avatar_url'
+              ],
+              filters: {'id': friendId},
+              limit: 1,
+            );
 
-          if (friendProfile != null && (friendProfile as List).isNotEmpty) {
-            friends.add(friendProfile[0]);
+            if (friendProfile != null && (friendProfile as List).isNotEmpty) {
+              friends.add(friendProfile[0]);
+            }
           }
+        } catch (e) {
+          // Skip this friend if there's an error fetching their profile
+          AppConfig.debugPrint('⚠️ Failed to fetch friend profile: $e');
+          continue;
         }
       }
 
       return friends;
     } catch (e) {
-      throw Exception('Failed to load user friends: $e');
+      AppConfig.debugPrint('❌ getUserFriends error: $e');
+      return []; // Return empty list instead of throwing
     }
   }
 
@@ -57,13 +71,13 @@ class FriendsVisibilityService {
   // GET VISIBILITY SETTING
   // ==================================================
   static Future<bool> getFriendsListVisibility() async {
-    if (AuthService.currentUserId == null) {
+    if (DatabaseServiceCore.currentUserId == null) {
       throw Exception('Please sign in to continue');
     }
 
     try {
       final profile = await ProfileService.getUserProfile(
-        AuthService.currentUserId!,
+        DatabaseServiceCore.currentUserId!,
       );
       return profile?['friends_list_visible'] ?? true;
     } catch (_) {
@@ -75,11 +89,11 @@ class FriendsVisibilityService {
   // UPDATE VISIBILITY SETTING
   // ==================================================
   static Future<void> updateFriendsListVisibility(bool isVisible) async {
-    if (AuthService.currentUserId == null) {
+    if (DatabaseServiceCore.currentUserId == null) {
       throw Exception('Please sign in to continue');
     }
 
-    final userId = AuthService.currentUserId!;
+    final userId = DatabaseServiceCore.currentUserId!;
 
     try {
       await DatabaseServiceCore.workerQuery(

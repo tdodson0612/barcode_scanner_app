@@ -7,6 +7,8 @@ import '../config/app_config.dart';
 import 'auth_service.dart';                 // currentUserId + auth
 import 'friends_service.dart';              // getFriends()
 import 'database_service_core.dart';        // workerQuery + cache helpers
+import '../widgets/menu_icon_with_badge.dart'; // For cache invalidation
+import '../widgets/app_drawer.dart';        // For cache invalidation
 
 
 class MessagingService {
@@ -124,6 +126,10 @@ class MessagingService {
       // Clear cache for that chat
       await DatabaseServiceCore.clearCache('cache_messages_${uid}_$receiverId');
       await DatabaseServiceCore.clearCache('cache_last_message_time_${uid}_$receiverId');
+      
+      // 🔥 FIX: Invalidate unread badge cache when sending (receiver will get new unread)
+      await MenuIconWithBadge.invalidateCache();
+      await AppDrawer.invalidateUnreadCache();
     } catch (e) {
       throw Exception('Failed to send message: $e');
     }
@@ -167,6 +173,10 @@ class MessagingService {
         filters: {'id': messageId},
         data: {'is_read': true},
       );
+      
+      // 🔥 FIX: Invalidate unread badge cache when marking as read
+      await MenuIconWithBadge.invalidateCache();
+      await AppDrawer.invalidateUnreadCache();
     } catch (_) {}
   }
 
@@ -198,7 +208,15 @@ class MessagingService {
           data: {'is_read': true},
         );
       }
-    } catch (_) {}
+      
+      // 🔥 FIX: Invalidate unread badge cache after marking messages as read
+      await MenuIconWithBadge.invalidateCache();
+      await AppDrawer.invalidateUnreadCache();
+      
+      AppConfig.debugPrint('✅ Messages marked as read, badge cache invalidated');
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Error marking messages as read: $e');
+    }
   }
 
   // ==============================================

@@ -1,4 +1,6 @@
-// main.dart - FIXED: Firebase auto-initialized by plugin (no manual init)
+// main.dart - FIXED: Platform-conditional Firebase initialization
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,7 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'config/app_config.dart';
 
-// 🔥 Firebase - Import but DO NOT manually initialize!
+// 🔥 Firebase imports
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
@@ -30,8 +32,10 @@ import 'pages/reset_password_page.dart';
 /// 🔥 Background FCM handler (required for messages when app is terminated)
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // ⚠️ Firebase is already initialized by GeneratedPluginRegistrant
-  // DO NOT call Firebase.initializeApp() here!
+  // Initialize Firebase if not already initialized
+  if (!kIsWeb && Platform.isAndroid) {
+    await Firebase.initializeApp();
+  }
   debugPrint("🔥 Background message received: ${message.messageId}");
 }
 
@@ -42,12 +46,22 @@ void main() async {
     // Load environment variables FIRST
     await dotenv.load(fileName: ".env");
 
-    // 🔥 CRITICAL: Firebase is AUTO-INITIALIZED by GeneratedPluginRegistrant in AppDelegate
-    // DO NOT call Firebase.initializeApp() here - it will cause a crash!
-    // The plugin system handles Firebase initialization automatically.
-    
-    // ✅ Just register FCM handlers (Firebase already initialized by iOS native code)
+    // 🔥 Platform-conditional Firebase initialization
     try {
+      if (!kIsWeb && Platform.isAndroid) {
+        // Android: Manual initialization required
+        await Firebase.initializeApp();
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('✅ Firebase initialized (Android)');
+        }
+      } else if (!kIsWeb && Platform.isIOS) {
+        // iOS: Auto-initialized by GeneratedPluginRegistrant
+        // No manual initialization needed
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('✅ Firebase auto-initialized (iOS)');
+        }
+      }
+
       // Register background message handler
       FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
       
@@ -69,7 +83,7 @@ void main() async {
         AppConfig.debugPrint('✅ Foreground FCM listener registered');
       }
 
-      // Request notification permissions on iOS
+      // Request notification permissions
       final messaging = FirebaseMessaging.instance;
       final settings = await messaging.requestPermission(
         alert: true,
@@ -110,7 +124,6 @@ void main() async {
       AppConfig.debugPrint('✅ Supabase initialized successfully');
       AppConfig.debugPrint('Supabase URL: ${AppConfig.supabaseUrl}');
       AppConfig.debugPrint('App Name: ${AppConfig.appName}');
-      AppConfig.debugPrint('🔥 Firebase Status: Auto-initialized by iOS plugin system');
     }
 
     runApp(const MyApp());

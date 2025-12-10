@@ -1,4 +1,4 @@
-// lib/widgets/app_drawer.dart - OPTIMIZED: Reuses cached unread count + clears route on logout
+// lib/widgets/app_drawer.dart - OPTIMIZED: Consolidated logout logic + cached unread count
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/messaging_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,15 +16,23 @@ class AppDrawer extends StatefulWidget {
 
   @override
   State<AppDrawer> createState() => _AppDrawerState();
+  
+  // Same cache keys as MenuIconWithBadge to share cache
+  static const String _cacheKey = 'cached_unread_count';
+  static const String _cacheTimeKey = 'cached_unread_count_time';
+  
+  /// Call this when user opens messages to invalidate cache
+  static Future<void> invalidateUnreadCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_cacheKey);
+    await prefs.remove(_cacheTimeKey);
+  }
 }
 
 class _AppDrawerState extends State<AppDrawer> {
   late final PremiumGateController _controller;
   int _unreadCount = 0;
 
-  // Same cache keys as MenuIconWithBadge to share cache
-  static const String _cacheKey = 'cached_unread_count';
-  static const String _cacheTimeKey = 'cached_unread_count_time';
   static const Duration _cacheDuration = Duration(seconds: 30);
 
   @override
@@ -52,8 +60,8 @@ class _AppDrawerState extends State<AppDrawer> {
       final prefs = await SharedPreferences.getInstance();
       
       // Try to load from cache first
-      final cachedCount = prefs.getInt(_cacheKey);
-      final cachedTime = prefs.getInt(_cacheTimeKey);
+      final cachedCount = prefs.getInt(AppDrawer._cacheKey);
+      final cachedTime = prefs.getInt(AppDrawer._cacheTimeKey);
       
       if (cachedCount != null && cachedTime != null) {
         final cacheAge = DateTime.now().millisecondsSinceEpoch - cachedTime;
@@ -72,8 +80,8 @@ class _AppDrawerState extends State<AppDrawer> {
       final count = await MessagingService.getUnreadMessageCount();
       
       // Save to cache
-      await prefs.setInt(_cacheKey, count);
-      await prefs.setInt(_cacheTimeKey, DateTime.now().millisecondsSinceEpoch);
+      await prefs.setInt(AppDrawer._cacheKey, count);
+      await prefs.setInt(AppDrawer._cacheTimeKey, DateTime.now().millisecondsSinceEpoch);
       
       if (mounted) {
         setState(() => _unreadCount = count);
@@ -84,19 +92,12 @@ class _AppDrawerState extends State<AppDrawer> {
       // On error, try to use cached value even if stale
       try {
         final prefs = await SharedPreferences.getInstance();
-        final cachedCount = prefs.getInt(_cacheKey);
+        final cachedCount = prefs.getInt(AppDrawer._cacheKey);
         if (cachedCount != null && mounted) {
           setState(() => _unreadCount = cachedCount);
         }
       } catch (_) {}
     }
-  }
-
-  /// Call this when user opens messages to invalidate cache
-  static Future<void> invalidateUnreadCache() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_cacheKey);
-    await prefs.remove(_cacheTimeKey);
   }
 
   @override
@@ -282,7 +283,7 @@ class _AppDrawerState extends State<AppDrawer> {
               onTap: () async {
                 Navigator.pop(context);
                 // Invalidate cache when user opens messages
-                await invalidateUnreadCache();
+                await AppDrawer.invalidateUnreadCache();
                 if (widget.currentPage != 'messages') {
                   Navigator.pushNamed(context, '/messages');
                 }
@@ -552,6 +553,7 @@ class _AppDrawerState extends State<AppDrawer> {
     );
   }
 
+  /// Consolidated logout logic - single source of truth
   Future<void> _performLogout(BuildContext context) async {
     // Show loading dialog
     showDialog(
@@ -578,8 +580,9 @@ class _AppDrawerState extends State<AppDrawer> {
     );
     
     try {
-      // Clear the saved route BEFORE logging out
       final prefs = await SharedPreferences.getInstance();
+      
+      // Clear the saved route BEFORE logging out
       await prefs.remove('last_route');
       
       // Sign out from Supabase
@@ -612,43 +615,6 @@ class _AppDrawerState extends State<AppDrawer> {
             content: Text('Error signing out. Please try again.'),
             backgroundColor: Colors.red,
             duration: Duration(seconds: 3),
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _logout(BuildContext context) async {
-    try {
-      // Clear the saved route BEFORE logging out
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('last_route');
-      
-      // Sign out from Supabase
-      await AuthService.signOut();
-      
-      // Clear all preferences
-      await prefs.clear();
-      
-      // Dismiss loading dialog and navigate to login
-      if (mounted) {
-        // Pop loading dialog
-        Navigator.pop(context);
-        
-        // Navigate to login and clear all routes
-        Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
-      }
-    } catch (e) {
-      print('Error during logout: $e');
-      
-      // Dismiss loading dialog
-      if (mounted) {
-        Navigator.pop(context);
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error signing out: $e'),
-            backgroundColor: Colors.red,
           ),
         );
       }
