@@ -1,4 +1,4 @@
-// lib/services/auth_service.dart - FINAL: Clean merge with smart retry
+// lib/services/auth_service.dart - COMPLETE FIXED VERSION
 
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -59,18 +59,18 @@ class AuthService {
   }
 
   // --------------------------------------------------------
-  // 🔥 STORE / UPDATE FCM TOKEN
+  // 🔥 STORE / UPDATE FCM TOKEN (NON-BLOCKING)
   // --------------------------------------------------------
   static Future<void> _saveFcmToken(String userId) async {
     try {
       final token = await FirebaseMessaging.instance.getToken();
 
       if (token == null) {
-        AppConfig.debugPrint("⚠️ FCM token is null, cannot save.");
+        AppConfig.debugPrint("⚠️ FCM token is null, skipping save.");
         return;
       }
 
-      AppConfig.debugPrint("📱 Saving FCM token: $token");
+      AppConfig.debugPrint("📱 Saving FCM token: ${token.substring(0, 20)}...");
 
       await DatabaseServiceCore.workerQuery(
         action: 'update',
@@ -81,25 +81,38 @@ class AuthService {
           'updated_at': DateTime.now().toIso8601String(),
         },
       );
+      
+      AppConfig.debugPrint("✅ FCM token saved successfully");
     } catch (e) {
-      AppConfig.debugPrint("❌ Failed to save FCM token: $e");
+      // ✅ CRITICAL FIX: Don't throw - just log and continue
+      AppConfig.debugPrint("⚠️ Failed to save FCM token (non-critical): $e");
+      // App continues to work without push notifications
     }
   }
 
   static void _listenForFcmTokenRefresh(String userId) {
-    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-      AppConfig.debugPrint("🔄 FCM token refreshed: $newToken");
+    try {
+      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+        AppConfig.debugPrint("🔄 FCM token refreshed: ${newToken.substring(0, 20)}...");
 
-      await DatabaseServiceCore.workerQuery(
-        action: 'update',
-        table: 'user_profiles',
-        filters: {'id': userId},
-        data: {
-          'fcm_token': newToken,
-          'updated_at': DateTime.now().toIso8601String(),
-        },
-      );
-    });
+        try {
+          await DatabaseServiceCore.workerQuery(
+            action: 'update',
+            table: 'user_profiles',
+            filters: {'id': userId},
+            data: {
+              'fcm_token': newToken,
+              'updated_at': DateTime.now().toIso8601String(),
+            },
+          );
+          AppConfig.debugPrint("✅ Refreshed FCM token saved");
+        } catch (e) {
+          AppConfig.debugPrint("⚠️ Failed to save refreshed FCM token: $e");
+        }
+      });
+    } catch (e) {
+      AppConfig.debugPrint("⚠️ FCM token refresh listener failed: $e");
+    }
   }
 
   // --------------------------------------------------------
@@ -137,10 +150,12 @@ class AuthService {
               'Signup succeeded but profile setup failed. Please sign in.');
         }
 
-        // 🔥 Save FCM token after profile creation
-        await _saveFcmToken(userId);
+        // 🔥 Save FCM token after profile creation (NON-BLOCKING)
+        _saveFcmToken(userId).catchError((error) {
+          AppConfig.debugPrint("⚠️ FCM token save failed (continuing anyway): $error");
+        });
 
-        // 🔄 Listen for token refresh
+        // 🔄 Listen for token refresh (also non-blocking)
         _listenForFcmTokenRefresh(userId);
       }
 
@@ -151,7 +166,7 @@ class AuthService {
   }
 
   // --------------------------------------------------------
-  // 🔥 SIGN IN (BEST OF BOTH: Direct login + smart retry)
+  // 🔥 SIGN IN (FIXED: Non-blocking FCM + Smart retry)
   // --------------------------------------------------------
   static Future<AuthResponse> signIn({
     required String email,
@@ -189,10 +204,12 @@ class AuthService {
           }
         }
 
-        // 🔥 Save FCM token after login
-        await _saveFcmToken(userId);
+        // 🔥 Save FCM token after login (NON-BLOCKING)
+        _saveFcmToken(userId).catchError((error) {
+          AppConfig.debugPrint("⚠️ FCM token save failed (continuing anyway): $error");
+        });
 
-        // 🔄 Listen for token refresh
+        // 🔄 Listen for token refresh (also non-blocking)
         _listenForFcmTokenRefresh(userId);
       }
 
@@ -225,13 +242,25 @@ class AuthService {
             
             AppConfig.debugPrint('✅ Retry login successful for user: $userId');
             
-            await _ensureUserProfileExists(userId, email);
-            
-            if (_isDefaultPremiumEmail(normalizedEmail)) {
-              await ProfileDataAccess.setPremium(userId, true);
+            try {
+              await _ensureUserProfileExists(userId, email);
+            } catch (profileError) {
+              AppConfig.debugPrint('⚠️ Profile check failed on retry: $profileError');
             }
             
-            await _saveFcmToken(userId);
+            if (_isDefaultPremiumEmail(normalizedEmail)) {
+              try {
+                await ProfileDataAccess.setPremium(userId, true);
+                AppConfig.debugPrint('✅ Premium status set on retry');
+              } catch (premiumError) {
+                AppConfig.debugPrint('⚠️ Premium setup failed on retry: $premiumError');
+              }
+            }
+            
+            _saveFcmToken(userId).catchError((error) {
+              AppConfig.debugPrint("⚠️ FCM token save failed on retry: $error");
+            });
+            
             _listenForFcmTokenRefresh(userId);
           }
           
@@ -239,7 +268,6 @@ class AuthService {
         } catch (retryError) {
           AppConfig.debugPrint('❌ Retry login failed: $retryError');
           
-          // Provide helpful error message
           final retryErrorStr = retryError.toString().toLowerCase();
           if (retryErrorStr.contains('invalid login credentials') || 
               retryErrorStr.contains('invalid_grant')) {
@@ -376,7 +404,9 @@ class AuthService {
 
       // Refresh FCM token for this user (optional but helpful)
       if (currentUserId == userId) {
-        await _saveFcmToken(userId);
+        _saveFcmToken(userId).catchError((error) {
+          AppConfig.debugPrint("⚠️ FCM token save failed: $error");
+        });
       }
     } catch (e) {
       AppConfig.debugPrint("❌ Failed to set premium status: $e");

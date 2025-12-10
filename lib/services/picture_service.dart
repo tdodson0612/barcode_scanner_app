@@ -193,10 +193,6 @@ class PictureService {
   // ==================================================
   // UPLOAD PICTURE TO PHOTO ALBUM
   // ==================================================
-// lib/services/picture_service.dart - FIXED GALLERY UPLOAD
-
-// Replace the uploadPicture method with this:
-
   static Future<String> uploadPicture(File imageFile) async {
     final userId = AuthService.currentUserId;
     if (userId == null) {
@@ -258,12 +254,17 @@ class PictureService {
       List<String> pictures = [];
 
       final existing = profile?['pictures'];
-      if (existing != null && existing.isNotEmpty) {
+      if (existing != null) {
         try {
-          // Handle both String (JSON) and List formats
-          if (existing is String) {
-            pictures = List<String>.from(jsonDecode(existing));
+          // Handle different format possibilities
+          if (existing is String && existing.isNotEmpty) {
+            // It's a JSON string
+            final decoded = jsonDecode(existing);
+            if (decoded is List) {
+              pictures = List<String>.from(decoded);
+            }
           } else if (existing is List) {
+            // It's already a List (from PostgreSQL array)
             pictures = List<String>.from(existing);
           }
           AppConfig.debugPrint('📦 Found ${pictures.length} existing pictures');
@@ -279,13 +280,17 @@ class PictureService {
       pictures.add(publicUrl);
       AppConfig.debugPrint('💾 Saving ${pictures.length} pictures to database...');
 
+      // 🔥 CRITICAL FIX: Send as JSON string - the Worker will parse it and send as array
+      final picturesJson = jsonEncode(pictures);
+      AppConfig.debugPrint('📋 Pictures JSON length: ${picturesJson.length} chars');
+
       // Save updated picture list to database
       await DatabaseServiceCore.workerQuery(
         action: 'update',
         table: 'user_profiles',
         filters: {'id': userId},
         data: {
-          'pictures': jsonEncode(pictures),
+          'pictures': picturesJson,  // Send as JSON string
           'updated_at': DateTime.now().toUtc().toIso8601String(),
         },
       );
@@ -318,6 +323,8 @@ class PictureService {
         throw Exception('Network error. Please check your internet connection.');
       } else if (errorStr.contains('413') || errorStr.contains('too large')) {
         throw Exception('Image too large. Please choose a smaller image.');
+      } else if (errorStr.contains('malformed array') || errorStr.contains('22P02')) {
+        throw Exception('Database format error. Please contact support.');
       }
       
       rethrow;
