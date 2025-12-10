@@ -11,20 +11,20 @@ import 'package:image_picker/image_picker.dart';
 import 'package:liver_wise/services/grocery_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../widgets/premium_gate.dart';
-import '../controllers/premium_gate_controller.dart';
-import 'liverhealthbar.dart';
-import '../services/auth_service.dart';
-import '../services/error_handling_service.dart';
-// TODO: will be removed once we refactor _makeRecipeFromNutrition
-import '../services/food_classifier_service.dart';
-import '../models/favorite_recipe.dart';
-import '../pages/search_users_page.dart';
-import '../widgets/app_drawer.dart';
-import '../config/app_config.dart';
-import '../widgets/menu_icon_with_badge.dart';
-import '../services/database_service_core.dart';
-import '../services/favorite_recipes_service.dart';
+// ✅ FIXED: Changed from ../widgets/ to package imports
+import 'package:liver_wise/widgets/premium_gate.dart';
+import 'package:liver_wise/controllers/premium_gate_controller.dart';
+import 'package:liver_wise/liverhealthbar.dart';
+import 'package:liver_wise/services/auth_service.dart';
+import 'package:liver_wise/services/error_handling_service.dart';
+import 'package:liver_wise/services/food_classifier_service.dart';
+import 'package:liver_wise/models/favorite_recipe.dart';
+import 'package:liver_wise/pages/search_users_page.dart';
+import 'package:liver_wise/widgets/app_drawer.dart';
+import 'package:liver_wise/config/app_config.dart';
+import 'package:liver_wise/widgets/menu_icon_with_badge.dart';
+import 'package:liver_wise/services/database_service_core.dart';
+import 'package:liver_wise/services/favorite_recipes_service.dart';
 
 class NutritionInfo {
   final String productName;
@@ -365,7 +365,7 @@ class _HomePageState extends State<HomePage>
   NutritionInfo? _currentNutrition;
 
   late final PremiumGateController _premiumController;
-  StreamSubscription? _premiumSubscription;
+  // ✅ REMOVED: StreamSubscription? _premiumSubscription;
 
   bool _isPremium = false;
   int _remainingScans = 3;
@@ -433,31 +433,34 @@ class _HomePageState extends State<HomePage>
   @override
   void dispose() {
     _isDisposed = true;
-    _premiumSubscription?.cancel();
+    // ✅ FIXED: Remove listener properly (no cancel())
+    _premiumController.removeListener(_onPremiumStateChanged);
     _interstitialAd?.dispose();
     _rewardedAd?.dispose();
     _searchController.dispose();
     super.dispose();
   }
 
+  // ✅ FIXED: Proper ChangeNotifier listener pattern
   void _initializePremiumController() {
     _premiumController = PremiumGateController();
 
-    _premiumSubscription = _premiumController.addListener(() {
-      if (mounted && !_isDisposed) {
-        setState(() {
-          _isPremium = _premiumController.isPremium;
-          _remainingScans = _premiumController.remainingScans;
-          _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
-        });
-      }
-    }) as StreamSubscription?;
+    // Add listener directly - addListener returns void, not StreamSubscription
+    _premiumController.addListener(_onPremiumStateChanged);
+    
+    // Initialize state immediately
+    _onPremiumStateChanged();
+  }
 
-    setState(() {
-      _isPremium = _premiumController.isPremium;
-      _remainingScans = _premiumController.remainingScans;
-      _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
-    });
+  // ✅ FIXED: Separate callback method for cleaner code
+  void _onPremiumStateChanged() {
+    if (mounted && !_isDisposed) {
+      setState(() {
+        _isPremium = _premiumController.isPremium;
+        _remainingScans = _premiumController.remainingScans;
+        _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
+      });
+    }
   }
 
   Future<void> _initializeAsync() async {
@@ -1274,7 +1277,8 @@ class _HomePageState extends State<HomePage>
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.1),
+        // ✅ FIXED: Changed from withValues to withOpacity
+        color: Colors.white.withOpacity(0.1),
         borderRadius: BorderRadius.circular(8),
       ),
       child: ExpansionTile(
@@ -1369,6 +1373,9 @@ class _HomePageState extends State<HomePage>
       ),
     );
   }
+
+  // Rest of the file continues unchanged from here...
+  // (All remaining methods stay the same)
 
   // -----------------------------------------------------
   // INITIAL HOME VIEW
