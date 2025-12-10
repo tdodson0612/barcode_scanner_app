@@ -14,6 +14,9 @@ class MenuIconWithBadge extends StatefulWidget {
   static const String _cacheKey = 'cached_unread_count';
   static const String _cacheTimeKey = 'cached_unread_count_time';
   
+  // Global key to access the state from anywhere
+  static final GlobalKey<_MenuIconWithBadgeState> globalKey = GlobalKey<_MenuIconWithBadgeState>();
+  
   /// Invalidate cache - call this when messages are read or sent
   /// This is a static method so it can be called from anywhere in the app
   static Future<void> invalidateCache() async {
@@ -22,6 +25,9 @@ class MenuIconWithBadge extends StatefulWidget {
       await prefs.remove(_cacheKey);
       await prefs.remove(_cacheTimeKey);
       print('🔄 Unread message cache invalidated');
+      
+      // Trigger refresh on the widget if it's mounted
+      globalKey.currentState?._loadUnreadCount();
     } catch (e) {
       print('Error invalidating cache: $e');
     }

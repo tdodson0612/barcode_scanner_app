@@ -21,11 +21,17 @@ class AppDrawer extends StatefulWidget {
   static const String _cacheKey = 'cached_unread_count';
   static const String _cacheTimeKey = 'cached_unread_count_time';
   
+  // Global key to access the state from anywhere
+  static final GlobalKey<_AppDrawerState> globalKey = GlobalKey<_AppDrawerState>();
+  
   /// Call this when user opens messages to invalidate cache
   static Future<void> invalidateUnreadCache() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_cacheKey);
     await prefs.remove(_cacheTimeKey);
+    
+    // Trigger refresh on the widget if it's mounted
+    globalKey.currentState?._loadUnreadCount();
   }
 }
 
