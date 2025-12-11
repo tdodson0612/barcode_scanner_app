@@ -1,4 +1,4 @@
-// lib/pages/favorite_recipes_page.dart - PART 1 OF 2
+// lib/pages/favorite_recipes_page.dart - FIXED: Added missing id field
 // UPDATED: Uses Cloudflare Worker for database queries
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -192,6 +192,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         if (mounted) {
           final recipes = data.map((json) {
             return FavoriteRecipe(
+              id: json['id'], // 🔥 FIXED: Keep as int? - no conversion needed
               userId: json['user_id'] ?? '',
               recipeName: json['title'] ?? '',
               ingredients: json['ingredients'] ?? '',
@@ -235,29 +236,34 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
       final currentUserId = AuthService.currentUserId;
       if (currentUserId == null) return;
 
-      // Find the favorite record to delete via Cloudflare Worker
-      final searchResponse = await http.post(
-        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'select',
-          'table': 'favorite_recipes_with_details',
-          'filters': {
-            'user_id': currentUserId,
-            'title': recipe.recipeName,
-          },
-        }),
-      );
+      // 🔥 FIXED: Convert recipe.id to String if available, otherwise search
+      String? favoriteId = recipe.id?.toString();
+      
+      if (favoriteId == null) {
+        // Fallback: Find the favorite record via Cloudflare Worker
+        final searchResponse = await http.post(
+          Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'action': 'select',
+            'table': 'favorite_recipes_with_details',
+            'filters': {
+              'user_id': currentUserId,
+              'title': recipe.recipeName,
+            },
+          }),
+        );
 
-      final favorites = jsonDecode(searchResponse.body) as List;
-      if (favorites.isEmpty) {
-        if (mounted) {
-          ErrorHandlingService.showSimpleError(context, 'Recipe not found in favorites');
+        final favorites = jsonDecode(searchResponse.body) as List;
+        if (favorites.isEmpty) {
+          if (mounted) {
+            ErrorHandlingService.showSimpleError(context, 'Recipe not found in favorites');
+          }
+          return;
         }
-        return;
-      }
 
-      final favoriteId = favorites[0]['id'];
+        favoriteId = favorites[0]['id'];
+      }
      
       // Store for undo
       final removedRecipe = recipe;
@@ -486,7 +492,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     );
   }
 
-@override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(

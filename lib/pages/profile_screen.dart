@@ -60,6 +60,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   List<String> _pictures = [];
   bool _isLoadingPictures = false;
   static const int _maxPictures = 20;
+  bool _picturesExpanded = true; // NEW: Controls pictures section expand/collapse
 
   List<SubmittedRecipe> _submittedRecipes = [];
   bool _isLoadingRecipes = false;
@@ -527,9 +528,16 @@ class _ProfileScreenState extends State<ProfileScreen>
       
       AppConfig.debugPrint('✅ Gallery upload complete: $url');
 
-      // Invalidate cache and reload
+        // 🔥 FIX: Invalidate cache AND force immediate refresh
       await _invalidatePicturesCache();
-      await _loadPictures(forceRefresh: true);
+      
+      // Force immediate reload with fresh data
+      if (mounted) {
+        setState(() {
+          _isLoadingPictures = true;
+        });
+        await _loadPictures(forceRefresh: true);
+      }
 
       if (mounted) {
         ErrorHandlingService.showSuccess(
@@ -1716,26 +1724,45 @@ class _ProfileScreenState extends State<ProfileScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Pictures (${_pictures.length}/$_maxPictures)',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+          // 🔥 FIX: Make header clickable to expand/collapse
+      InkWell(
+        onTap: () {
+          setState(() {
+            _picturesExpanded = !_picturesExpanded;
+          });
+        },
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Text(
+                  'Pictures (${_pictures.length}/$_maxPictures)',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
+                const SizedBox(width: 8),
+                Icon(
+                  _picturesExpanded ? Icons.expand_less : Icons.expand_more,
+                  color: Colors.grey.shade600,
+                ),
+              ],
+            ),
+            if (_pictures.length < _maxPictures && _picturesExpanded)
+              IconButton(
+                icon: const Icon(Icons.add_photo_alternate, color: Colors.blue),
+                onPressed: _showPictureUploadDialog,
+                tooltip: 'Add Picture',
               ),
-              if (_pictures.length < _maxPictures)
-                IconButton(
-                  icon:
-                      const Icon(Icons.add_photo_alternate, color: Colors.blue),
-                  onPressed: _showPictureUploadDialog,
-                  tooltip: 'Add Picture',
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
+          ],
+        ),
+      ),
+      
+      // Only show content if expanded
+      if (_picturesExpanded) ...[
+        const SizedBox(height: 12),
           if (_isLoadingPictures) ...[
             const Center(
               child: Padding(
@@ -1828,6 +1855,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
           ],
         ],
+      ],
       ),
     );
   }

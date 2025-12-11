@@ -441,30 +441,42 @@ class _HomePageState extends State<HomePage>
     super.dispose();
   }
 
-  // ✅ FIXED: Proper ChangeNotifier listener pattern
+// ✅ FIXED: Proper ChangeNotifier listener pattern with scheduled updates
   void _initializePremiumController() {
     _premiumController = PremiumGateController();
 
     // Add listener directly - addListener returns void, not StreamSubscription
     _premiumController.addListener(_onPremiumStateChanged);
     
-    // Initialize state immediately
-    _onPremiumStateChanged();
+    // Initialize state AFTER build phase using addPostFrameCallback
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _onPremiumStateChanged();
+    });
   }
 
-  // ✅ FIXED: Separate callback method for cleaner code
+
   void _onPremiumStateChanged() {
-    if (mounted && !_isDisposed) {
-      setState(() {
-        _isPremium = _premiumController.isPremium;
-        _remainingScans = _premiumController.remainingScans;
-        _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
-      });
-    }
+    if (!mounted || _isDisposed) return;
+    
+    // Schedule the setState for after the current build phase
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _isPremium = _premiumController.isPremium;
+          _remainingScans = _premiumController.remainingScans;
+          _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
+        });
+      }
+    });
   }
 
   Future<void> _initializeAsync() async {
     try {
+      // Delay initial refresh to avoid build phase issues
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      if (!mounted || _isDisposed) return;
+      
       await _premiumController.refresh();
       await _loadFavoriteRecipes();
       await _syncFavoritesFromDatabase();
@@ -1380,6 +1392,7 @@ class _HomePageState extends State<HomePage>
   // -----------------------------------------------------
   // INITIAL HOME VIEW
   // -----------------------------------------------------
+  
   Widget _buildInitialView() {
     return Stack(
       children: [
@@ -1908,134 +1921,165 @@ Widget _buildScanningView() {
         fit: BoxFit.cover,
       ),
     ),
-    child: SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          const SizedBox(height: 20),
+    child: Stack(
+      children: [
+        // Background Image Error Handling
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isTablet = constraints.maxWidth > 600;
 
-          // IMAGE PREVIEW
-          if (_imageFile != null)
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.file(
-                  _imageFile!,
-                  height: 300,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                ),
-              ),
-            ),
-
-          const SizedBox(height: 20),
-
-          // BUTTON ROW
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                ElevatedButton.icon(
-                  onPressed: _takePhoto,
-                  icon: const Icon(Icons.camera_alt),
-                  label: const Text("Retake"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-                const SizedBox(width: 8),
-
-                if (_imageFile != null && !_isLoading)
-                  ElevatedButton.icon(
-                    onPressed: _submitPhoto,
-                    icon: const Icon(Icons.send),
-                    label: const Text("Analyze"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
+            return Image.asset(
+              isTablet
+                  ? 'assets/backgrounds/ipad_background.png'
+                  : 'assets/backgrounds/home_background.png',
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  color: Colors.green.shade50,
+                  child: Center(
+                    child: Icon(
+                      Icons.image_not_supported,
+                      size: 50,
+                      color: Colors.grey,
                     ),
                   ),
-                const SizedBox(width: 8),
+                );
+              },
+            );
+          },
+        ),
 
-                if (_nutritionText.isNotEmpty)
-                  ElevatedButton.icon(
-                    onPressed: _addNutritionToGroceryList,
-                    icon: const Icon(Icons.add_shopping_cart),
-                    label: const Text("Grocery List"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.purple,
-                      foregroundColor: Colors.white,
+        // MAIN CONTENT
+        SingleChildScrollView(
+          padding: EdgeInsets.all(16),
+          child: Column(
+            children: [
+              const SizedBox(height: 20),
+
+              // IMAGE PREVIEW
+              if (_imageFile != null)
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.file(
+                      _imageFile!,
+                      height: 300,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
                     ),
                   ),
-                const SizedBox(width: 8),
+                ),
 
-                ElevatedButton.icon(
-                  onPressed: _resetToHome,
-                  icon: const Icon(Icons.home),
-                  label: const Text("Home"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange,
-                    foregroundColor: Colors.white,
+              const SizedBox(height: 20),
+
+              // BUTTON ROW
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: _takePhoto,
+                      icon: const Icon(Icons.camera_alt),
+                      label: const Text("Retake"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+
+                    if (_imageFile != null && !_isLoading)
+                      ElevatedButton.icon(
+                        onPressed: _submitPhoto,
+                        icon: const Icon(Icons.send),
+                        label: const Text("Analyze"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+
+                    if (_nutritionText.isNotEmpty)
+                      ElevatedButton.icon(
+                        onPressed: _addNutritionToGroceryList,
+                        icon: const Icon(Icons.add_shopping_cart),
+                        label: const Text("Grocery List"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.purple,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+
+                    ElevatedButton.icon(
+                      onPressed: _resetToHome,
+                      icon: const Icon(Icons.home),
+                      label: const Text("Home"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // LOADING
+              if (_isLoading)
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Column(
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text("Analyzing nutrition information..."),
+                    ],
                   ),
                 ),
-              ],
-            ),
+
+              // NUTRITION INFO
+              if (_nutritionText.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade700,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _nutritionText,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+
+              const SizedBox(height: 20),
+
+              if (_showLiverBar && _liverHealthScore != null)
+                LiverHealthBar(healthScore: _liverHealthScore!),
+
+              const SizedBox(height: 20),
+
+              _buildNutritionRecipeSuggestions(),
+            ],
           ),
-
-          const SizedBox(height: 20),
-
-          // LOADING
-          if (_isLoading)
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Column(
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text("Analyzing nutrition information..."),
-                ],
-              ),
-            ),
-
-          // NUTRITION INFO
-          if (_nutritionText.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.green.shade700,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                _nutritionText,
-                style: const TextStyle(color: Colors.white),
-              ),
-            ),
-
-          const SizedBox(height: 20),
-
-          if (_showLiverBar && _liverHealthScore != null)
-            LiverHealthBar(healthScore: _liverHealthScore!),
-
-          const SizedBox(height: 20),
-
-          _buildNutritionRecipeSuggestions(),
-        ],
-      ),
+        ),
+      ],
     ),
   );
 }
@@ -2052,7 +2096,7 @@ Widget build(BuildContext context) {
     appBar: AppBar(
       leading: Builder(
         builder: (context) => IconButton(
-          icon: MenuIconWithBadge(),
+          icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),
           onPressed: () => Scaffold.of(context).openDrawer(),
         ),
       ),
@@ -2082,7 +2126,10 @@ Widget build(BuildContext context) {
       ),
       backgroundColor: Colors.green,
     ),
-    drawer: AppDrawer(currentPage: 'home'),
+    drawer: AppDrawer(
+      key: AppDrawer.globalKey,
+      currentPage: 'home',
+    ),
     body: _showInitialView ? _buildInitialView() : _buildScanningView(),
   );
 }

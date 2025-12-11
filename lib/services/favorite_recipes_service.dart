@@ -1,5 +1,5 @@
 // lib/services/favorite_recipes_service.dart
-// FIXED: Added duplicate prevention, recipe_id mapping, and proper error handling
+// IMPROVED: Better error handling for database constraint issues
 
 import 'dart:convert';
 import '../models/favorite_recipe.dart';
@@ -96,13 +96,13 @@ class FavoriteRecipesService {
     String recipeName,
     String ingredients,
     String directions, {
-    int? recipeId, // ⭐ NEW: Optional recipe_id from recipe_master
+    int? recipeId, // ⭐ Optional recipe_id from recipe_master
   }) async {
     if (AuthService.currentUserId == null) {
       throw Exception('Please sign in to continue');
     }
 
-    // ⭐ NEW: Check for duplicates BEFORE inserting
+    // ⭐ Check for duplicates BEFORE inserting
     final existing = await findExistingFavorite(
       recipeId: recipeId,
       recipeName: recipeName,
@@ -113,7 +113,7 @@ class FavoriteRecipesService {
     }
 
     try {
-      final data = <String, dynamic>{ // ← ONLY THIS LINE CHANGED
+      final data = <String, dynamic>{
         'user_id': AuthService.currentUserId!,
         'recipe_name': recipeName,
         'ingredients': ingredients,
@@ -121,7 +121,7 @@ class FavoriteRecipesService {
         'created_at': DateTime.now().toIso8601String(),
       };
 
-      // ⭐ NEW: Include recipe_id if available
+      // ⭐ Include recipe_id if available
       if (recipeId != null) {
         data['recipe_id'] = recipeId;
       }
@@ -140,12 +140,34 @@ class FavoriteRecipesService {
 
       return FavoriteRecipe.fromJson(row);
     } catch (e) {
-      if (e.toString().contains('already in your favorites')) {
-        rethrow; // Preserve duplicate error message
+      final errorStr = e.toString().toLowerCase();
+      
+      // 🔥 IMPROVED: Better error messages for different constraint violations
+      if (errorStr.contains('duplicate key') || 
+          errorStr.contains('already exists') ||
+          errorStr.contains('23505')) {
+        
+        if (errorStr.contains('user_id_key')) {
+          // This means the database has the wrong constraint!
+          throw Exception(
+            'Database configuration error: Please contact support. '
+            '(Only one favorite allowed per user - this should not happen)'
+          );
+        } else {
+          // Normal duplicate - recipe already favorited
+          throw Exception('This recipe is already in your favorites!');
+        }
       }
+      
+      // Preserve other error messages
+      if (errorStr.contains('already in your favorites')) {
+        rethrow;
+      }
+      
       throw Exception('Failed to add favorite recipe: $e');
     }
   }
+
   // --------------------------------------------------
   // REMOVE FAVORITE
   // --------------------------------------------------

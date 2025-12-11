@@ -37,9 +37,26 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
+    _initializeChat(); // 🔥 FIXED: Use async initialization
+  }
+
+  // 🔥 NEW: Proper async initialization
+  Future<void> _initializeChat() async {
+    // Load messages first
     _loadMessages();
-    // Mark all messages from this friend as read
-    MessagingService.markMessagesAsReadFrom(widget.friendId);
+    
+    // Then mark messages as read and invalidate badge cache
+    await _markMessagesAsRead();
+  }
+
+  // 🔥 NEW: Separate method for marking as read
+  Future<void> _markMessagesAsRead() async {
+    try {
+      await MessagingService.markMessagesAsReadFrom(widget.friendId);
+      print('✅ Messages marked as read, badge should update');
+    } catch (e) {
+      print('⚠️ Error marking messages as read: $e');
+    }
   }
 
   @override
@@ -158,7 +175,7 @@ class _ChatPageState extends State<ChatPage> {
      'sender': AuthService.currentUserId,
      'receiver': widget.friendId,
      'content': content,
-     'created_at': DateTime.now().toUtc().toIso8601String(), // Add .toUtc() here
+     'created_at': DateTime.now().toUtc().toIso8601String(),
      'is_temp': true,
     };
 
