@@ -119,7 +119,7 @@ class MessagingService {
           'sender': uid,
           'receiver': receiverId,
           'content': content,
-          'is_read': false,
+          'is_read': 0,
           'created_at': DateTime.now().toUtc().toIso8601String(),
         },
       );
@@ -155,7 +155,7 @@ class MessagingService {
         columns: ['id'],
         filters: {
           'receiver': uid,
-          'is_read': false,
+          'is_read': 0,
         },
       );
 
@@ -218,7 +218,7 @@ class MessagingService {
         filters: {
           'receiver': uid,
           'sender': senderId,
-          'is_read': false,
+          'is_read': 0,
         },
       );
 
@@ -343,7 +343,7 @@ class MessagingService {
         columns: ['sender'],
         filters: {
           'receiver': uid,
-          'is_read': false,
+          'is_read': 0,
         },
       );
 
