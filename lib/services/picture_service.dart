@@ -256,18 +256,19 @@ class PictureService {
       final existing = profile?['pictures'];
       if (existing != null) {
         try {
-          // Handle different format possibilities
-          if (existing is String && existing.isNotEmpty) {
-            // It's a JSON string
+          // 🔥 FIX: Handle PostgreSQL ARRAY type correctly
+          if (existing is List) {
+            // Already a List from PostgreSQL array
+            pictures = List<String>.from(existing);
+            AppConfig.debugPrint('📦 Found ${pictures.length} existing pictures (from array)');
+          } else if (existing is String && existing.isNotEmpty) {
+            // Fallback: Handle if it's JSON string
             final decoded = jsonDecode(existing);
             if (decoded is List) {
               pictures = List<String>.from(decoded);
+              AppConfig.debugPrint('📦 Found ${pictures.length} existing pictures (from JSON)');
             }
-          } else if (existing is List) {
-            // It's already a List (from PostgreSQL array)
-            pictures = List<String>.from(existing);
           }
-          AppConfig.debugPrint('📦 Found ${pictures.length} existing pictures');
         } catch (e) {
           AppConfig.debugPrint('⚠️ Failed to parse existing pictures: $e');
           pictures = [];
@@ -280,17 +281,14 @@ class PictureService {
       pictures.add(publicUrl);
       AppConfig.debugPrint('💾 Saving ${pictures.length} pictures to database...');
 
-      // 🔥 CRITICAL FIX: Send as JSON string - the Worker will parse it and send as array
-      final picturesJson = jsonEncode(pictures);
-      AppConfig.debugPrint('📋 Pictures JSON length: ${picturesJson.length} chars');
-
-      // Save updated picture list to database
+      // 🔥 CRITICAL FIX: Send as PostgreSQL array, not JSON string
+      // The Worker should handle this as an array type, not a string
       await DatabaseServiceCore.workerQuery(
         action: 'update',
         table: 'user_profiles',
         filters: {'id': userId},
         data: {
-          'pictures': picturesJson,  // Send as JSON string
+          'pictures': pictures,  // 🔥 Send as List directly, not jsonEncode()
           'updated_at': DateTime.now().toUtc().toIso8601String(),
         },
       );
@@ -330,7 +328,6 @@ class PictureService {
       rethrow;
     }
   }
-
   // ==================================================
   // DELETE PICTURE (Gallery, Profile, OR Background)
   // ==================================================
@@ -353,16 +350,23 @@ class PictureService {
         // Continue anyway to remove from database
       }
 
-      // Remove from pictures JSON array in database
+      // Remove from pictures array in database
       final profile = await ProfileService.getCurrentUserProfile();
-      final picturesJson = profile?['pictures'];
+      final picturesData = profile?['pictures'];
 
-      if (picturesJson != null && picturesJson.isNotEmpty) {
+      if (picturesData != null) {
         List<String> pictures = [];
+        
         try {
-          pictures = List<String>.from(jsonDecode(picturesJson));
+          // 🔥 FIX: Handle PostgreSQL ARRAY type correctly
+          if (picturesData is List) {
+            pictures = List<String>.from(picturesData);
+          } else if (picturesData is String && picturesData.isNotEmpty) {
+            // Fallback for JSON string
+            pictures = List<String>.from(jsonDecode(picturesData));
+          }
         } catch (e) {
-          AppConfig.debugPrint('⚠️ Failed to parse pictures JSON: $e');
+          AppConfig.debugPrint('⚠️ Failed to parse pictures: $e');
           pictures = [];
         }
 
@@ -377,7 +381,7 @@ class PictureService {
             table: 'user_profiles',
             filters: {'id': userId},
             data: {
-              'pictures': jsonEncode(pictures),
+              'pictures': pictures,  // 🔥 Send as List directly, not jsonEncode()
               'updated_at': DateTime.now().toUtc().toIso8601String(),
             },
           );
@@ -398,7 +402,6 @@ class PictureService {
       throw Exception('Failed to delete picture: $e');
     }
   }
-
   // ==================================================
   // SET A GALLERY PICTURE AS PROFILE PICTURE
   // ==================================================
@@ -441,15 +444,25 @@ class PictureService {
   static Future<List<String>> getUserPictures(String userId) async {
     try {
       final profile = await ProfileService.getUserProfile(userId);
-      final jsonText = profile?['pictures'];
+      final picturesData = profile?['pictures'];
 
-      if (jsonText == null || jsonText.isEmpty) {
+      if (picturesData == null) {
         AppConfig.debugPrint('📭 No pictures found for user: $userId');
         return [];
       }
 
-      final pictures = List<String>.from(jsonDecode(jsonText));
-      AppConfig.debugPrint('📦 Loaded ${pictures.length} pictures for user: $userId');
+      List<String> pictures = [];
+      
+      // 🔥 FIX: Handle PostgreSQL ARRAY type correctly
+      if (picturesData is List) {
+        pictures = List<String>.from(picturesData);
+        AppConfig.debugPrint('📦 Loaded ${pictures.length} pictures for user: $userId (from array)');
+      } else if (picturesData is String && picturesData.isNotEmpty) {
+        // Fallback for JSON string
+        pictures = List<String>.from(jsonDecode(picturesData));
+        AppConfig.debugPrint('📦 Loaded ${pictures.length} pictures for user: $userId (from JSON)');
+      }
+      
       return pictures;
     } catch (e) {
       AppConfig.debugPrint('❌ getUserPictures error: $e');

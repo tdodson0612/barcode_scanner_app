@@ -961,6 +961,15 @@ class _HomePageState extends State<HomePage>
   Future<void> _executeTakePhoto() async {
     if (_isDisposed) return;
 
+    // ✅ NEW: Cleanup any existing image before taking new one
+    if (_imageFile != null) {
+      try {
+        await _imageFile!.delete();
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ Could not delete old image: $e');
+      }
+    }
+
     try {
       if (mounted) {
         setState(() {
@@ -976,17 +985,49 @@ class _HomePageState extends State<HomePage>
         });
       }
 
+      // ✅ FIXED: Reduced image quality and size for better memory management
       final pickedFile = await _picker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 85,
-        maxWidth: 1024,
-        maxHeight: 1024,
+        imageQuality: 70,        // Reduced from 85
+        maxWidth: 800,            // Reduced from 1024
+        maxHeight: 800,           // Reduced from 1024
+        preferredCameraDevice: CameraDevice.rear,
+      ).timeout(
+        const Duration(seconds: 30),  // ✅ NEW: Add timeout
+        onTimeout: () {
+          throw TimeoutException('Camera operation timed out');
+        },
       );
 
       if (pickedFile != null && mounted && !_isDisposed) {
-        setState(() => _imageFile = File(pickedFile.path));
+        // ✅ NEW: Verify file exists and is readable before setting state
+        final file = File(pickedFile.path);
+        final exists = await file.exists();
+        
+        if (!exists) {
+          throw Exception('Captured image file not found');
+        }
+
+        // ✅ NEW: Check file size (warn if > 5MB)
+        final fileSize = await file.length();
+        if (fileSize > 5 * 1024 * 1024) {
+          AppConfig.debugPrint('⚠️ Large image file: ${fileSize / (1024 * 1024)}MB');
+        }
+
+        setState(() => _imageFile = file);
+        
+        AppConfig.debugPrint('✅ Image captured: ${fileSize / 1024}KB');
       }
 
+    } on TimeoutException catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.imageError,
+          customMessage: 'Camera operation timed out. Please try again.',
+        );
+      }
     } catch (e) {
       if (mounted) {
         await ErrorHandlingService.handleError(
@@ -1006,6 +1047,19 @@ class _HomePageState extends State<HomePage>
   Future<void> _submitPhoto() async {
     if (_imageFile == null || _isDisposed) return;
 
+    // ✅ NEW: Verify file still exists before processing
+    final fileExists = await _imageFile!.exists();
+    if (!fileExists) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'Image file not found. Please take a new photo.',
+        );
+        _resetToHome();
+      }
+      return;
+    }
+
     try {
       final success = await _premiumController.useScan();
       if (!success) {
@@ -1024,7 +1078,14 @@ class _HomePageState extends State<HomePage>
         });
       }
 
-      final nutrition = await BarcodeScannerService.scanAndLookup(_imageFile!.path);
+      // ✅ NEW: Add timeout to barcode scanning
+      final nutrition = await BarcodeScannerService.scanAndLookup(_imageFile!.path)
+          .timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          throw TimeoutException('Barcode scanning timed out');
+        },
+      );
 
       if (nutrition == null) {
         if (mounted && !_isDisposed) {
@@ -1062,7 +1123,7 @@ class _HomePageState extends State<HomePage>
           _currentNutrition = nutrition;
         });
 
-        // ⭐ FIXED: Better scan remaining message
+        // ✅ FIXED: Better scan remaining message
         String message;
         if (_premiumController.isPremium) {
           message = 'Analysis successful! You have unlimited scans.';
@@ -1074,6 +1135,22 @@ class _HomePageState extends State<HomePage>
         ErrorHandlingService.showSuccess(context, message);
       }
 
+    } on TimeoutException catch (e) {
+      if (mounted) {
+        setState(() {
+          _nutritionText = "Scanning timed out. Please try again.";
+          _showLiverBar = false;
+          _isLoading = false;
+        });
+
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.scanError,
+          customMessage: 'Scanning operation timed out',
+          onRetry: _submitPhoto,
+        );
+      }
     } catch (e) {
       if (mounted) {
         setState(() {

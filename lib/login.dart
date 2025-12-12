@@ -1,4 +1,5 @@
-// lib/login.dart - COMPLETE (Works with fixed AuthService)
+// lib/login.dart - COMPLETE UPDATED FILE
+// Replace your entire login.dart with this version
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
@@ -128,6 +129,8 @@ class _LoginPageState extends State<LoginPage> {
       userFriendlyMessage = 'The passwords you entered don\'t match.';
     } else if (errorMessage.contains('row-level security') || errorMessage.contains('RLS')) {
       userFriendlyMessage = 'Account setup failed. Please contact support if this continues.';
+    } else if (errorMessage.contains('session') || errorMessage.contains('expired')) {
+      userFriendlyMessage = 'Session error detected. Please try the "Clear Session" button below.';
     } else {
       userFriendlyMessage = 'Unable to sign in right now. Please try again.';
     }
@@ -156,15 +159,10 @@ class _LoginPageState extends State<LoginPage> {
         await _saveCredentials();
       }
 
-      // ⭐ AuthService now handles session clearing internally
+      // AuthService now handles multiple retries internally for iOS
       final response = await AuthService.signIn(
         email: trimmedEmail,
         password: _password,
-      ).timeout(
-        const Duration(seconds: 15),
-        onTimeout: () {
-          throw Exception('Connection timed out. Please try again.');
-        },
       );
 
       if (response.user != null && response.session != null) {
@@ -252,6 +250,33 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
       AppConfig.debugPrint('❌ Sign up error: $e');
       rethrow;
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  // ✅ NEW: Force reset session (for iOS debugging)
+  Future<void> _forceResetSession() async {
+    try {
+      setState(() => _isLoading = true);
+      
+      await AuthService.forceResetSession();
+      
+      if (mounted) {
+        ErrorHandlingService.showSuccess(
+          context,
+          'Session cleared! Please try logging in again.',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'Failed to clear session: $e',
+        );
+      }
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -705,6 +730,22 @@ class _LoginPageState extends State<LoginPage> {
                                   ),
                                 ),
                               ),
+                              
+                              // ✅ NEW: Clear Session Button (Debug Only)
+                              if (AppConfig.enableDebugPrints) ...[
+                                const SizedBox(height: 8),
+                                TextButton.icon(
+                                  onPressed: _isLoading ? null : _forceResetSession,
+                                  icon: const Icon(Icons.refresh, size: 16, color: Colors.orange),
+                                  label: Text(
+                                    "Clear Session (iOS Debug)",
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.orange.shade700,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ],
                             
                             SizedBox(height: isTablet ? 32 : 24),

@@ -61,6 +61,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _isLoadingPictures = false;
   static const int _maxPictures = 20;
   bool _picturesExpanded = true; // NEW: Controls pictures section expand/collapse
+  static const String _picturesExpandedKey = 'pictures_section_expanded'; // 🔥 ADD THIS LINE
+
 
   List<SubmittedRecipe> _submittedRecipes = [];
   bool _isLoadingRecipes = false;
@@ -104,9 +106,6 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     _nameController.dispose();
     _emailController.dispose();
-
-    // 🔥 Cancel the listener
-    _profileUpdateSub.cancel();
 
     _premiumController.removeListener(_updatePremiumState);
     super.dispose();
@@ -525,17 +524,14 @@ class _ProfileScreenState extends State<ProfileScreen>
       
       AppConfig.debugPrint('🚀 Starting gallery upload...');
       final url = await PictureService.uploadPicture(imageFile);
-      
+
       AppConfig.debugPrint('✅ Gallery upload complete: $url');
 
-        // 🔥 FIX: Invalidate cache AND force immediate refresh
+      // 🔥 FIX: Invalidate cache AND force immediate refresh
       await _invalidatePicturesCache();
-      
-      // Force immediate reload with fresh data
+
+      // Force immediate reload (loading state handled by _loadPictures)
       if (mounted) {
-        setState(() {
-          _isLoadingPictures = true;
-        });
         await _loadPictures(forceRefresh: true);
       }
 
@@ -1123,6 +1119,9 @@ class _ProfileScreenState extends State<ProfileScreen>
           await prefs.setString('background_picture_url', backgroundPictureUrl);
         }
 
+        // 🔥 NEW: Restore pictures collapse state
+        final expandedState = prefs.getBool(_picturesExpandedKey) ?? true;
+
         if (mounted) {
           setState(() {
             _userName = userName;
@@ -1131,6 +1130,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             _emailController.text = userEmail;
             _profileImageUrl = profilePictureUrl;
             _backgroundImageUrl = backgroundPictureUrl;
+            _picturesExpanded = expandedState; // 🔥 Restore collapse state
             
             AppConfig.debugPrint('✅ Profile loaded successfully');
           });
@@ -1141,6 +1141,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         final savedEmail = prefs.getString('user_email') ?? '';
         final savedProfilePicture = prefs.getString('profile_picture_url');
         final savedBackgroundPicture = prefs.getString('background_picture_url');
+        final expandedState = prefs.getBool(_picturesExpandedKey) ?? true;
 
         if (mounted) {
           setState(() {
@@ -1150,6 +1151,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             _emailController.text = savedEmail;
             _profileImageUrl = savedProfilePicture;
             _backgroundImageUrl = savedBackgroundPicture;
+            _picturesExpanded = expandedState; // 🔥 Restore collapse state
             
             AppConfig.debugPrint('⚠️ Using cached profile data');
           });
@@ -1164,6 +1166,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         final savedEmail = prefs.getString('user_email') ?? '';
         final savedProfilePicture = prefs.getString('profile_picture_url');
         final savedBackgroundPicture = prefs.getString('background_picture_url');
+        final expandedState = prefs.getBool(_picturesExpandedKey) ?? true;
 
         if (mounted) {
           setState(() {
@@ -1173,6 +1176,7 @@ class _ProfileScreenState extends State<ProfileScreen>
             _emailController.text = savedEmail;
             _profileImageUrl = savedProfilePicture;
             _backgroundImageUrl = savedBackgroundPicture;
+            _picturesExpanded = expandedState; // 🔥 Restore collapse state
           });
         }
       } catch (e2) {
@@ -1184,6 +1188,15 @@ class _ProfileScreenState extends State<ProfileScreen>
           _isLoading = false;
         });
       }
+    }
+  }
+
+  Future<void> _savePicturesExpandedState(bool expanded) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_picturesExpandedKey, expanded);
+    } catch (e) {
+      AppConfig.debugPrint('Error saving pictures expanded state: $e');
     }
   }
 
@@ -1724,45 +1737,46 @@ class _ProfileScreenState extends State<ProfileScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 🔥 FIX: Make header clickable to expand/collapse
-      InkWell(
-        onTap: () {
-          setState(() {
-            _picturesExpanded = !_picturesExpanded;
-          });
-        },
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
+          // 🔥 FIX: Make header clickable to expand/collapse with persistence
+          InkWell(
+            onTap: () {
+              setState(() {
+                _picturesExpanded = !_picturesExpanded;
+              });
+              _savePicturesExpandedState(_picturesExpanded); // 🔥 Persist state
+            },
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Pictures (${_pictures.length}/$_maxPictures)',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+                Row(
+                  children: [
+                    Text(
+                      'Pictures (${_pictures.length}/$_maxPictures)',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      _picturesExpanded ? Icons.expand_less : Icons.expand_more,
+                      color: Colors.grey.shade600,
+                    ),
+                  ],
+                ),
+                if (_pictures.length < _maxPictures && _picturesExpanded)
+                  IconButton(
+                    icon: const Icon(Icons.add_photo_alternate, color: Colors.blue),
+                    onPressed: _showPictureUploadDialog,
+                    tooltip: 'Add Picture',
                   ),
-                ),
-                const SizedBox(width: 8),
-                Icon(
-                  _picturesExpanded ? Icons.expand_less : Icons.expand_more,
-                  color: Colors.grey.shade600,
-                ),
               ],
             ),
-            if (_pictures.length < _maxPictures && _picturesExpanded)
-              IconButton(
-                icon: const Icon(Icons.add_photo_alternate, color: Colors.blue),
-                onPressed: _showPictureUploadDialog,
-                tooltip: 'Add Picture',
-              ),
-          ],
-        ),
-      ),
-      
-      // Only show content if expanded
-      if (_picturesExpanded) ...[
-        const SizedBox(height: 12),
+          ),
+          
+          // Only show content if expanded
+          if (_picturesExpanded) ...[
+            const SizedBox(height: 12),
           if (_isLoadingPictures) ...[
             const Center(
               child: Padding(
@@ -2040,11 +2054,11 @@ class _ProfileScreenState extends State<ProfileScreen>
             child: _backgroundImageUrl != null
                 ? Image.network(
                     _backgroundImageUrl!,
-                    fit: BoxFit.cover,
+                    fit: BoxFit.fill, // 🔥 FIXED: Stretch to fill instead of cover
                     errorBuilder: (context, error, stackTrace) {
                       return Image.asset(
                         'assets/background.png',
-                        fit: BoxFit.cover,
+                        fit: BoxFit.fill, // 🔥 FIXED: Consistent scaling
                         errorBuilder: (context, error, stackTrace) {
                           return Container(
                             color: Colors.green.shade50,
@@ -2055,7 +2069,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   )
                 : Image.asset(
                     'assets/background.png',
-                    fit: BoxFit.cover,
+                    fit: BoxFit.fill, // 🔥 FIXED: Consistent scaling
                     errorBuilder: (context, error, stackTrace) {
                       return Container(
                         color: Colors.green.shade50,

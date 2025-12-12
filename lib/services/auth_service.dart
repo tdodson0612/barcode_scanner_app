@@ -172,125 +172,146 @@ class AuthService {
     required String email,
     required String password,
   }) async {
-    try {
-      AppConfig.debugPrint('🔐 Attempting login for: ${email.trim().toLowerCase()}');
+    const maxRetries = 3; // iOS sometimes needs 2-3 attempts
+    int attempt = 0;
 
-      // Try direct login first (works for most cases)
-      final response = await _supabase.auth.signInWithPassword(
-        email: email,
-        password: password,
-      );
+    while (attempt < maxRetries) {
+      attempt++;
+      
+      try {
+        AppConfig.debugPrint('🔐 Login attempt $attempt/$maxRetries for: ${email.trim().toLowerCase()}');
 
-      if (response.user != null) {
-        final userId = response.user!.id;
-        final normalizedEmail = email.trim().toLowerCase();
-
-        AppConfig.debugPrint('✅ Login successful for user: $userId');
-
-        // Ensure profile exists
+        // Always clear session before attempting login (iOS fix)
         try {
-          await _ensureUserProfileExists(userId, email);
-        } catch (profileError) {
-          AppConfig.debugPrint('⚠️ Profile check failed: $profileError');
+          final currentSession = _supabase.auth.currentSession;
+          if (currentSession != null) {
+            AppConfig.debugPrint('🧹 Clearing existing session before login (attempt $attempt)');
+            await _supabase.auth.signOut();
+            await Future.delayed(const Duration(milliseconds: 500));
+          }
+        } catch (clearError) {
+          AppConfig.debugPrint('⚠️ Session clear failed (continuing): $clearError');
         }
 
-        // Set premium if applicable
-        if (_isDefaultPremiumEmail(normalizedEmail)) {
+        // Attempt login
+        final response = await _supabase.auth.signInWithPassword(
+          email: email,
+          password: password,
+        ).timeout(
+          const Duration(seconds: 15),
+          onTimeout: () {
+            throw Exception('Connection timed out. Please try again.');
+          },
+        );
+
+        // ✅ SUCCESS PATH
+        if (response.user != null && response.session != null) {
+          final userId = response.user!.id;
+          final normalizedEmail = email.trim().toLowerCase();
+
+          AppConfig.debugPrint('✅ Login successful (attempt $attempt): $userId');
+
+          // Ensure profile exists
           try {
-            await ProfileDataAccess.setPremium(userId, true);
-            AppConfig.debugPrint('✅ Premium status set for: $normalizedEmail');
-          } catch (premiumError) {
-            AppConfig.debugPrint('⚠️ Premium setup failed: $premiumError');
+            await _ensureUserProfileExists(userId, email);
+          } catch (profileError) {
+            AppConfig.debugPrint('⚠️ Profile check failed: $profileError');
           }
-        }
 
-        // 🔥 Save FCM token after login (NON-BLOCKING)
-        _saveFcmToken(userId).catchError((error) {
-          AppConfig.debugPrint("⚠️ FCM token save failed (continuing anyway): $error");
-        });
-
-        // 🔄 Listen for token refresh (also non-blocking)
-        _listenForFcmTokenRefresh(userId);
-      }
-
-      return response;
-    } catch (e) {
-      AppConfig.debugPrint('❌ Sign in failed: $e');
-      
-      final errorStr = e.toString().toLowerCase();
-      
-      // ⭐ SMART RETRY: Only for session-related errors
-      if (errorStr.contains('session') || 
-          errorStr.contains('expired') || 
-          errorStr.contains('invalid_grant')) {
-        AppConfig.debugPrint('🔄 Session conflict detected, clearing and retrying once...');
-        
-        try {
-          await _supabase.auth.signOut();
-          await Future.delayed(const Duration(milliseconds: 300));
-          
-          // Retry login ONCE
-          AppConfig.debugPrint('🔐 Retrying login after session clear...');
-          final retryResponse = await _supabase.auth.signInWithPassword(
-            email: email,
-            password: password,
-          );
-          
-          if (retryResponse.user != null) {
-            final userId = retryResponse.user!.id;
-            final normalizedEmail = email.trim().toLowerCase();
-            
-            AppConfig.debugPrint('✅ Retry login successful for user: $userId');
-            
+          // Set premium if applicable
+          if (_isDefaultPremiumEmail(normalizedEmail)) {
             try {
-              await _ensureUserProfileExists(userId, email);
-            } catch (profileError) {
-              AppConfig.debugPrint('⚠️ Profile check failed on retry: $profileError');
+              await ProfileDataAccess.setPremium(userId, true);
+              AppConfig.debugPrint('✅ Premium status set');
+            } catch (premiumError) {
+              AppConfig.debugPrint('⚠️ Premium setup failed: $premiumError');
             }
-            
-            if (_isDefaultPremiumEmail(normalizedEmail)) {
-              try {
-                await ProfileDataAccess.setPremium(userId, true);
-                AppConfig.debugPrint('✅ Premium status set on retry');
-              } catch (premiumError) {
-                AppConfig.debugPrint('⚠️ Premium setup failed on retry: $premiumError');
-              }
-            }
-            
-            _saveFcmToken(userId).catchError((error) {
-              AppConfig.debugPrint("⚠️ FCM token save failed on retry: $error");
-            });
-            
-            _listenForFcmTokenRefresh(userId);
           }
-          
-          return retryResponse;
-        } catch (retryError) {
-          AppConfig.debugPrint('❌ Retry login failed: $retryError');
-          
-          final retryErrorStr = retryError.toString().toLowerCase();
-          if (retryErrorStr.contains('invalid login credentials') || 
-              retryErrorStr.contains('invalid_grant')) {
-            throw Exception('Invalid email or password. Please try again.');
-          }
-          throw Exception('Sign in failed after retry: $retryError');
+
+          // Save FCM token (non-blocking)
+          _saveFcmToken(userId).catchError((error) {
+            AppConfig.debugPrint("⚠️ FCM token save failed: $error");
+          });
+
+          _listenForFcmTokenRefresh(userId);
+
+          return response; // ✅ SUCCESS - Return immediately
         }
+
+        // If we got here, login returned but no user/session
+        throw Exception('Login failed: No user or session returned');
+
+      } catch (e) {
+        final errorStr = e.toString().toLowerCase();
+        
+        AppConfig.debugPrint('❌ Login attempt $attempt failed: $e');
+
+        // 🍎 iOS-SPECIFIC: Session conflict errors - retry
+        final isSessionError = errorStr.contains('session') ||
+                            errorStr.contains('expired') ||
+                            errorStr.contains('invalid_grant') ||
+                            errorStr.contains('refresh_token') ||
+                            errorStr.contains('jwt');
+
+        if (isSessionError && attempt < maxRetries) {
+          AppConfig.debugPrint('🔄 Session conflict detected, will retry (attempt ${attempt + 1}/$maxRetries)');
+          await Future.delayed(Duration(milliseconds: 500 * attempt)); // Exponential backoff
+          continue; // Try again
+        }
+
+        // ❌ FATAL ERRORS - Don't retry
+        if (errorStr.contains('invalid login credentials') ||
+            errorStr.contains('invalid email or password')) {
+          throw Exception('Invalid email or password. Please try again.');
+        }
+        
+        if (errorStr.contains('email not confirmed')) {
+          throw Exception('Please verify your email before signing in.');
+        }
+        
+        if (errorStr.contains('network') || errorStr.contains('socket')) {
+          throw Exception('Network error. Please check your internet connection.');
+        }
+
+        // If we've exhausted retries, throw the error
+        if (attempt >= maxRetries) {
+          AppConfig.debugPrint('❌ All $maxRetries login attempts failed');
+          throw Exception('Sign in failed after $maxRetries attempts. Please try again later.');
+        }
+
+        // For other errors on early attempts, retry
+        AppConfig.debugPrint('⚠️ Retrying login due to error: $e');
+        await Future.delayed(Duration(milliseconds: 500 * attempt));
+        continue;
       }
-      
-      // Provide helpful error messages for other cases
-      if (errorStr.contains('invalid login credentials') || 
-          errorStr.contains('invalid_grant')) {
-        throw Exception('Invalid email or password. Please try again.');
-      } else if (errorStr.contains('email not confirmed')) {
-        throw Exception('Please verify your email before signing in.');
-      } else if (errorStr.contains('network') || errorStr.contains('socket')) {
-        throw Exception('Network error. Please check your internet connection.');
-      }
-      
-      throw Exception('Sign in failed: $e');
     }
+
+    // Should never reach here, but just in case
+    throw Exception('Login failed after $maxRetries attempts');
   }
 
+  // --------------------------------------------------------
+  // 🍎 NEW: Force clear all session data (for iOS troubleshooting)
+  // --------------------------------------------------------
+  static Future<void> forceResetSession() async {
+    try {
+      AppConfig.debugPrint('🧹 Force resetting all session data...');
+      
+      // Sign out from Supabase
+      await _supabase.auth.signOut();
+      
+      // Clear all local caches
+      await DatabaseServiceCore.clearAllUserCache();
+      
+      // Wait for iOS to settle
+      await Future.delayed(const Duration(seconds: 1));
+      
+      AppConfig.debugPrint('✅ Session reset complete');
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Session reset error: $e');
+      throw Exception('Failed to reset session: $e');
+    }
+  }
   // --------------------------------------------------------
   // Ensure user profile exists
   // --------------------------------------------------------

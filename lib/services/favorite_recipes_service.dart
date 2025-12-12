@@ -1,5 +1,5 @@
 // lib/services/favorite_recipes_service.dart
-// IMPROVED: Better error handling for database constraint issues
+// ✅ FIXED: Enhanced duplicate prevention and better error handling
 
 import 'dart:convert';
 import '../models/favorite_recipe.dart';
@@ -49,7 +49,8 @@ class FavoriteRecipesService {
   }
 
   // --------------------------------------------------
-  // ⭐ NEW: CHECK IF RECIPE IS ALREADY FAVORITED (prevents duplicates)
+  // ✅ IMPROVED: CHECK IF RECIPE IS ALREADY FAVORITED
+  // Now checks BOTH recipe_id AND recipe_name for better accuracy
   // --------------------------------------------------
   static Future<FavoriteRecipe?> findExistingFavorite({
     int? recipeId,
@@ -59,53 +60,71 @@ class FavoriteRecipesService {
     if (userId == null) return null;
 
     try {
-      Map<String, dynamic> filters = {'user_id': userId};
-
-      // Prefer searching by recipe_id if available (more reliable)
+      // ✅ STRATEGY 1: Check by recipe_id first (most reliable)
       if (recipeId != null) {
-        filters['recipe_id'] = recipeId;
-      } else if (recipeName != null) {
-        filters['recipe_name'] = recipeName;
-      } else {
-        return null;
+        final response = await DatabaseServiceCore.workerQuery(
+          action: 'select',
+          table: 'favorite_recipes',
+          columns: ['*'],
+          filters: {
+            'user_id': userId,
+            'recipe_id': recipeId,
+          },
+          limit: 1,
+        );
+
+        if (response != null && (response as List).isNotEmpty) {
+          return FavoriteRecipe.fromJson(response.first);
+        }
       }
 
-      final response = await DatabaseServiceCore.workerQuery(
-        action: 'select',
-        table: 'favorite_recipes',
-        columns: ['*'],
-        filters: filters,
-        limit: 1,
-      );
+      // ✅ STRATEGY 2: Fallback to recipe_name if no recipe_id match
+      if (recipeName != null && recipeName.trim().isNotEmpty) {
+        final response = await DatabaseServiceCore.workerQuery(
+          action: 'select',
+          table: 'favorite_recipes',
+          columns: ['*'],
+          filters: {
+            'user_id': userId,
+            'recipe_name': recipeName.trim(),
+          },
+          limit: 1,
+        );
 
-      if (response != null && (response as List).isNotEmpty) {
-        return FavoriteRecipe.fromJson(response.first);
+        if (response != null && (response as List).isNotEmpty) {
+          return FavoriteRecipe.fromJson(response.first);
+        }
       }
 
       return null;
     } catch (e) {
-      print('⚠️ Error checking for existing favorite: $e');
+      AppConfig.debugPrint('⚠️ Error checking for existing favorite: $e');
       return null;
     }
   }
 
   // --------------------------------------------------
-  // ADD FAVORITE RECIPE (with duplicate prevention)
+  // ✅ FIXED: ADD FAVORITE RECIPE (enhanced duplicate prevention)
   // --------------------------------------------------
   static Future<FavoriteRecipe> addFavoriteRecipe(
     String recipeName,
     String ingredients,
     String directions, {
-    int? recipeId, // ⭐ Optional recipe_id from recipe_master
+    int? recipeId, // Optional recipe_id from recipe_master
   }) async {
     if (AuthService.currentUserId == null) {
       throw Exception('Please sign in to continue');
     }
 
-    // ⭐ Check for duplicates BEFORE inserting
+    final trimmedName = recipeName.trim();
+    if (trimmedName.isEmpty) {
+      throw Exception('Recipe name cannot be empty');
+    }
+
+    // ✅ CRITICAL: Check for duplicates BEFORE inserting
     final existing = await findExistingFavorite(
       recipeId: recipeId,
-      recipeName: recipeName,
+      recipeName: trimmedName,
     );
 
     if (existing != null) {
@@ -115,13 +134,13 @@ class FavoriteRecipesService {
     try {
       final data = <String, dynamic>{
         'user_id': AuthService.currentUserId!,
-        'recipe_name': recipeName,
-        'ingredients': ingredients,
-        'directions': directions,
+        'recipe_name': trimmedName,
+        'ingredients': ingredients.trim(),
+        'directions': directions.trim(),
         'created_at': DateTime.now().toIso8601String(),
       };
 
-      // ⭐ Include recipe_id if available
+      // Include recipe_id if available (links to recipe_master table)
       if (recipeId != null) {
         data['recipe_id'] = recipeId;
       }
@@ -139,32 +158,42 @@ class FavoriteRecipesService {
       await DatabaseServiceCore.clearCache(_CACHE_KEY);
 
       return FavoriteRecipe.fromJson(row);
+      
     } catch (e) {
       final errorStr = e.toString().toLowerCase();
       
-      // 🔥 IMPROVED: Better error messages for different constraint violations
+      // ✅ IMPROVED: Detect various constraint violation patterns
       if (errorStr.contains('duplicate key') || 
           errorStr.contains('already exists') ||
-          errorStr.contains('23505')) {
+          errorStr.contains('unique constraint') ||
+          errorStr.contains('23505')) { // PostgreSQL unique violation code
         
-        if (errorStr.contains('user_id_key')) {
-          // This means the database has the wrong constraint!
+        // ✅ Check if it's a database configuration issue
+        if (errorStr.contains('user_id_key') || 
+            errorStr.contains('favorite_recipes_user_id_key')) {
           throw Exception(
-            'Database configuration error: Please contact support. '
-            '(Only one favorite allowed per user - this should not happen)'
+            'Database configuration error detected. '
+            'The unique constraint is incorrectly set on user_id alone. '
+            'Required fix: Run SQL migration to update constraint to (user_id, recipe_id) or (user_id, recipe_name).'
           );
-        } else {
-          // Normal duplicate - recipe already favorited
-          throw Exception('This recipe is already in your favorites!');
         }
+        
+        // Normal duplicate - recipe already favorited
+        throw Exception('This recipe is already in your favorites!');
       }
       
-      // Preserve other error messages
+      // ✅ Preserve specific error messages
       if (errorStr.contains('already in your favorites')) {
         rethrow;
       }
       
-      throw Exception('Failed to add favorite recipe: $e');
+      if (errorStr.contains('recipe name cannot be empty')) {
+        rethrow;
+      }
+      
+      // Generic database error
+      AppConfig.debugPrint('❌ Database error adding favorite: $e');
+      throw Exception('Failed to add favorite recipe. Please try again.');
     }
   }
 
@@ -180,17 +209,22 @@ class FavoriteRecipesService {
       await DatabaseServiceCore.workerQuery(
         action: 'delete',
         table: 'favorite_recipes',
-        filters: {'id': recipeId},
+        filters: {
+          'id': recipeId,
+          'user_id': AuthService.currentUserId!, // ✅ Added user_id check for security
+        },
       );
 
       await DatabaseServiceCore.clearCache(_CACHE_KEY);
+      
     } catch (e) {
-      throw Exception('Failed to remove favorite recipe: $e');
+      AppConfig.debugPrint('❌ Error removing favorite: $e');
+      throw Exception('Failed to remove favorite recipe. Please try again.');
     }
   }
 
   // --------------------------------------------------
-  // ⭐ IMPROVED: CHECK IF FAVORITED (supports both recipe_id and name)
+  // ✅ IMPROVED: CHECK IF FAVORITED (supports both recipe_id and name)
   // --------------------------------------------------
   static Future<bool> isRecipeFavorited({
     int? recipeId,
@@ -200,32 +234,21 @@ class FavoriteRecipesService {
     if (userId == null) return false;
 
     try {
-      Map<String, dynamic> filters = {'user_id': userId};
-
-      if (recipeId != null) {
-        filters['recipe_id'] = recipeId;
-      } else if (recipeName != null) {
-        filters['recipe_name'] = recipeName;
-      } else {
-        return false;
-      }
-
-      final response = await DatabaseServiceCore.workerQuery(
-        action: 'select',
-        table: 'favorite_recipes',
-        columns: ['id'],
-        filters: filters,
-        limit: 1,
+      final existing = await findExistingFavorite(
+        recipeId: recipeId,
+        recipeName: recipeName,
       );
-
-      return response != null && (response as List).isNotEmpty;
-    } catch (_) {
+      
+      return existing != null;
+      
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Error checking if favorited: $e');
       return false;
     }
   }
 
   // --------------------------------------------------
-  // ⭐ NEW: BULK CHECK FAVORITES (efficient for lists)
+  // ✅ NEW: BULK CHECK FAVORITES (efficient for lists)
   // --------------------------------------------------
   static Future<Set<String>> getFavoritedRecipeNames() async {
     final userId = AuthService.currentUserId;
@@ -244,9 +267,62 @@ class FavoriteRecipesService {
       return (response as List)
           .map((e) => e['recipe_name'] as String)
           .toSet();
+          
     } catch (e) {
-      print('⚠️ Error loading favorited recipe names: $e');
+      AppConfig.debugPrint('⚠️ Error loading favorited recipe names: $e');
       return {};
+    }
+  }
+
+  // --------------------------------------------------
+  // ✅ NEW: BULK CHECK BY IDs (for recipe_master integration)
+  // --------------------------------------------------
+  static Future<Set<int>> getFavoritedRecipeIds() async {
+    final userId = AuthService.currentUserId;
+    if (userId == null) return {};
+
+    try {
+      final response = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'favorite_recipes',
+        columns: ['recipe_id'],
+        filters: {'user_id': userId},
+      );
+
+      if (response == null) return {};
+
+      return (response as List)
+          .where((e) => e['recipe_id'] != null)
+          .map((e) => e['recipe_id'] as int)
+          .toSet();
+          
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Error loading favorited recipe IDs: $e');
+      return {};
+    }
+  }
+
+  // --------------------------------------------------
+  // ✅ NEW: CLEAR ALL FAVORITES (useful for testing/reset)
+  // --------------------------------------------------
+  static Future<void> clearAllFavorites() async {
+    final userId = AuthService.currentUserId;
+    if (userId == null) {
+      throw Exception('Please sign in to continue');
+    }
+
+    try {
+      await DatabaseServiceCore.workerQuery(
+        action: 'delete',
+        table: 'favorite_recipes',
+        filters: {'user_id': userId},
+      );
+
+      await DatabaseServiceCore.clearCache(_CACHE_KEY);
+      
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error clearing favorites: $e');
+      throw Exception('Failed to clear favorites. Please try again.');
     }
   }
 }

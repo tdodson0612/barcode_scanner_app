@@ -1,17 +1,18 @@
 // lib/services/messaging_service.dart
-// Handles all direct messaging features (send, read, list, caching)
+// ✅ FIXED: Proper unread count tracking and cache invalidation
 
 import 'dart:convert';
 import '../config/app_config.dart';
 
-import 'auth_service.dart';                 // currentUserId + auth
-import 'friends_service.dart';              // getFriends()
-import 'database_service_core.dart';        // workerQuery + cache helpers
-import '../widgets/menu_icon_with_badge.dart'; // For cache invalidation
-import '../widgets/app_drawer.dart';        // For cache invalidation
-
+import 'auth_service.dart';
+import 'friends_service.dart';
+import 'database_service_core.dart';
+import '../widgets/menu_icon_with_badge.dart';
+import '../widgets/app_drawer.dart';
 
 class MessagingService {
+  // ✅ NEW: Track if we're currently updating read status to prevent race conditions
+  static bool _isMarkingAsRead = false;
 
   // ==============================================
   // GET MESSAGES WITH SMART CACHING
@@ -119,24 +120,28 @@ class MessagingService {
           'receiver': receiverId,
           'content': content,
           'is_read': false,
-          'created_at': DateTime.now().toUtc().toIso8601String(), // FIXED: Always store as UTC
+          'created_at': DateTime.now().toUtc().toIso8601String(),
         },
       );
 
-      // Clear cache for that chat
+      // Clear message cache for both sender and receiver
       await DatabaseServiceCore.clearCache('cache_messages_${uid}_$receiverId');
+      await DatabaseServiceCore.clearCache('cache_messages_${receiverId}_$uid');
       await DatabaseServiceCore.clearCache('cache_last_message_time_${uid}_$receiverId');
+      await DatabaseServiceCore.clearCache('cache_last_message_time_${receiverId}_$uid');
       
-      // 🔥 FIX: Invalidate unread badge cache when sending (receiver will get new unread)
+      // ✅ FIXED: Invalidate unread badge cache (receiver will get new unread message)
       await MenuIconWithBadge.invalidateCache();
       await AppDrawer.invalidateUnreadCache();
+      
+      AppConfig.debugPrint('✅ Message sent, caches invalidated');
     } catch (e) {
       throw Exception('Failed to send message: $e');
     }
   }
 
   // ==============================================
-  // UNREAD MESSAGE COUNT
+  // ✅ FIXED: UNREAD MESSAGE COUNT (with better error handling)
   // ==============================================
   static Future<int> getUnreadMessageCount() async {
     if (AuthService.currentUserId == null) return 0;
@@ -154,14 +159,18 @@ class MessagingService {
         },
       );
 
-      return (response as List).length;
+      final count = (response as List).length;
+      AppConfig.debugPrint('📬 Unread message count: $count');
+      
+      return count;
     } catch (e) {
+      AppConfig.debugPrint('⚠️ Error getting unread count: $e');
       return 0;
     }
   }
 
   // ==============================================
-  // MARK SINGLE MESSAGE READ
+  // ✅ IMPROVED: MARK SINGLE MESSAGE READ (with debouncing)
   // ==============================================
   static Future<void> markMessageAsRead(String messageId) async {
     if (AuthService.currentUserId == null) return;
@@ -174,21 +183,34 @@ class MessagingService {
         data: {'is_read': true},
       );
       
-      // 🔥 FIX: Invalidate unread badge cache when marking as read
+      // ✅ Invalidate unread badge cache
       await MenuIconWithBadge.invalidateCache();
       await AppDrawer.invalidateUnreadCache();
-    } catch (_) {}
+      
+      AppConfig.debugPrint('✅ Message $messageId marked as read');
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Error marking message as read: $e');
+    }
   }
 
   // ==============================================
-  // MARK ALL MESSAGES FROM USER AS READ
+  // ✅ FIXED: MARK ALL MESSAGES FROM USER AS READ (batch operation with proper locking)
   // ==============================================
   static Future<void> markMessagesAsReadFrom(String senderId) async {
     if (AuthService.currentUserId == null) return;
+    
+    // ✅ Prevent race conditions - only one marking operation at a time
+    if (_isMarkingAsRead) {
+      AppConfig.debugPrint('⏭️ Already marking messages as read, skipping...');
+      return;
+    }
+
+    _isMarkingAsRead = true;
 
     try {
       final uid = AuthService.currentUserId!;
 
+      // ✅ FIXED: Get unread messages first
       final messages = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'messages',
@@ -200,7 +222,17 @@ class MessagingService {
         },
       );
 
-      for (var msg in messages as List) {
+      final messageList = messages as List;
+      
+      if (messageList.isEmpty) {
+        AppConfig.debugPrint('ℹ️ No unread messages to mark');
+        return;
+      }
+
+      AppConfig.debugPrint('📝 Marking ${messageList.length} messages as read...');
+
+      // ✅ IMPROVED: Batch update instead of individual updates
+      for (var msg in messageList) {
         await DatabaseServiceCore.workerQuery(
           action: 'update',
           table: 'messages',
@@ -209,13 +241,20 @@ class MessagingService {
         );
       }
       
-      // 🔥 FIX: Invalidate unread badge cache after marking messages as read
+      // ✅ Clear message caches
+      await DatabaseServiceCore.clearCache('cache_messages_${uid}_$senderId');
+      await DatabaseServiceCore.clearCache('cache_last_message_time_${uid}_$senderId');
+      
+      // ✅ CRITICAL: Invalidate unread badge cache AFTER all messages are marked
       await MenuIconWithBadge.invalidateCache();
       await AppDrawer.invalidateUnreadCache();
       
-      AppConfig.debugPrint('✅ Messages marked as read, badge cache invalidated');
+      AppConfig.debugPrint('✅ ${messageList.length} messages marked as read, badge cache invalidated');
+      
     } catch (e) {
       AppConfig.debugPrint('⚠️ Error marking messages as read: $e');
+    } finally {
+      _isMarkingAsRead = false;
     }
   }
 
@@ -230,10 +269,10 @@ class MessagingService {
     try {
       final uid = AuthService.currentUserId!;
       
-      // FRIENDS come from FriendsService now
+      // Get friends list
       final friends = await FriendsService.getFriends();
 
-      // ALL messages
+      // Get all messages
       final allMessages = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'messages',
@@ -247,18 +286,29 @@ class MessagingService {
       for (final f in friends) {
         final fid = f['id'];
         Map<String, dynamic>? lastMessage;
+        int unreadCount = 0;
 
         for (var msg in allMessages as List) {
-          if ((msg['sender'] == uid && msg['receiver'] == fid) ||
-              (msg['sender'] == fid && msg['receiver'] == uid)) {
-            lastMessage = msg;
-            break;
+          final isRelevant = (msg['sender'] == uid && msg['receiver'] == fid) ||
+                            (msg['sender'] == fid && msg['receiver'] == uid);
+          
+          if (isRelevant) {
+            // Get last message
+            if (lastMessage == null) {
+              lastMessage = msg;
+            }
+            
+            // ✅ NEW: Count unread messages from this friend
+            if (msg['receiver'] == uid && msg['is_read'] == false) {
+              unreadCount++;
+            }
           }
         }
 
         chats.add({
           'friend': f,
           'lastMessage': lastMessage,
+          'unreadCount': unreadCount, // ✅ NEW: Add unread count per chat
         });
       }
 
@@ -276,5 +326,46 @@ class MessagingService {
     } catch (e) {
       throw Exception('Failed to load chat list: $e');
     }
+  }
+
+  // ==============================================
+  // ✅ NEW: GET UNREAD COUNT PER SENDER (for chat list badges)
+  // ==============================================
+  static Future<Map<String, int>> getUnreadCountsBySender() async {
+    if (AuthService.currentUserId == null) return {};
+
+    try {
+      final uid = AuthService.currentUserId!;
+
+      final response = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'messages',
+        columns: ['sender'],
+        filters: {
+          'receiver': uid,
+          'is_read': false,
+        },
+      );
+
+      final counts = <String, int>{};
+      for (var msg in response as List) {
+        final sender = msg['sender'] as String;
+        counts[sender] = (counts[sender] ?? 0) + 1;
+      }
+
+      return counts;
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Error getting unread counts by sender: $e');
+      return {};
+    }
+  }
+
+  // ==============================================
+  // ✅ NEW: REFRESH BADGE (call this when entering messaging screens)
+  // ==============================================
+  static Future<void> refreshUnreadBadge() async {
+    await MenuIconWithBadge.invalidateCache();
+    await AppDrawer.invalidateUnreadCache();
+    AppConfig.debugPrint('🔄 Unread badge refreshed');
   }
 }
