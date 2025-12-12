@@ -32,8 +32,19 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
   @override
   void initState() {
     super.initState();
+    // Initialize with passed recipes, but always reload from database/cache
     _favoriteRecipes = List.from(widget.favoriteRecipes);
-    _loadFavoriteRecipes();
+    // Force immediate load to ensure we have latest data
+    _loadFavoriteRecipes(forceRefresh: false);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Reload when page becomes visible again (e.g., after navigation)
+    if (mounted && _favoriteRecipes.isEmpty) {
+      _loadFavoriteRecipes(forceRefresh: false);
+    }
   }
 
   // ========== CACHING HELPERS ==========
