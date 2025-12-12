@@ -11,6 +11,8 @@ import 'package:liver_wise/services/submitted_recipes_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart'; 
 import 'dart:convert';
+import '../services/favorite_recipes_service.dart';
+
 
 
 // 🔥 NEW — listens to refresh_profile events
@@ -60,12 +62,15 @@ class _ProfileScreenState extends State<ProfileScreen>
   List<String> _pictures = [];
   bool _isLoadingPictures = false;
   static const int _maxPictures = 20;
-  bool _picturesExpanded = true; // NEW: Controls pictures section expand/collapse
-  static const String _picturesExpandedKey = 'pictures_section_expanded'; // 🔥 ADD THIS LINE
-
+  bool _picturesExpanded = true;
+  static const String _picturesExpandedKey = 'pictures_section_expanded';
 
   List<SubmittedRecipe> _submittedRecipes = [];
   bool _isLoadingRecipes = false;
+
+  // 🔥 NEW: Favorite recipes state
+  int _favoriteRecipesCount = 0;
+  bool _isLoadingFavoritesCount = false;
 
   late final PremiumGateController _premiumController;
   bool _isPremium = false;
@@ -84,6 +89,10 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool get wantKeepAlive => true;
 
   @override
+  // FIND AND REPLACE the entire initState() method (around line 95)
+// Replace from @override to the closing brace }
+
+  @override
   void initState() {
     super.initState();
 
@@ -92,6 +101,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     _loadFriends();
     _loadPictures();
     _loadSubmittedRecipes();
+    _loadFavoriteRecipesCount(); // 🔥 ADD THIS LINE
 
     // 🔥 Listen for background push-triggered profile refreshes
     _profileUpdateSub = profileUpdateStreamController.stream.listen((_) async {
@@ -925,6 +935,35 @@ class _ProfileScreenState extends State<ProfileScreen>
       }
     }
   }
+
+  Future<void> _loadFavoriteRecipesCount() async {
+    if (!mounted) return;
+
+    setState(() {
+      _isLoadingFavoritesCount = true;
+    });
+
+    try {
+      final count = await FavoriteRecipesService.getFavoriteRecipesCount();
+      
+      if (mounted) {
+        setState(() {
+          _favoriteRecipesCount = count;
+          _isLoadingFavoritesCount = false;
+        });
+      }
+    } catch (e) {
+      AppConfig.debugPrint('Error loading favorites count: $e');
+      
+      if (mounted) {
+        setState(() {
+          _favoriteRecipesCount = 0;
+          _isLoadingFavoritesCount = false;
+        });
+      }
+    }
+  }
+
 
   Future<void> _toggleFriendsVisibility(bool isVisible) async {
     try {
@@ -2095,6 +2134,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                 _loadPictures(forceRefresh: true),
                 _loadFriends(forceRefresh: true),
                 _loadProfile(),
+                _loadFavoriteRecipesCount(), 
+
               ]);
             },
             child: SingleChildScrollView(
@@ -2499,8 +2540,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   PremiumGate(
                     feature: PremiumFeature.favoriteRecipes,
                     featureName: 'Favorite Recipes',
-                    featureDescription:
-                        'Save and organize your favorite recipes.',
+                    featureDescription: 'Save and organize your favorite recipes.',
                     showSoftPreview: true,
                     child: _sectionContainer(
                       child: Column(
@@ -2514,47 +2554,59 @@ class _ProfileScreenState extends State<ProfileScreen>
                             ),
                           ),
                           const SizedBox(height: 10),
-                          Text(
-                            widget.favoriteRecipes.isEmpty
-                                ? 'No favorite recipes yet. Start scanning to discover new recipes!'
-                                : '${widget.favoriteRecipes.length} favorite recipes saved',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                          if (widget.favoriteRecipes.isNotEmpty) ...[
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                onPressed: () {
-                                  try {
-                                    Navigator.pushNamed(
-                                        context, '/favorite-recipes');
-                                  } catch (e) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                          content: Text(
-                                              'Favorites page unavailable')),
-                                    );
-                                  }
-                                },
-                                icon: const Icon(Icons.favorite),
-                                label: const Text('View Favorite Recipes'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red,
-                                  foregroundColor: Colors.white,
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 12),
-                                ),
+                          if (_isLoadingFavoritesCount) ...[
+                            const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(12),
+                                child: CircularProgressIndicator(),
                               ),
                             ),
+                          ] else ...[
+                            Text(
+                              _favoriteRecipesCount == 0
+                                  ? 'No favorite recipes yet. Start scanning to discover new recipes!'
+                                  : '$_favoriteRecipesCount favorite ${_favoriteRecipesCount == 1 ? 'recipe' : 'recipes'} saved',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                            if (_favoriteRecipesCount > 0) ...[
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () async {
+                                    try {
+                                      await Navigator.pushNamed(context, '/favorite-recipes');
+                                      // Reload count when returning from favorites page
+                                      if (mounted) {
+                                        await _loadFavoriteRecipesCount();
+                                      }
+                                    } catch (e) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Favorites page unavailable'),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  icon: const Icon(Icons.favorite),
+                                  label: const Text('View Favorite Recipes'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
                         ],
                       ),
                     ),
                   ),
+                  const SizedBox(height: 20),
                   const SizedBox(height: 20),
                   _sectionContainer(
                     child: Column(

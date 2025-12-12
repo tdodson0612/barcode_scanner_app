@@ -8,6 +8,7 @@ import '../models/favorite_recipe.dart';
 import '../widgets/app_drawer.dart';
 import '../services/error_handling_service.dart';
 import '../services/auth_service.dart';
+import '../services/favorite_recipes_service.dart';
 import '../config/app_config.dart';
 
 class FavoriteRecipesPage extends StatefulWidget {
@@ -42,7 +43,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     // Reload when page becomes visible again (e.g., after navigation)
-    if (mounted && _favoriteRecipes.isEmpty) {
+    if (mounted) {
       _loadFavoriteRecipes(forceRefresh: false);
     }
   }

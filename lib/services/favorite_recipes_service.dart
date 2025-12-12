@@ -325,4 +325,19 @@ class FavoriteRecipesService {
       throw Exception('Failed to clear favorites. Please try again.');
     }
   }
+  // --------------------------------------------------
+  // ✅ NEW: GET FAVORITE RECIPES COUNT (for ProfileScreen)
+  // --------------------------------------------------
+  static Future<int> getFavoriteRecipesCount() async {
+    final userId = AuthService.currentUserId;
+    if (userId == null) return 0;
+
+    try {
+      final recipes = await getFavoriteRecipes();
+      return recipes.length;
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Error getting favorite recipes count: $e');
+      return 0;
+    }
+  }
 }
