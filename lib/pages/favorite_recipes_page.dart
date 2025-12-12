@@ -1,4 +1,4 @@
-// lib/pages/favorite_recipes_page.dart - FIXED: Added missing id field
+// lib/pages/favorite_recipes_page.dart - UPDATED: Improved recipe detail dialog
 // UPDATED: Uses Cloudflare Worker for database queries
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -192,7 +192,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         if (mounted) {
           final recipes = data.map((json) {
             return FavoriteRecipe(
-              id: json['id'], // 🔥 FIXED: Keep as int? - no conversion needed
+              id: json['id'],
               userId: json['user_id'] ?? '',
               recipeName: json['title'] ?? '',
               ingredients: json['ingredients'] ?? '',
@@ -236,7 +236,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
       final currentUserId = AuthService.currentUserId;
       if (currentUserId == null) return;
 
-      // 🔥 FIXED: Convert recipe.id to String if available, otherwise search
       String? favoriteId = recipe.id?.toString();
       
       if (favoriteId == null) {
@@ -392,102 +391,253 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
+  // ========== IMPROVED RECIPE DETAILS DIALOG ==========
+
   void _showRecipeDetails(FavoriteRecipe recipe) {
+    // Parse ingredients into a list
+    List<String> ingredientsList = recipe.ingredients
+        .split('\n')
+        .where((line) => line.trim().isNotEmpty)
+        .toList();
+    
+    // Parse directions into bullet points
+    List<String> directionsList = recipe.directions
+        .split('\n')
+        .where((line) => line.trim().isNotEmpty)
+        .toList();
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.restaurant, color: Colors.red),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                recipe.recipeName,
-                style: TextStyle(fontSize: 20),
-              ),
-            ),
-          ],
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
         ),
-        content: SingleChildScrollView(
+        child: Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.8,
+            maxWidth: 500,
+          ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (recipe.ingredients.isNotEmpty) ...[
-                Container(
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(8),
+              // Header with recipe name
+              Container(
+                padding: EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(16),
+                    topRight: Radius.circular(16),
                   ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.restaurant, color: Colors.white, size: 28),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        recipe.recipeName,
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close, color: Colors.white),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // Scrollable content
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.all(20),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          Icon(Icons.list_alt, size: 18, color: Colors.orange.shade700),
-                          SizedBox(width: 6),
-                          Text(
-                            'Ingredients',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.orange.shade700,
+                      // Ingredients section
+                      if (ingredientsList.isNotEmpty) ...[
+                        Row(
+                          children: [
+                            Icon(Icons.shopping_cart, 
+                              size: 24, 
+                              color: Colors.orange.shade700
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              'Ingredients',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orange.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 12),
+                        Container(
+                          padding: EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.orange.shade200,
+                              width: 1,
                             ),
                           ),
-                        ],
-                      ),
-                      SizedBox(height: 8),
-                      Text(
-                        recipe.ingredients,
-                        style: TextStyle(height: 1.4),
-                      ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: ingredientsList.map((ingredient) {
+                              return Padding(
+                                padding: EdgeInsets.only(bottom: 8),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '• ',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.orange.shade700,
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Text(
+                                        ingredient.trim(),
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                        SizedBox(height: 24),
+                      ],
+                      
+                      // Directions section
+                      if (directionsList.isNotEmpty) ...[
+                        Row(
+                          children: [
+                            Icon(Icons.format_list_numbered, 
+                              size: 24, 
+                              color: Colors.blue.shade700
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              'Instructions',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 12),
+                        Container(
+                          padding: EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.blue.shade200,
+                              width: 1,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: directionsList.asMap().entries.map((entry) {
+                              int idx = entry.key;
+                              String direction = entry.value;
+                              return Padding(
+                                padding: EdgeInsets.only(bottom: 12),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Container(
+                                      width: 28,
+                                      height: 28,
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade700,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          '${idx + 1}',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        direction.trim(),
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          height: 1.5,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
-                SizedBox(height: 16),
-              ],
-              if (recipe.directions.isNotEmpty) ...[
-                Container(
-                  padding: EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.description, size: 18, color: Colors.blue.shade700),
-                          SizedBox(width: 6),
-                          Text(
-                            'Directions',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue.shade700,
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 8),
-                      Text(
-                        recipe.directions,
-                        style: TextStyle(height: 1.4),
-                      ),
-                    ],
+              ),
+              
+              // Bottom action button
+              Container(
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(16),
+                    bottomRight: Radius.circular(16),
                   ),
                 ),
-              ],
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: Text(
+                      'Close',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
-        actions: [
-          TextButton.icon(
-            onPressed: () => Navigator.pop(context),
-            icon: Icon(Icons.close),
-            label: Text('Close'),
-          ),
-        ],
       ),
     );
   }
