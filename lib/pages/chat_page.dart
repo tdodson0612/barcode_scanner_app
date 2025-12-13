@@ -55,6 +55,11 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _markMessagesAsRead() async {
     try {
       await MessagingService.markMessagesAsReadFrom(widget.friendId);
+      
+      // ✅ CRITICAL FIX: Invalidate badge cache immediately
+      await MenuIconWithBadge.invalidateCache();
+      await AppDrawer.invalidateUnreadCache();
+      
       print('✅ Messages marked as read, badge should update');
     } catch (e) {
       print('⚠️ Error marking messages as read: $e');
@@ -63,6 +68,8 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    // ✅ CRITICAL FIX: Final refresh when leaving chat
+    MessagingService.refreshUnreadBadge();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -195,6 +202,10 @@ class _ChatPageState extends State<ChatPage> {
     try {
       await MessagingService.sendMessage(widget.friendId, content);
       
+      // ✅ CRITICAL FIX: Refresh badge after sending
+      await MenuIconWithBadge.invalidateCache();
+      await AppDrawer.invalidateUnreadCache();
+      
       if (mounted) {
         // Reload messages to get the actual message with proper ID
         await _loadMessages();
@@ -246,9 +257,6 @@ class _ChatPageState extends State<ChatPage> {
       final localDateTime = utcDateTime.toLocal();
       final now = DateTime.now();
       final difference = now.difference(localDateTime);
-
-      // Debug: Log the conversion
-      print('UTC: $utcDateTime -> Local: $localDateTime (Diff: ${difference.inHours}h)');
 
       if (difference.inDays == 0 && localDateTime.day == now.day) {
         return DateFormat('h:mm a').format(localDateTime);
@@ -390,9 +398,10 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // 🔥 Invalidate badge cache when leaving chat
+        // ✅ CRITICAL FIX: Invalidate badge cache when leaving chat
         await MenuIconWithBadge.invalidateCache();
         await AppDrawer.invalidateUnreadCache();
+        print('✅ Leaving chat, badge cache invalidated');
         return true;
       },
       child: Scaffold(

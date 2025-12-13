@@ -22,6 +22,19 @@ subprojects {
     }
 }
 
+// ⭐ REQUIRED FIX FOR OLD PLUGINS MISSING namespace (AGP 8+) ⭐
+// This safely injects a namespace ONLY if the plugin forgot to define one.
+// Prevents build failures for legacy plugins like google_mlkit_barcode_scanning 0.7.0
+subprojects {
+    plugins.withId("com.android.library") {
+        extensions.configure<com.android.build.gradle.LibraryExtension>("android") {
+            if (namespace == null) {
+                namespace = "com.temp.${project.name.replace("-", "_")}"
+            }
+        }
+    }
+}
+
 // ---- YOUR ORIGINAL BUILD DIR OVERRIDES ----
 val newBuildDir: Directory = rootProject.layout.buildDirectory.dir("../../build").get()
 rootProject.layout.buildDirectory.value(newBuildDir)

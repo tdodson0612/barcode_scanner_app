@@ -1,4 +1,4 @@
-// lib/pages/messages_page.dart - OPTIMIZED: Aggressive caching for chats and friend requests
+// lib/pages/messages_page.dart - FIXED: Badge refresh on page load
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/friends_service.dart';
 import 'package:liver_wise/services/messaging_service.dart';
@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../services/database_service_core.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/menu_icon_with_badge.dart'; // ✅ ADD THIS IMPORT
 import 'chat_page.dart';
 import 'search_users_page.dart';
 
@@ -27,13 +28,19 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
   bool _isLoadingRequests = true;
 
   // Cache configuration
-  static const Duration _chatsCacheDuration = Duration(minutes: 1); // Chats change frequently
-  static const Duration _requestsCacheDuration = Duration(minutes: 2); // Requests change less often
+  static const Duration _chatsCacheDuration = Duration(minutes: 1);
+  static const Duration _requestsCacheDuration = Duration(minutes: 2);
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    
+    // ✅ CRITICAL FIX: Refresh badge when entering messages page
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await MessagingService.refreshUnreadBadge();
+    });
+    
     _loadData();
   }
 
@@ -476,31 +483,68 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
           final chat = _chats[index];
           final friend = chat['friend'];
           final lastMessage = chat['lastMessage'];
+          final unreadCount = chat['unreadCount'] ?? 0; // ✅ NEW: Get unread count per chat
           
           return Card(
             margin: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: ListTile(
-              leading: CircleAvatar(
-                backgroundImage: friend['avatar_url'] != null
-                    ? NetworkImage(friend['avatar_url'])
-                    : null,
-                child: friend['avatar_url'] == null
-                    ? Text(
-                        (friend['username'] ?? friend['email'] ?? 'U')[0].toUpperCase(),
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      )
-                    : null,
+              leading: Stack(
+                children: [
+                  CircleAvatar(
+                    backgroundImage: friend['avatar_url'] != null
+                        ? NetworkImage(friend['avatar_url'])
+                        : null,
+                    child: friend['avatar_url'] == null
+                        ? Text(
+                            (friend['username'] ?? friend['email'] ?? 'U')[0].toUpperCase(),
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          )
+                        : null,
+                  ),
+                  // ✅ NEW: Show unread badge on avatar
+                  if (unreadCount > 0)
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      child: Container(
+                        padding: EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        constraints: BoxConstraints(
+                          minWidth: 18,
+                          minHeight: 18,
+                        ),
+                        child: Text(
+                          unreadCount > 9 ? '9+' : '$unreadCount',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
               ),
               title: Text(
                 friend['username'] ?? friend['email'] ?? 'Unknown User',
-                style: TextStyle(fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.w600,
+                ),
               ),
               subtitle: lastMessage != null
                   ? Text(
                       lastMessage['content'] ?? '',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: Colors.grey[600]),
+                      style: TextStyle(
+                        color: unreadCount > 0 ? Colors.black : Colors.grey[600],
+                        fontWeight: unreadCount > 0 ? FontWeight.w600 : FontWeight.normal,
+                      ),
                     )
                   : Text(
                       'No messages yet',
@@ -509,16 +553,42 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                         fontStyle: FontStyle.italic,
                       ),
                     ),
-              trailing: lastMessage != null
-                  ? Text(
+              trailing: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (lastMessage != null)
+                    Text(
                       _formatMessageTime(lastMessage['created_at']),
                       style: TextStyle(
-                        color: Colors.grey[500],
+                        color: unreadCount > 0 ? Colors.blue : Colors.grey[500],
                         fontSize: 12,
+                        fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
                       ),
-                    )
-                  : Icon(Icons.chat_bubble_outline, color: Colors.grey[400]),
+                    ),
+                  if (unreadCount > 0)
+                    Container(
+                      margin: EdgeInsets.only(top: 4),
+                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        unreadCount > 9 ? '9+' : '$unreadCount',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
               onTap: () async {
+                // ✅ CRITICAL: Invalidate badge BEFORE opening chat
+                await MenuIconWithBadge.invalidateCache();
+                
                 final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -529,6 +599,10 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                     ),
                   ),
                 );
+                
+                // ✅ CRITICAL: Refresh badge AFTER returning from chat
+                await MessagingService.refreshUnreadBadge();
+                
                 if (result == true) {
                   // Message sent, invalidate cache and reload
                   await _invalidateChatsCache();

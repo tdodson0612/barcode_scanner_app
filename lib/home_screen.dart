@@ -965,6 +965,7 @@ class _HomePageState extends State<HomePage>
     if (_imageFile != null) {
       try {
         await _imageFile!.delete();
+        AppConfig.debugPrint('🗑️ Deleted old image file');
       } catch (e) {
         AppConfig.debugPrint('⚠️ Could not delete old image: $e');
       }
@@ -985,38 +986,91 @@ class _HomePageState extends State<HomePage>
         });
       }
 
-      // ✅ FIXED: Reduced image quality and size for better memory management
-      final pickedFile = await _picker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 70,        // Reduced from 85
-        maxWidth: 800,            // Reduced from 1024
-        maxHeight: 800,           // Reduced from 1024
-        preferredCameraDevice: CameraDevice.rear,
-      ).timeout(
-        const Duration(seconds: 30),  // ✅ NEW: Add timeout
-        onTimeout: () {
-          throw TimeoutException('Camera operation timed out');
-        },
-      );
+      // ✅ FIXED: More lenient settings + better error handling
+      XFile? pickedFile;
+      
+      try {
+        pickedFile = await _picker.pickImage(
+          source: ImageSource.camera,
+          imageQuality: 65,              // Reduced for faster processing
+          maxWidth: 720,                 // Reduced from 800
+          maxHeight: 720,                // Reduced from 800
+          preferredCameraDevice: CameraDevice.rear,
+        ).timeout(
+          const Duration(seconds: 45),  // ✅ Increased timeout from 30s
+          onTimeout: () {
+            throw TimeoutException('Camera took too long. Please try again.');
+          },
+        );
+      } catch (e) {
+        // ✅ NEW: Handle specific camera errors
+        if (e.toString().contains('camera_access_denied')) {
+          throw Exception('Camera access denied. Please enable camera permissions in Settings.');
+        } else if (e.toString().contains('operation_in_progress')) {
+          throw Exception('Camera is already open. Please close it and try again.');
+        } else if (e is TimeoutException) {
+          throw TimeoutException('Camera operation timed out. Please ensure your device has enough memory and try again.');
+        }
+        rethrow;
+      }
 
-      if (pickedFile != null && mounted && !_isDisposed) {
-        // ✅ NEW: Verify file exists and is readable before setting state
-        final file = File(pickedFile.path);
+      if (pickedFile == null) {
+        // User cancelled - reset to home
+        if (mounted && !_isDisposed) {
+          _resetToHome();
+        }
+        return;
+      }
+
+      // ✅ NEW: Verify file exists and is valid
+      final file = File(pickedFile.path);
+      
+      try {
         final exists = await file.exists();
         
         if (!exists) {
           throw Exception('Captured image file not found');
         }
 
-        // ✅ NEW: Check file size (warn if > 5MB)
+        // ✅ NEW: Check file size
         final fileSize = await file.length();
-        if (fileSize > 5 * 1024 * 1024) {
+        
+        if (fileSize == 0) {
+          throw Exception('Captured image is empty. Please try again.');
+        }
+        
+        if (fileSize > 10 * 1024 * 1024) {
           AppConfig.debugPrint('⚠️ Large image file: ${fileSize / (1024 * 1024)}MB');
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Image is large (${(fileSize / (1024 * 1024)).toStringAsFixed(1)}MB). Processing may take longer.'),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
         }
 
-        setState(() => _imageFile = file);
-        
-        AppConfig.debugPrint('✅ Image captured: ${fileSize / 1024}KB');
+        if (mounted && !_isDisposed) {
+          setState(() => _imageFile = file);
+          
+          AppConfig.debugPrint('✅ Image captured: ${fileSize / 1024}KB');
+          
+          // ✅ NEW: Auto-analyze after successful capture
+          if (mounted) {
+            // Small delay to ensure UI updates
+            await Future.delayed(Duration(milliseconds: 300));
+            _submitPhoto();
+          }
+        }
+      } catch (e) {
+        // Clean up invalid file
+        try {
+          await file.delete();
+        } catch (_) {}
+        rethrow;
       }
 
     } on TimeoutException catch (e) {
@@ -1025,7 +1079,8 @@ class _HomePageState extends State<HomePage>
           context: context,
           error: e,
           category: ErrorHandlingService.imageError,
-          customMessage: 'Camera operation timed out. Please try again.',
+          customMessage: 'Camera operation timed out. Please ensure:\n• Your device has sufficient storage\n• Camera app is not running in background\n• Device has enough memory available',
+          onRetry: _executeTakePhoto,
         );
       }
     } catch (e) {
@@ -1035,15 +1090,13 @@ class _HomePageState extends State<HomePage>
           error: e,
           category: ErrorHandlingService.imageError,
           customMessage: 'Failed to take photo',
+          onRetry: _executeTakePhoto,
         );
       }
     }
   }
 
-  // -----------------------------
-  // PHOTO SUBMISSION & NUTRITION SCAN
-  // -----------------------------
-
+  // ✅ IMPROVED: Better barcode scanning with timeouts
   Future<void> _submitPhoto() async {
     if (_imageFile == null || _isDisposed) return;
 
@@ -1078,23 +1131,83 @@ class _HomePageState extends State<HomePage>
         });
       }
 
-      // ✅ NEW: Add timeout to barcode scanning
-      final nutrition = await BarcodeScannerService.scanAndLookup(_imageFile!.path)
-          .timeout(
-        const Duration(seconds: 15),
-        onTimeout: () {
-          throw TimeoutException('Barcode scanning timed out');
-        },
-      );
+      // ✅ FIXED: Increased timeout and better error handling
+      NutritionInfo? nutrition;
+      
+      try {
+        nutrition = await BarcodeScannerService.scanAndLookup(_imageFile!.path)
+            .timeout(
+          const Duration(seconds: 20),  // ✅ Increased from 15s
+          onTimeout: () {
+            throw TimeoutException('Barcode scanning is taking too long. This may be due to:\n• Poor barcode quality\n• Poor lighting conditions\n• Network connection issues');
+          },
+        );
+      } catch (e) {
+        if (e is TimeoutException) {
+          rethrow;
+        }
+        
+        // Handle specific scanning errors
+        if (e.toString().contains('network')) {
+          throw Exception('Network error while looking up product. Please check your connection and try again.');
+        }
+        
+        throw Exception('Error scanning barcode: ${e.toString()}');
+      }
 
       if (nutrition == null) {
         if (mounted && !_isDisposed) {
           setState(() {
-            _nutritionText =
-                "No barcode found or product not recognized. Please try again.";
+            _nutritionText = "No barcode found or product not recognized.\n\nTips:\n• Ensure barcode is clearly visible\n• Try better lighting\n• Hold camera steady\n• Make sure barcode fills most of frame";
             _showLiverBar = false;
             _isLoading = false;
           });
+          
+          // ✅ NEW: Show helpful error with retry option
+          if (mounted) {
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Row(
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.orange),
+                    SizedBox(width: 8),
+                    Text('Barcode Not Found'),
+                  ],
+                ),
+                content: Text(
+                  'We couldn\'t detect a barcode in this image.\n\n'
+                  'Tips for better results:\n'
+                  '• Ensure barcode is clearly visible and centered\n'
+                  '• Use good lighting (avoid shadows)\n'
+                  '• Hold camera steady when taking photo\n'
+                  '• Make sure barcode is not blurry\n'
+                  '• Try holding phone closer or further away'
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _resetToHome();
+                    },
+                    child: Text('Cancel'),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _executeTakePhoto();
+                    },
+                    icon: Icon(Icons.camera_alt),
+                    label: Text('Try Again'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
         }
         return;
       }
@@ -1116,20 +1229,20 @@ class _HomePageState extends State<HomePage>
 
       if (mounted && !_isDisposed) {
         setState(() {
-          _nutritionText = _buildNutritionDisplay(nutrition);
+          _nutritionText = _buildNutritionDisplay(nutrition!);
           _liverHealthScore = score;
           _showLiverBar = true;
           _isLoading = false;
           _currentNutrition = nutrition;
         });
 
-        // ✅ FIXED: Better scan remaining message
+        // ✅ FIXED: Better success message
         String message;
         if (_premiumController.isPremium) {
-          message = 'Analysis successful! You have unlimited scans.';
+          message = '✅ Analysis successful! You have unlimited scans.';
         } else {
           final remaining = _premiumController.remainingScans.clamp(0, 3);
-          message = 'Analysis successful! $remaining scan${remaining == 1 ? '' : 's'} remaining today.';
+          message = '✅ Analysis successful! $remaining scan${remaining == 1 ? '' : 's'} remaining today.';
         }
         
         ErrorHandlingService.showSuccess(context, message);
@@ -1147,14 +1260,14 @@ class _HomePageState extends State<HomePage>
           context: context,
           error: e,
           category: ErrorHandlingService.scanError,
-          customMessage: 'Scanning operation timed out',
+          customMessage: e.message ?? 'Scanning operation timed out',
           onRetry: _submitPhoto,
         );
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _nutritionText = "Error processing image: ${e.toString()}";
+          _nutritionText = "Error: ${e.toString()}";
           _showLiverBar = false;
           _isLoading = false;
         });
@@ -1470,227 +1583,352 @@ class _HomePageState extends State<HomePage>
   // INITIAL HOME VIEW
   // -----------------------------------------------------
   
+  // lib/home_screen.dart - BACKGROUND IMAGE FIX
+  // Replace your _buildInitialView() method with this version
+
   Widget _buildInitialView() {
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final isTablet = constraints.maxWidth > 600;
-
-              return Image.asset(
-                isTablet
-                    ? 'assets/backgrounds/ipad_background.png'
-                    : 'assets/backgrounds/home_background.png',
-                fit: BoxFit.fill, // 🔥 CHANGED: from cover to fill (stretches to fit)
-                errorBuilder: (context, error, stackTrace) {
-                  return Container(
-                    color: Colors.green.shade50,
-                    child: Center(
-                      child: Icon(
-                        Icons.image_not_supported,
-                        size: 50,
-                        color: Colors.grey,
-                      ),
-                    ),
-                  );
-                },
-              );
-            },
+    return Container(
+      // ✅ FIXED: Use Container with decoration instead of Stack
+      decoration: BoxDecoration(
+        image: DecorationImage(
+          image: AssetImage(
+            MediaQuery.of(context).size.width > 600
+                ? 'assets/backgrounds/ipad_background.png'
+                : 'assets/backgrounds/home_background.png',
           ),
+          fit: BoxFit.cover, // ✅ This ensures single image stretched to fill
         ),
-
-        // MAIN CONTENT
-        SingleChildScrollView(
-          padding: EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Container(
-                padding: EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.white.withAlpha((0.9 * 255).toInt()),
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: Column(
-                  children: [
-                    Icon(Icons.scanner, size: 48, color: Colors.green),
-                    SizedBox(height: 12),
-                    Text(
-                      'Welcome to Liver Food Scanner',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    SizedBox(height: 8),
-                    Text(
-                      'Scan products to discover amazing recipes and get nutrition insights!',
-                      style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
+      ),
+      child: SingleChildScrollView(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Container(
+              padding: EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                borderRadius: BorderRadius.circular(15),
               ),
-// Add this code in _buildInitialView() where it says:
-// SizedBox(height: 30),
-// 
-// // SCAN BUTTON SECTION ...
-// // (unchanged — preserving your functionality)
-
-              SizedBox(height: 30),
-
-              // SCAN BUTTON SECTION
-              Container(
-                padding: EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white.withAlpha((0.95 * 255).toInt()),
-                  borderRadius: BorderRadius.circular(15),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 10,
-                      offset: Offset(0, 4),
+              child: Column(
+                children: [
+                  Icon(Icons.scanner, size: 48, color: Colors.green),
+                  SizedBox(height: 12),
+                  Text(
+                    'Welcome to Liver Food Scanner',
+                    style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
                     ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    // Scan Status Display
-                    if (!_isPremium)
-                      Container(
-                        padding: EdgeInsets.all(12),
-                        decoration: BoxDecoration(
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Scan products to discover amazing recipes and get nutrition insights!',
+                    style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+
+            SizedBox(height: 30),
+
+            // SCAN BUTTON SECTION
+            Container(
+              padding: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha((0.95 * 255).toInt()),
+                borderRadius: BorderRadius.circular(15),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  // Scan Status Display
+                  if (!_isPremium)
+                    Container(
+                      padding: EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _hasUsedAllFreeScans
+                            ? Colors.red.shade50
+                            : Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
                           color: _hasUsedAllFreeScans
-                              ? Colors.red.shade50
-                              : Colors.blue.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: _hasUsedAllFreeScans
-                                ? Colors.red.shade200
-                                : Colors.blue.shade200,
-                          ),
+                              ? Colors.red.shade200
+                              : Colors.blue.shade200,
                         ),
-                        child: Row(
-                          children: [
-                            Icon(
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _hasUsedAllFreeScans
+                                ? Icons.warning_rounded
+                                : Icons.info_outline,
+                            color: _hasUsedAllFreeScans
+                                ? Colors.red.shade700
+                                : Colors.blue.shade700,
+                          ),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
                               _hasUsedAllFreeScans
-                                  ? Icons.warning_rounded
-                                  : Icons.info_outline,
-                              color: _hasUsedAllFreeScans
-                                  ? Colors.red.shade700
-                                  : Colors.blue.shade700,
-                            ),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                _hasUsedAllFreeScans
-                                    ? 'Daily free scans used. Upgrade for unlimited!'
-                                    : '$_remainingScans free scan${_remainingScans == 1 ? '' : 's'} remaining today',
-                                style: TextStyle(
-                                  color: _hasUsedAllFreeScans
-                                      ? Colors.red.shade900
-                                      : Colors.blue.shade900,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                                  ? 'Daily free scans used. Upgrade for unlimited!'
+                                  : '$_remainingScans free scan${_remainingScans == 1 ? '' : 's'} remaining today',
+                              style: TextStyle(
+                                color: _hasUsedAllFreeScans
+                                    ? Colors.red.shade900
+                                    : Colors.blue.shade900,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                          ],
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  SizedBox(height: 16),
+
+                  // Camera Button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton.icon(
+                      onPressed: _isScanning ? null : _takePhoto,
+                      icon: _isScanning
+                          ? SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2.5,
+                              ),
+                            )
+                          : Icon(Icons.camera_alt, size: 28),
+                      label: Text(
+                        _isScanning ? 'Scanning...' : 'Scan Food Product',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green.shade600,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 2,
+                      ),
+                    ),
+                  ),
 
+                  SizedBox(height: 12),
+
+                  // Info text
+                  Text(
+                    'Take a photo of the product barcode',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey.shade600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+
+            SizedBox(height: 30),
+
+            if (_scannedRecipes.isNotEmpty)
+              PremiumGate(
+                feature: PremiumFeature.viewRecipes,
+                featureName: "Recipe Details",
+                featureDescription:
+                    "View full recipe details with ingredients and directions.",
+                child: Column(
+                  children: [
+                    Container(
+                      padding: EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.restaurant, color: Colors.green, size: 24),
+                          SizedBox(width: 12),
+                          Text(
+                            "Recipe Suggestions",
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     SizedBox(height: 16),
 
-                    // Camera Button
-                    SizedBox(
-                      width: double.infinity,
-                      height: 56,
-                      child: ElevatedButton.icon(
-                        onPressed: _isScanning ? null : _takePhoto,
-                        icon: _isScanning
-                            ? SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2.5,
-                                ),
-                              )
-                            : Icon(Icons.camera_alt, size: 28),
-                        label: Text(
-                          _isScanning ? 'Scanning...' : 'Scan Food Product',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green.shade600,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 2,
-                        ),
+                    ..._scannedRecipes
+                        .map((recipe) => _buildScannedRecipeCard(recipe)),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ✅ ALSO FIX: _buildScanningView() - Replace the Stack with Container
+  Widget _buildScanningView() {
+    return Container(
+      // ✅ FIXED: Use Container with decoration instead of Stack
+      decoration: BoxDecoration(
+        image: DecorationImage(
+          image: AssetImage(
+            MediaQuery.of(context).size.width > 600
+                ? 'assets/backgrounds/ipad_background.png'
+                : 'assets/backgrounds/home_background.png',
+          ),
+          fit: BoxFit.cover, // ✅ Single image stretched to fill
+        ),
+      ),
+      child: SingleChildScrollView(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          children: [
+            const SizedBox(height: 20),
+
+            // IMAGE PREVIEW
+            if (_imageFile != null)
+              Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.file(
+                    _imageFile!,
+                    height: 300,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+
+            const SizedBox(height: 20),
+
+            // BUTTON ROW
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _takePhoto,
+                    icon: const Icon(Icons.camera_alt),
+                    label: const Text("Retake"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+
+                  if (_imageFile != null && !_isLoading)
+                    ElevatedButton.icon(
+                      onPressed: _submitPhoto,
+                      icon: const Icon(Icons.send),
+                      label: const Text("Analyze"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
                       ),
                     ),
+                  const SizedBox(width: 8),
 
-                    SizedBox(height: 12),
-
-                    // Info text
-                    Text(
-                      'Take a photo of the product barcode',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey.shade600,
+                  if (_nutritionText.isNotEmpty)
+                    ElevatedButton.icon(
+                      onPressed: _addNutritionToGroceryList,
+                      icon: const Icon(Icons.add_shopping_cart),
+                      label: const Text("Grocery List"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.purple,
+                        foregroundColor: Colors.white,
                       ),
-                      textAlign: TextAlign.center,
                     ),
+                  const SizedBox(width: 8),
+
+                  ElevatedButton.icon(
+                    onPressed: _resetToHome,
+                    icon: const Icon(Icons.home),
+                    label: const Text("Home"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // LOADING
+            if (_isLoading)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Column(
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text("Analyzing nutrition information..."),
                   ],
                 ),
               ),
 
-              SizedBox(height: 30),
-
-              if (_scannedRecipes.isNotEmpty)
-                PremiumGate(
-                  feature: PremiumFeature.viewRecipes,
-                  featureName: "Recipe Details",
-                  featureDescription:
-                      "View full recipe details with ingredients and directions.",
-                  child: Column(
-                    children: [
-                      Container(
-                        padding: EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withAlpha((0.9 * 255).toInt()),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.restaurant, color: Colors.green, size: 24),
-                            SizedBox(width: 12),
-                            Text(
-                              "Recipe Suggestions",
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(height: 16),
-
-                      ..._scannedRecipes
-                          .map((recipe) => _buildScannedRecipeCard(recipe)),
-                    ],
-                  ),
+            // NUTRITION INFO
+            if (_nutritionText.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade700,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-            ],
-          ),
+                child: Text(
+                  _nutritionText,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+
+            const SizedBox(height: 20),
+
+            if (_showLiverBar && _liverHealthScore != null)
+              LiverHealthBar(healthScore: _liverHealthScore!),
+
+            const SizedBox(height: 20),
+
+            _buildNutritionRecipeSuggestions(),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -1979,184 +2217,6 @@ Widget _buildNutritionRecipeSuggestions() {
           ],
         ],
       ),
-    ),
-  );
-}
-
-// ----------------------------------------------------
-// SCANNING VIEW
-// ----------------------------------------------------
-Widget _buildScanningView() {
-  return Container(
-    decoration: BoxDecoration(
-      image: DecorationImage(
-        image: AssetImage(
-          MediaQuery.of(context).size.width > 600
-              ? 'assets/backgrounds/ipad_background.png'
-              : 'assets/backgrounds/home_background.png',
-        ),
-        fit: BoxFit.fill,
-      ),
-    ),
-    child: Stack(
-      children: [
-        // Background Image Error Handling
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final isTablet = constraints.maxWidth > 600;
-
-            return Image.asset(
-              isTablet
-                  ? 'assets/backgrounds/ipad_background.png'
-                  : 'assets/backgrounds/home_background.png',
-              fit: BoxFit.fill,
-              errorBuilder: (context, error, stackTrace) {
-                return Container(
-                  color: Colors.green.shade50,
-                  child: Center(
-                    child: Icon(
-                      Icons.image_not_supported,
-                      size: 50,
-                      color: Colors.grey,
-                    ),
-                  ),
-                );
-              },
-            );
-          },
-        ),
-
-        // MAIN CONTENT
-        SingleChildScrollView(
-          padding: EdgeInsets.all(16),
-          child: Column(
-            children: [
-              const SizedBox(height: 20),
-
-              // IMAGE PREVIEW
-              if (_imageFile != null)
-                Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 8,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(
-                      _imageFile!,
-                      height: 300,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                ),
-
-              const SizedBox(height: 20),
-
-              // BUTTON ROW
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: _takePhoto,
-                      icon: const Icon(Icons.camera_alt),
-                      label: const Text("Retake"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-
-                    if (_imageFile != null && !_isLoading)
-                      ElevatedButton.icon(
-                        onPressed: _submitPhoto,
-                        icon: const Icon(Icons.send),
-                        label: const Text("Analyze"),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                        ),
-                      ),
-                    const SizedBox(width: 8),
-
-                    if (_nutritionText.isNotEmpty)
-                      ElevatedButton.icon(
-                        onPressed: _addNutritionToGroceryList,
-                        icon: const Icon(Icons.add_shopping_cart),
-                        label: const Text("Grocery List"),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.purple,
-                          foregroundColor: Colors.white,
-                        ),
-                      ),
-                    const SizedBox(width: 8),
-
-                    ElevatedButton.icon(
-                      onPressed: _resetToHome,
-                      icon: const Icon(Icons.home),
-                      label: const Text("Home"),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              // LOADING
-              if (_isLoading)
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Column(
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text("Analyzing nutrition information..."),
-                    ],
-                  ),
-                ),
-
-              // NUTRITION INFO
-              if (_nutritionText.isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.green.shade700,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    _nutritionText,
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                ),
-
-              const SizedBox(height: 20),
-
-              if (_showLiverBar && _liverHealthScore != null)
-                LiverHealthBar(healthScore: _liverHealthScore!),
-
-              const SizedBox(height: 20),
-
-              _buildNutritionRecipeSuggestions(),
-            ],
-          ),
-        ),
-      ],
     ),
   );
 }
