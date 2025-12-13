@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import '../widgets/menu_icon_with_badge.dart';
+import '../widgets/app_drawer.dart';
 
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
@@ -386,123 +388,131 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundImage: widget.friendAvatar != null
-                  ? NetworkImage(widget.friendAvatar!)
-                  : null,
-              child: widget.friendAvatar == null
-                  ? Text(
-                      widget.friendName.isNotEmpty
-                          ? widget.friendName[0].toUpperCase()
-                          : 'U',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    )
-                  : null,
-            ),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                widget.friendName,
-                style: TextStyle(fontSize: 18),
-                overflow: TextOverflow.ellipsis,
+    return WillPopScope(
+      onWillPop: () async {
+        // 🔥 Invalidate badge cache when leaving chat
+        await MenuIconWithBadge.invalidateCache();
+        await AppDrawer.invalidateUnreadCache();
+        return true;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundImage: widget.friendAvatar != null
+                    ? NetworkImage(widget.friendAvatar!)
+                    : null,
+                child: widget.friendAvatar == null
+                    ? Text(
+                        widget.friendName.isNotEmpty
+                            ? widget.friendName[0].toUpperCase()
+                            : 'U',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      )
+                    : null,
               ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  widget.friendName,
+                  style: TextStyle(fontSize: 18),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black87,
+          elevation: 1,
+          actions: [
+            IconButton(
+              onPressed: () async {
+                try {
+                  await _loadMessages();
+                  if (mounted) {
+                    ErrorHandlingService.showSuccess(context, 'Messages refreshed');
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    await ErrorHandlingService.handleError(
+                      context: context,
+                      error: e,
+                      category: ErrorHandlingService.databaseError,
+                      showSnackBar: true,
+                      customMessage: 'Failed to refresh messages',
+                    );
+                  }
+                }
+              },
+              icon: Icon(Icons.refresh),
+              tooltip: 'Refresh messages',
             ),
           ],
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-        elevation: 1,
-        actions: [
-          IconButton(
-            onPressed: () async {
-              try {
-                await _loadMessages();
-                if (mounted) {
-                  ErrorHandlingService.showSuccess(context, 'Messages refreshed');
-                }
-              } catch (e) {
-                if (mounted) {
-                  await ErrorHandlingService.handleError(
-                    context: context,
-                    error: e,
-                    category: ErrorHandlingService.databaseError,
-                    showSnackBar: true,
-                    customMessage: 'Failed to refresh messages',
-                  );
-                }
-              }
-            },
-            icon: Icon(Icons.refresh),
-            tooltip: 'Refresh messages',
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _isLoading
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text(
-                          'Loading messages...',
-                          style: TextStyle(color: Colors.grey.shade600),
-                        ),
-                      ],
-                    ),
-                  )
-                : _messages.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.chat_bubble_outline,
-                              size: 64,
-                              color: Colors.grey.shade400,
-                            ),
-                            SizedBox(height: 16),
-                            Text(
-                              'No messages yet',
-                              style: TextStyle(
-                                fontSize: 18,
-                                color: Colors.grey.shade600,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            SizedBox(height: 8),
-                            Text(
-                              'Send a message to start the conversation!',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey.shade500,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
-                      )
-                    : RefreshIndicator(
-                        onRefresh: _loadMessages,
-                        child: ListView.builder(
-                          controller: _scrollController,
-                          itemCount: _messages.length,
-                          itemBuilder: (context, index) {
-                            return _buildMessageBubble(_messages[index]);
-                          },
-                        ),
+        body: Column(
+          children: [
+            Expanded(
+              child: _isLoading
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 16),
+                          Text(
+                            'Loading messages...',
+                            style: TextStyle(color: Colors.grey.shade600),
+                          ),
+                        ],
                       ),
-          ),
-          _buildMessageInput(),
-        ],
+                    )
+                  : _messages.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.chat_bubble_outline,
+                                size: 64,
+                                color: Colors.grey.shade400,
+                              ),
+                              SizedBox(height: 16),
+                              Text(
+                                'No messages yet',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  color: Colors.grey.shade600,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                'Send a message to start the conversation!',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey.shade500,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: _loadMessages,
+                          child: ListView.builder(
+                            controller: _scrollController,
+                            itemCount: _messages.length,
+                            itemBuilder: (context, index) {
+                              return _buildMessageBubble(_messages[index]);
+                            },
+                          ),
+                        ),
+            ),
+            _buildMessageInput(),
+          ],
+        ),
       ),
     );
   }

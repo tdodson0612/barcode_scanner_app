@@ -1482,7 +1482,7 @@ class _HomePageState extends State<HomePage>
                 isTablet
                     ? 'assets/backgrounds/ipad_background.png'
                     : 'assets/backgrounds/home_background.png',
-                fit: BoxFit.cover,
+                fit: BoxFit.fill, // 🔥 CHANGED: from cover to fill (stretches to fit)
                 errorBuilder: (context, error, stackTrace) {
                   return Container(
                     color: Colors.green.shade50,
@@ -1995,7 +1995,7 @@ Widget _buildScanningView() {
               ? 'assets/backgrounds/ipad_background.png'
               : 'assets/backgrounds/home_background.png',
         ),
-        fit: BoxFit.cover,
+        fit: BoxFit.fill,
       ),
     ),
     child: Stack(
@@ -2009,7 +2009,7 @@ Widget _buildScanningView() {
               isTablet
                   ? 'assets/backgrounds/ipad_background.png'
                   : 'assets/backgrounds/home_background.png',
-              fit: BoxFit.cover,
+              fit: BoxFit.fill,
               errorBuilder: (context, error, stackTrace) {
                 return Container(
                   color: Colors.green.shade50,

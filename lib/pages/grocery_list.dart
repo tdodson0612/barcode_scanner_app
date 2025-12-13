@@ -1,4 +1,4 @@
-// lib/pages/grocery_list.dart - FIXED: Uses AuthService + GroceryService
+// lib/pages/grocery_list.dart - UPDATED: Added measurement field (Qty, Measurement, Item)
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -63,17 +63,24 @@ class _GroceryListPageState extends State<GroceryListPage> {
             itemControllers.last['name']!.text.isEmpty) {
           itemControllers.last['name']!.dispose();
           itemControllers.last['quantity']!.dispose();
+          itemControllers.last['measurement']!.dispose();
           itemControllers.removeLast();
         }
         
-        itemControllers.add({
-          'name': TextEditingController(text: item),
-          'quantity': TextEditingController(text: '1'),
-        });
+        // Parse the scanned item to extract quantity, measurement, and name
+        final parsed = _parseItemText(item);
         
         itemControllers.add({
-          'name': TextEditingController(),
+          'quantity': TextEditingController(text: parsed['quantity']!.isEmpty ? '1' : parsed['quantity']),
+          'measurement': TextEditingController(text: parsed['measurement']),
+          'name': TextEditingController(text: parsed['name']),
+        });
+        
+        // Add empty row for next item
+        itemControllers.add({
           'quantity': TextEditingController(),
+          'measurement': TextEditingController(),
+          'name': TextEditingController(),
         });
       });
       
@@ -142,6 +149,41 @@ class _GroceryListPageState extends State<GroceryListPage> {
     }
   }
 
+  // ========== PARSE ITEM TEXT INTO 3 PARTS ==========
+  Map<String, String> _parseItemText(String itemText) {
+    // Expected format: "1 lb Ground Turkey" or "1 x Ground Turkey" or just "Ground Turkey"
+    String quantity = '';
+    String measurement = '';
+    String name = itemText;
+
+    // Try to parse "quantity measurement name" format
+    final parts = itemText.trim().split(RegExp(r'\s+'));
+    
+    if (parts.length >= 3) {
+      // Check if first part is a number
+      if (RegExp(r'^[\d.]+$').hasMatch(parts[0])) {
+        quantity = parts[0];
+        measurement = parts[1];
+        name = parts.sublist(2).join(' ');
+      }
+    } else if (parts.length == 2) {
+      // Check if format is "quantity x name"
+      if (parts[1].toLowerCase() == 'x' || RegExp(r'^[\d.]+$').hasMatch(parts[0])) {
+        final quantityMatch = RegExp(r'^([\d.]+)\s*x?\s*(.+)$').firstMatch(itemText);
+        if (quantityMatch != null) {
+          quantity = quantityMatch.group(1) ?? '';
+          name = quantityMatch.group(2) ?? itemText;
+        }
+      }
+    }
+
+    return {
+      'quantity': quantity,
+      'measurement': measurement,
+      'name': name,
+    };
+  }
+
   // ========== LOAD FUNCTION WITH CACHING ==========
 
   Future<void> _loadGroceryList({bool forceRefresh = false}) async {
@@ -154,35 +196,27 @@ class _GroceryListPageState extends State<GroceryListPage> {
           if (mounted) {
             setState(() {
               itemControllers = cachedItems.map((item) {
-                // Parse quantity from item text
-                final parts = item.item.split(' x ');
-                String itemName;
-                String quantity;
-                
-                if (parts.length == 2) {
-                  quantity = parts[0];
-                  itemName = parts[1];
-                } else {
-                  quantity = '';
-                  itemName = item.item;
-                }
+                final parsed = _parseItemText(item.item);
                 
                 return {
-                  'name': TextEditingController(text: itemName),
-                  'quantity': TextEditingController(text: quantity),
+                  'quantity': TextEditingController(text: parsed['quantity']),
+                  'measurement': TextEditingController(text: parsed['measurement']),
+                  'name': TextEditingController(text: parsed['name']),
                 };
               }).toList();
               
               if (itemControllers.isEmpty) {
                 itemControllers.add({
-                  'name': TextEditingController(),
                   'quantity': TextEditingController(),
+                  'measurement': TextEditingController(),
+                  'name': TextEditingController(),
                 });
               }
               
               itemControllers.add({
-                'name': TextEditingController(),
                 'quantity': TextEditingController(),
+                'measurement': TextEditingController(),
+                'name': TextEditingController(),
               });
             });
           }
@@ -199,34 +233,27 @@ class _GroceryListPageState extends State<GroceryListPage> {
       if (mounted) {
         setState(() {
           itemControllers = groceryItems.map((item) {
-            final parts = item.item.split(' x ');
-            String itemName;
-            String quantity;
-            
-            if (parts.length == 2) {
-              quantity = parts[0];
-              itemName = parts[1];
-            } else {
-              quantity = '';
-              itemName = item.item;
-            }
+            final parsed = _parseItemText(item.item);
             
             return {
-              'name': TextEditingController(text: itemName),
-              'quantity': TextEditingController(text: quantity),
+              'quantity': TextEditingController(text: parsed['quantity']),
+              'measurement': TextEditingController(text: parsed['measurement']),
+              'name': TextEditingController(text: parsed['name']),
             };
           }).toList();
           
           if (itemControllers.isEmpty) {
             itemControllers.add({
-              'name': TextEditingController(),
               'quantity': TextEditingController(),
+              'measurement': TextEditingController(),
+              'name': TextEditingController(),
             });
           }
           
           itemControllers.add({
-            'name': TextEditingController(),
             'quantity': TextEditingController(),
+            'measurement': TextEditingController(),
+            'name': TextEditingController(),
           });
         });
       }
@@ -237,34 +264,27 @@ class _GroceryListPageState extends State<GroceryListPage> {
         if (staleItems != null) {
           setState(() {
             itemControllers = staleItems.map((item) {
-              final parts = item.item.split(' x ');
-              String itemName;
-              String quantity;
-              
-              if (parts.length == 2) {
-                quantity = parts[0];
-                itemName = parts[1];
-              } else {
-                quantity = '';
-                itemName = item.item;
-              }
+              final parsed = _parseItemText(item.item);
               
               return {
-                'name': TextEditingController(text: itemName),
-                'quantity': TextEditingController(text: quantity),
+                'quantity': TextEditingController(text: parsed['quantity']),
+                'measurement': TextEditingController(text: parsed['measurement']),
+                'name': TextEditingController(text: parsed['name']),
               };
             }).toList();
             
             if (itemControllers.isEmpty) {
               itemControllers.add({
-                'name': TextEditingController(),
                 'quantity': TextEditingController(),
+                'measurement': TextEditingController(),
+                'name': TextEditingController(),
               });
             }
             
             itemControllers.add({
-              'name': TextEditingController(),
               'quantity': TextEditingController(),
+              'measurement': TextEditingController(),
+              'name': TextEditingController(),
             });
           });
           return;
@@ -272,8 +292,9 @@ class _GroceryListPageState extends State<GroceryListPage> {
 
         setState(() {
           itemControllers = [{
-            'name': TextEditingController(),
             'quantity': TextEditingController(),
+            'measurement': TextEditingController(),
+            'name': TextEditingController(),
           }];
         });
         ScaffoldMessenger.of(context).showSnackBar(
@@ -291,6 +312,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
     for (var controllers in itemControllers) {
       controllers['name']!.dispose();
       controllers['quantity']!.dispose();
+      controllers['measurement']!.dispose();
     }
     super.dispose();
   }
@@ -298,8 +320,9 @@ class _GroceryListPageState extends State<GroceryListPage> {
   void _addNewItem() {
     setState(() {
       itemControllers.add({
-        'name': TextEditingController(),
         'quantity': TextEditingController(),
+        'measurement': TextEditingController(),
+        'name': TextEditingController(),
       });
     });
   }
@@ -309,6 +332,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
       setState(() {
         itemControllers[index]['name']!.dispose();
         itemControllers[index]['quantity']!.dispose();
+        itemControllers[index]['measurement']!.dispose();
         itemControllers.removeAt(index);
       });
     }
@@ -325,12 +349,15 @@ class _GroceryListPageState extends State<GroceryListPage> {
           .map((controllers) {
             final name = controllers['name']!.text.trim();
             final quantity = controllers['quantity']!.text.trim();
+            final measurement = controllers['measurement']!.text.trim();
             
-            if (quantity.isNotEmpty) {
-              return '$quantity x $name';
-            } else {
-              return name;
-            }
+            // Build item string: "quantity measurement name"
+            List<String> parts = [];
+            if (quantity.isNotEmpty) parts.add(quantity);
+            if (measurement.isNotEmpty) parts.add(measurement);
+            parts.add(name);
+            
+            return parts.join(' ');
           })
           .toList();
           
@@ -390,7 +417,6 @@ class _GroceryListPageState extends State<GroceryListPage> {
       ),
     );
 
-    // Only proceed if user confirmed
     if (confirmed != true) return;
 
     try {
@@ -403,10 +429,12 @@ class _GroceryListPageState extends State<GroceryListPage> {
           for (var controllers in itemControllers) {
             controllers['name']!.dispose();
             controllers['quantity']!.dispose();
+            controllers['measurement']!.dispose();
           }
           itemControllers = [{
-            'name': TextEditingController(),
             'quantity': TextEditingController(),
+            'measurement': TextEditingController(),
+            'name': TextEditingController(),
           }];
         });
         ScaffoldMessenger.of(context).showSnackBar(
@@ -518,6 +546,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                   padding: const EdgeInsets.only(bottom: 12),
                                   child: Row(
                                     children: [
+                                      // Row number
                                       Container(
                                         width: 35,
                                         height: 35,
@@ -542,13 +571,14 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                       ),
                                       const SizedBox(width: 12),
                                       
+                                      // Quantity field
                                       SizedBox(
-                                        width: 60,
+                                        width: 50,
                                         child: TextField(
                                           controller: itemControllers[index]['quantity'],
                                           decoration: InputDecoration(
                                             hintText: 'Qty',
-                                            hintStyle: TextStyle(fontSize: 12),
+                                            hintStyle: TextStyle(fontSize: 11),
                                             border: OutlineInputBorder(
                                               borderRadius: BorderRadius.circular(8),
                                               borderSide: BorderSide(color: Colors.grey.shade300),
@@ -558,7 +588,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                               borderSide: BorderSide(color: Colors.blue, width: 2),
                                             ),
                                             contentPadding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
+                                              horizontal: 6,
                                               vertical: 8,
                                             ),
                                             filled: true,
@@ -568,17 +598,47 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                           inputFormatters: [
                                             FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                                           ],
-                                          style: TextStyle(fontSize: 14),
+                                          style: TextStyle(fontSize: 13),
                                           textAlign: TextAlign.center,
                                         ),
                                       ),
-                                      const SizedBox(width: 8),
+                                      const SizedBox(width: 6),
                                       
+                                      // Measurement field (lb, oz, kg, etc.)
+                                      SizedBox(
+                                        width: 55,
+                                        child: TextField(
+                                          controller: itemControllers[index]['measurement'],
+                                          decoration: InputDecoration(
+                                            hintText: 'Unit',
+                                            hintStyle: TextStyle(fontSize: 11),
+                                            border: OutlineInputBorder(
+                                              borderRadius: BorderRadius.circular(8),
+                                              borderSide: BorderSide(color: Colors.grey.shade300),
+                                            ),
+                                            focusedBorder: OutlineInputBorder(
+                                              borderRadius: BorderRadius.circular(8),
+                                              borderSide: BorderSide(color: Colors.blue, width: 2),
+                                            ),
+                                            contentPadding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 8,
+                                            ),
+                                            filled: true,
+                                            fillColor: Colors.grey.shade50,
+                                          ),
+                                          style: TextStyle(fontSize: 13),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      
+                                      // Item name field
                                       Expanded(
                                         child: TextField(
                                           controller: itemControllers[index]['name'],
                                           decoration: InputDecoration(
-                                            hintText: 'Enter grocery item...',
+                                            hintText: 'Enter item name...',
                                             border: OutlineInputBorder(
                                               borderRadius: BorderRadius.circular(8),
                                               borderSide: BorderSide(color: Colors.grey.shade300),
@@ -602,14 +662,18 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                         ),
                                       ),
                                       
+                                      // Remove button
                                       if (itemControllers.length > 1)
                                         Padding(
-                                          padding: const EdgeInsets.only(left: 8),
+                                          padding: const EdgeInsets.only(left: 6),
                                           child: IconButton(
                                             icon: Icon(
                                               Icons.remove_circle,
                                               color: Colors.red.shade400,
+                                              size: 22,
                                             ),
+                                            padding: EdgeInsets.zero,
+                                            constraints: BoxConstraints(),
                                             onPressed: () => _removeItem(index),
                                           ),
                                         ),

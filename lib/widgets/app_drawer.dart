@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../controllers/premium_gate_controller.dart';
 import '../services/auth_service.dart';
 import '../services/database_service_core.dart';
+import '../widgets/menu_icon_with_badge.dart';
+import '../widgets/menu_icon_with_badge.dart';
 
 class AppDrawer extends StatefulWidget {
   final String currentPage;
@@ -288,14 +290,16 @@ class _AppDrawerState extends State<AppDrawer> {
               selected: widget.currentPage == 'messages',
               onTap: () async {
                 Navigator.pop(context);
-                // Invalidate cache when user opens messages
+                
+                // 🔥 FIX: Invalidate BOTH caches when user opens messages
                 await AppDrawer.invalidateUnreadCache();
+                await MenuIconWithBadge.invalidateCache();
+                
                 if (widget.currentPage != 'messages') {
                   Navigator.pushNamed(context, '/messages');
                 }
               },
             ),
-            
             ListTile(
               leading: Icon(
                 Icons.person_search,
