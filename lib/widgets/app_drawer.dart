@@ -351,6 +351,12 @@ class _AppDrawerState extends State<AppDrawer> {
                   Navigator.pushNamed(context, '/grocery-list');
                 },
               ),
+
+              ListTile(
+                leading: Icon(Icons.bookmark, color: Colors.green),
+                title: Text("Saved Ingredients"),
+                onTap: () => Navigator.pushNamed(context, '/saved-ingredients'),
+              ),
               
               ListTile(
                 leading: Icon(Icons.add_circle),

@@ -11,7 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:liver_wise/services/grocery_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:liver_wise/widgets/add_to_cookbook_button.dart';
-// ✅ FIXED: Changed from ../widgets/ to package imports
+import 'package:liver_wise/models/nutrition_info.dart';
 import 'package:liver_wise/widgets/premium_gate.dart';
 import 'package:liver_wise/controllers/premium_gate_controller.dart';
 import 'package:liver_wise/liverhealthbar.dart';
@@ -25,40 +25,6 @@ import 'package:liver_wise/config/app_config.dart';
 import 'package:liver_wise/widgets/menu_icon_with_badge.dart';
 import 'package:liver_wise/services/database_service_core.dart';
 import 'package:liver_wise/services/favorite_recipes_service.dart';
-
-class NutritionInfo {
-  final String productName;
-  final double fat;
-  final double sodium;
-  final double sugar;
-  final double calories;
-
-  NutritionInfo({
-    required this.productName,
-    required this.fat,
-    required this.sodium,
-    required this.sugar,
-    required this.calories,
-  });
-
-  factory NutritionInfo.fromJson(Map<String, dynamic> json) {
-    final product = json['product'] ?? {};
-    final nutriments = product['nutriments'] ?? {};
-
-    double parseDouble(dynamic value) {
-      if (value == null) return 0.0;
-      return double.tryParse(value.toString()) ?? 0.0;
-    }
-
-    return NutritionInfo(
-      productName: product['product_name'] ?? 'Unknown product',
-      calories: parseDouble(nutriments['energy-kcal_100g']),
-      fat: parseDouble(nutriments['fat_100g']),
-      sugar: parseDouble(nutriments['sugars_100g']),
-      sodium: parseDouble(nutriments['sodium_100g']),
-    );
-  }
-}
 
 class Recipe {
   final String title;
@@ -93,31 +59,7 @@ class Recipe {
       );
 }
 
-class LiverHealthCalculator {
-  static const double fatMax = 20.0;
-  static const double sodiumMax = 500.0;
-  static const double sugarMax = 20.0;
-  static const double calMax = 400.0;
 
-  static int calculate({
-    required double fat,
-    required double sodium,
-    required double sugar,
-    required double calories,
-  }) {
-    final fatScore = 1 - (fat / fatMax).clamp(0, 1);
-    final sodiumScore = 1 - (sodium / sodiumMax).clamp(0, 1);
-    final sugarScore = 1 - (sugar / sugarMax).clamp(0, 1);
-    final calScore = 1 - (calories / calMax).clamp(0, 1);
-
-    final finalScore = (fatScore * 0.3) +
-        (sodiumScore * 0.25) +
-        (sugarScore * 0.25) +
-        (calScore * 0.2);
-
-    return (finalScore * 100).round().clamp(0, 100);
-  }
-}
 
 class RecipeGenerator {
   /// Search recipes by one or more keywords (button selections).
@@ -1598,7 +1540,6 @@ class _HomePageState extends State<HomePage>
 
   Widget _buildInitialView() {
     return Container(
-      // ✅ FIXED: Use Container with decoration instead of Stack
       decoration: BoxDecoration(
         image: DecorationImage(
           image: AssetImage(
@@ -1606,24 +1547,27 @@ class _HomePageState extends State<HomePage>
                 ? 'assets/backgrounds/ipad_background.png'
                 : 'assets/backgrounds/home_background.png',
           ),
-          fit: BoxFit.cover, // ✅ This ensures single image stretched to fill
+          fit: BoxFit.cover,
         ),
       ),
       child: SingleChildScrollView(
-        padding: EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // -----------------------------------------
+            // WELCOME CARD
+            // -----------------------------------------
             Container(
-              padding: EdgeInsets.all(20),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 color: Colors.white.withAlpha((0.9 * 255).toInt()),
                 borderRadius: BorderRadius.circular(15),
               ),
               child: Column(
                 children: [
-                  Icon(Icons.scanner, size: 48, color: Colors.green),
-                  SizedBox(height: 12),
-                  Text(
+                  const Icon(Icons.scanner, size: 48, color: Colors.green),
+                  const SizedBox(height: 12),
+                  const Text(
                     'Welcome to Liver Food Scanner',
                     style: TextStyle(
                       fontSize: 24,
@@ -1631,21 +1575,26 @@ class _HomePageState extends State<HomePage>
                       color: Colors.black87,
                     ),
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
-                    'Scan products to discover amazing recipes and get nutrition insights!',
-                    style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+                    'Scan products, look up foods, and get nutrition insights!',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey.shade600,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                 ],
               ),
             ),
 
-            SizedBox(height: 30),
+            const SizedBox(height: 30),
 
-            // SCAN BUTTON SECTION
+            // -----------------------------------------
+            // MAIN ACTION CARD (SCAN + BUTTONS)
+            // -----------------------------------------
             Container(
-              padding: EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.white.withAlpha((0.95 * 255).toInt()),
                 borderRadius: BorderRadius.circular(15),
@@ -1653,16 +1602,16 @@ class _HomePageState extends State<HomePage>
                   BoxShadow(
                     color: Colors.black.withOpacity(0.1),
                     blurRadius: 10,
-                    offset: Offset(0, 4),
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),
               child: Column(
                 children: [
-                  // Scan Status Display
+                  // Premium Scan Status
                   if (!_isPremium)
                     Container(
-                      padding: EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: _hasUsedAllFreeScans
                             ? Colors.red.shade50
@@ -1684,7 +1633,7 @@ class _HomePageState extends State<HomePage>
                                 ? Colors.red.shade700
                                 : Colors.blue.shade700,
                           ),
-                          SizedBox(width: 12),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: Text(
                               _hasUsedAllFreeScans
@@ -1702,16 +1651,18 @@ class _HomePageState extends State<HomePage>
                       ),
                     ),
 
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
 
-                  // Camera Button
+                  // -----------------------------------------
+                  // SCAN BUTTON
+                  // -----------------------------------------
                   SizedBox(
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton.icon(
                       onPressed: _isScanning ? null : _takePhoto,
                       icon: _isScanning
-                          ? SizedBox(
+                          ? const SizedBox(
                               width: 24,
                               height: 24,
                               child: CircularProgressIndicator(
@@ -1719,10 +1670,10 @@ class _HomePageState extends State<HomePage>
                                 strokeWidth: 2.5,
                               ),
                             )
-                          : Icon(Icons.camera_alt, size: 28),
+                          : const Icon(Icons.camera_alt, size: 28),
                       label: Text(
                         _isScanning ? 'Scanning...' : 'Scan Food Product',
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                         ),
@@ -1738,9 +1689,8 @@ class _HomePageState extends State<HomePage>
                     ),
                   ),
 
-                  SizedBox(height: 12),
+                  const SizedBox(height: 12),
 
-                  // Info text
                   Text(
                     'Take a photo of the product barcode',
                     style: TextStyle(
@@ -1749,12 +1699,71 @@ class _HomePageState extends State<HomePage>
                     ),
                     textAlign: TextAlign.center,
                   ),
+
+                  const SizedBox(height: 24),
+
+                  // -----------------------------------------
+                  // MANUAL BARCODE ENTRY BUTTON
+                  // -----------------------------------------
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton.icon(
+                      onPressed: () => Navigator.pushNamed(
+                        context,
+                        '/manual-barcode-entry',
+                      ),
+                      icon: const Icon(Icons.edit),
+                      label: const Text(
+                        "Manual Barcode Entry",
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade600,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 2,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // -----------------------------------------
+                  // SEARCH FOOD NAME BUTTON
+                  // -----------------------------------------
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton.icon(
+                      onPressed: () =>
+                          Navigator.pushNamed(context, '/nutrition-search'),
+                      icon: const Icon(Icons.search),
+                      label: const Text(
+                        "Search Food by Name",
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange.shade800,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 2,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
 
-            SizedBox(height: 30),
+            const SizedBox(height: 30),
 
+            // -----------------------------------------
+            // RECIPE SUGGESTIONS SECTION
+            // -----------------------------------------
             if (_scannedRecipes.isNotEmpty)
               PremiumGate(
                 feature: PremiumFeature.viewRecipes,
@@ -1764,13 +1773,13 @@ class _HomePageState extends State<HomePage>
                 child: Column(
                   children: [
                     Container(
-                      padding: EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.white.withAlpha((0.9 * 255).toInt()),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Row(
-                        children: [
+                        children: const [
                           Icon(Icons.restaurant, color: Colors.green, size: 24),
                           SizedBox(width: 12),
                           Text(
@@ -1783,10 +1792,9 @@ class _HomePageState extends State<HomePage>
                         ],
                       ),
                     ),
-                    SizedBox(height: 16),
-
-                    ..._scannedRecipes
-                        .map((recipe) => _buildScannedRecipeCard(recipe)),
+                    const SizedBox(height: 16),
+                    ..._scannedRecipes.map((recipe) =>
+                        _buildScannedRecipeCard(recipe)),
                   ],
                 ),
               ),

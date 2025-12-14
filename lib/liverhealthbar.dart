@@ -1,3 +1,5 @@
+// lib/liverhealthbar.dart
+
 import 'package:flutter/material.dart';
 
 String getFaceEmoji(int score) {
@@ -12,13 +14,37 @@ class LiverHealthBar extends StatelessWidget {
 
   const LiverHealthBar({super.key, required this.healthScore});
 
+  // ⬇️ NEW STATIC FUNCTION FOR ALL NUTRITION SYSTEMS
+  static int calculateScore({
+    required double fat,
+    required double sodium,
+    required double sugar,
+    required double calories,
+  }) {
+    const fatMax = 20.0;
+    const sodiumMax = 500.0;
+    const sugarMax = 20.0;
+    const calMax = 400.0;
+
+    final fatScore = 1 - (fat / fatMax).clamp(0, 1);
+    final sodiumScore = 1 - (sodium / sodiumMax).clamp(0, 1);
+    final sugarScore = 1 - (sugar / sugarMax).clamp(0, 1);
+    final calScore = 1 - (calories / calMax).clamp(0, 1);
+
+    final finalScore = (fatScore * 0.3) +
+        (sodiumScore * 0.25) +
+        (sugarScore * 0.25) +
+        (calScore * 0.2);
+
+    return (finalScore * 100).round().clamp(0, 100);
+  }
+
   @override
   Widget build(BuildContext context) {
     final face = getFaceEmoji(healthScore);
 
     return Column(
       children: [
-        // Score text above the bar
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
@@ -26,25 +52,17 @@ class LiverHealthBar extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
-            'Liver Health Score: $healthScore/100',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-            ),
+            "Liver Health Score: $healthScore/100",
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
           ),
         ),
-        
         const SizedBox(height: 40),
-        
-        // Stack with proper sizing for emoji
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 16),
-          height: 60, // Give enough height for emoji above bar
+          height: 60,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              // Gradient Bar
               Positioned(
                 bottom: 0,
                 left: 0,
@@ -59,14 +77,11 @@ class LiverHealthBar extends StatelessWidget {
                   ),
                 ),
               ),
-              // Emoji sliding over bar
               Positioned(
-                left: (MediaQuery.of(context).size.width - 64) * (healthScore / 100) - 14,
-                top: 0,
-                child: Text(
-                  face,
-                  style: const TextStyle(fontSize: 28),
-                ),
+                left: (MediaQuery.of(context).size.width - 64) *
+                    (healthScore / 100) -
+                    14,
+                child: Text(face, style: const TextStyle(fontSize: 28)),
               ),
             ],
           ),

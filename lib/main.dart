@@ -28,6 +28,9 @@ import 'models/favorite_recipe.dart';
 import 'contact_screen.dart';
 import 'home_screen.dart';
 import 'pages/reset_password_page.dart';
+import 'package:liver_wise/pages/manual_barcode_entry_screen.dart';
+import 'package:liver_wise/pages/nutrition_search_screen.dart';
+
 
 /// 🔥 Background FCM handler (required for messages when app is terminated)
 @pragma('vm:entry-point')
@@ -439,6 +442,9 @@ class _MyAppState extends State<MyApp> {
         '/search-users': (context) => const SearchUsersPage(),
         '/favorite-recipes': (context) => FavoriteRecipesPage(favoriteRecipes: const []),
         '/contact': (context) => const ContactScreen(),
+        '/manual-barcode-entry': (context) => const ManualBarcodeEntryScreen(),
+        '/nutrition-search': (context) => const NutritionSearchScreen(),
+        '/saved-ingredients': (context) => const SavedIngredientsScreen(),
         '/reset-password': (context) {
           final session = ModalRoute.of(context)?.settings.arguments as Session?;
           return ResetPasswordPage(session: session);

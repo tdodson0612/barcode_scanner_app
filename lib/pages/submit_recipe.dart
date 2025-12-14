@@ -1,4 +1,4 @@
-// lib/pages/submit_recipe.dart - ENHANCED with Save & Grocery List buttons
+// lib/pages/submit_recipe.dart - ENHANCED with Save, Grocery List, and Nutrition buttons
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/submitted_recipes_service.dart';
 import 'package:liver_wise/services/grocery_service.dart';
@@ -6,6 +6,10 @@ import '../services/database_service_core.dart';
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
 import 'package:liver_wise/services/local_draft_service.dart';
+import 'package:liver_wise/widgets/recipe_nutrition_display.dart';
+import 'package:liver_wise/services/recipe_nutrition_service.dart';
+import 'package:liver_wise/services/saved_ingredients_service.dart';
+import 'package:liver_wise/models/nutrition_info.dart';
 
 class SubmitRecipePage extends StatefulWidget {
   final String? initialIngredients;
@@ -34,6 +38,11 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
   int _tabIndex = 0;
   Map<String, dynamic> _drafts = {};
   String? _loadedDraftName;
+
+  // 🔥 NEW: Nutrition aggregation state
+  List<NutritionInfo> _matchedNutritionIngredients = [];
+  RecipeNutrition? _recipeNutrition;
+  bool _isAnalyzingNutrition = false;
 
   @override
   void initState() {
@@ -131,9 +140,10 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       for (String ingredient in ingredients) {
         final cleaned = ingredient
             .replaceAll(RegExp(r'^[•\-\d]+\.?\s*'), '')
-            .replaceAll(RegExp(
-                r'^\d+\s+(cup|tsp|tbsp|oz|lb|g|kg|ml|l)\s+'),
-                '')
+            .replaceAll(
+              RegExp(r'^\d+\s+(cup|tsp|tbsp|oz|lb|g|kg|ml|l)\s+'),
+              '',
+            )
             .trim();
 
         if (cleaned.isNotEmpty) {
@@ -164,8 +174,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
           context: context,
           error: e,
           category: ErrorHandlingService.databaseError,
-          customMessage:
-              'Failed to add ingredients to grocery list',
+          customMessage: 'Failed to add ingredients to grocery list',
         );
       }
     }
@@ -195,8 +204,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content:
-              Text('Recipe submitted to community successfully!'),
+          content: Text('Recipe submitted to community successfully!'),
           backgroundColor: Colors.green,
         ),
       );
@@ -212,6 +220,107 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       );
     } finally {
       setState(() => isSubmitting = false);
+    }
+  }
+
+  // 🔥 NEW: Analyze recipe nutrition using simple name matching (Option A)
+  Future<void> _analyzeRecipeNutrition() async {
+    final rawText = _ingredientsController.text.trim();
+    if (rawText.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Add ingredients first to analyze nutrition.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isAnalyzingNutrition = true;
+      _matchedNutritionIngredients = [];
+      _recipeNutrition = null;
+    });
+
+    try {
+      final saved = await SavedIngredientsService.loadSavedIngredients();
+      if (saved.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No saved ingredients found yet.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Split ingredients by line (and commas as backup)
+      final lines = rawText
+          .split(RegExp(r'[\n]'))
+          .expand((line) => line.split(','))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+
+      final lowerLines = lines.map((e) => e.toLowerCase()).toList();
+
+      final List<NutritionInfo> matches = [];
+
+      for (final item in saved) {
+        final name = item.productName.trim();
+        if (name.isEmpty) continue;
+
+        final lowerName = name.toLowerCase();
+
+        final found = lowerLines.any((line) => line.contains(lowerName));
+        if (found) {
+          // avoid duplicates by productName
+          final already = matches.any(
+            (m) => m.productName.toLowerCase() == lowerName,
+          );
+          if (!already) {
+            matches.add(item);
+          }
+        }
+      }
+
+      if (matches.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'No matching saved ingredients found in this recipe yet.',
+              ),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      final totals = RecipeNutritionService.calculateTotals(matches);
+
+      if (mounted) {
+        setState(() {
+          _matchedNutritionIngredients = matches;
+          _recipeNutrition = totals;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.apiError,
+          customMessage: 'Error analyzing recipe nutrition',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isAnalyzingNutrition = false);
+      }
     }
   }
 
@@ -322,8 +431,8 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(
-                    color: Colors.green, width: 2),
+                borderSide:
+                    const BorderSide(color: Colors.green, width: 2),
               ),
               errorBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
@@ -373,8 +482,8 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       body: Stack(
         children: [
           Positioned.fill(
-            child: Image.asset('assets/background.png',
-                fit: BoxFit.cover),
+            child:
+                Image.asset('assets/background.png', fit: BoxFit.cover),
           ),
           Column(
             children: [
@@ -483,7 +592,220 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
               },
             ),
 
+            const SizedBox(height: 20),
+
+            // 🔥 NEW: Recipe Nutrition Section
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.analytics,
+                          color: Colors.green, size: 22),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Recipe Nutrition (Saved Ingredients)',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'We will try to match saved ingredients to your ingredient list by name and estimate total nutrition.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed:
+                          _isAnalyzingNutrition ? null : _analyzeRecipeNutrition,
+                      icon: _isAnalyzingNutrition
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
+                              ),
+                            )
+                          : const Icon(Icons.calculate),
+                      label: Text(
+                        _isAnalyzingNutrition
+                            ? 'Analyzing...'
+                            : 'Analyze Recipe Nutrition',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green.shade700,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  if (_matchedNutritionIngredients.isNotEmpty) ...[
+                    const Text(
+                      'Matched Ingredients:',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    ..._matchedNutritionIngredients.map(
+                      (n) => Row(
+                        children: [
+                          const Icon(Icons.check,
+                              size: 14, color: Colors.green),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              n.productName,
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  if (_recipeNutrition != null)
+                    RecipeNutritionDisplay(
+                      nutrition: _recipeNutrition!,
+                    ),
+                ],
+              ),
+            ),
+
             const SizedBox(height: 30),
+
+            // 🔥 NEW: Recipe Nutrition Section
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.analytics, color: Colors.green, size: 22),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Recipe Nutrition (Saved Ingredients)',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 8),
+                  const Text(
+                    'We will try to match saved ingredients to your list and estimate total nutrition.',
+                    style: TextStyle(fontSize: 12, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 12),
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton.icon(
+                      onPressed: _isAnalyzingNutrition ? null : _analyzeRecipeNutrition,
+                      icon: _isAnalyzingNutrition
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : const Icon(Icons.calculate),
+                      label: Text(
+                        _isAnalyzingNutrition ? 'Analyzing...' : 'Analyze Recipe Nutrition',
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green.shade700,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Matched ingredient list
+                  if (_matchedNutritionIngredients.isNotEmpty) ...[
+                    const Text(
+                      'Matched Ingredients:',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 4),
+                    ..._matchedNutritionIngredients.map(
+                      (n) => Row(
+                        children: [
+                          const Icon(Icons.check, size: 14, color: Colors.green),
+                          const SizedBox(width: 4),
+                          Expanded(child: Text(n.productName, style: const TextStyle(fontSize: 13))),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // FINAL TOTALS + DISCLAIMER
+                  if (_recipeNutrition != null) ...[
+                    RecipeNutritionDisplay(nutrition: _recipeNutrition!),
+                    const SizedBox(height: 8),
+
+                    // 🔥 NEW DISCLAIMER
+                    const Text(
+                      "🛈 This is an estimate based on your saved ingredients. "
+                      "Accuracy depends on the items you have saved.",
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
 
             // BUTTONS SECTION
             Container(
@@ -500,19 +822,19 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                         child: SizedBox(
                           height: 54,
                           child: ElevatedButton.icon(
-                            onPressed: isSubmitting
-                                ? null
-                                : _saveRecipe,
+                            onPressed: isSubmitting ? null : _saveRecipe,
                             icon: Icon(
-                                _isSaved
-                                    ? Icons.check_circle
-                                    : Icons.save,
-                                size: 20),
+                              _isSaved
+                                  ? Icons.check_circle
+                                  : Icons.save,
+                              size: 20,
+                            ),
                             label: Text(
                               _isSaved ? 'Saved!' : 'Save Draft',
                               style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: _isSaved
@@ -532,16 +854,18 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                         child: SizedBox(
                           height: 54,
                           child: ElevatedButton.icon(
-                            onPressed: isSubmitting
-                                ? null
-                                : _addToGroceryList,
-                            icon: const Icon(Icons.add_shopping_cart,
-                                size: 20),
+                            onPressed:
+                                isSubmitting ? null : _addToGroceryList,
+                            icon: const Icon(
+                              Icons.add_shopping_cart,
+                              size: 20,
+                            ),
                             label: const Text(
                               'Grocery List',
                               style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.purple,
@@ -563,9 +887,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                     width: double.infinity,
                     height: 54,
                     child: ElevatedButton.icon(
-                      onPressed: isSubmitting
-                          ? null
-                          : _submitRecipe,
+                      onPressed: isSubmitting ? null : _submitRecipe,
                       icon: isSubmitting
                           ? const SizedBox(
                               width: 20,
@@ -574,7 +896,8 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                                 strokeWidth: 2,
                                 valueColor:
                                     AlwaysStoppedAnimation<Color>(
-                                        Colors.white),
+                                  Colors.white,
+                                ),
                               ),
                             )
                           : const Icon(Icons.send, size: 20),
@@ -583,8 +906,9 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                             ? 'Submitting...'
                             : 'Submit to Community',
                         style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
@@ -605,12 +929,11 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                       onPressed: isSubmitting
                           ? null
                           : () {
-                              if (_nameController.text
-                                      .isNotEmpty ||
-                                  _ingredientsController.text
-                                      .isNotEmpty ||
-                                  _directionsController.text
-                                      .isNotEmpty) {
+                              if (_nameController.text.isNotEmpty ||
+                                  _ingredientsController
+                                      .text.isNotEmpty ||
+                                  _directionsController
+                                      .text.isNotEmpty) {
                                 showDialog(
                                   context: context,
                                   builder: (context) =>
@@ -621,15 +944,18 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                                         'Are you sure? All changes will be lost.'),
                                     actions: [
                                       TextButton(
-                                        onPressed: () => Navigator.pop(context),
-                                        child: const Text('Keep Writing'),
+                                        onPressed: () =>
+                                            Navigator.pop(context),
+                                        child: const Text(
+                                            'Keep Writing'),
                                       ),
                                       TextButton(
                                         onPressed: () {
                                           Navigator.pop(context);
                                           Navigator.pop(context);
                                         },
-                                        child: const Text('Discard'),
+                                        child:
+                                            const Text('Discard'),
                                       ),
                                     ],
                                   ),
