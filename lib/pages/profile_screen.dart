@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart'; 
 import 'dart:convert';
 import '../services/favorite_recipes_service.dart';
+import '../widgets/cookbook_section.dart';
 
 
 
@@ -348,7 +349,10 @@ class _ProfileScreenState extends State<ProfileScreen>
         if (cachedRecipes != null) {
           if (mounted) {
             setState(() {
-              _submittedRecipes = cachedRecipes;
+              // 🔥 UPDATED: Filter to show only verified recipes
+              _submittedRecipes = cachedRecipes
+                  .where((recipe) => recipe.isVerified == true)
+                  .toList();
               _isLoadingRecipes = false;
             });
           }
@@ -361,30 +365,16 @@ class _ProfileScreenState extends State<ProfileScreen>
 
       if (mounted) {
         setState(() {
-          _submittedRecipes = recipes;
+          // 🔥 UPDATED: Filter to show only verified recipes
+          _submittedRecipes = recipes
+              .where((recipe) => recipe.isVerified == true)
+              .toList();
           _isLoadingRecipes = false;
         });
       }
     } catch (e) {
       print('Error loading recipes: $e');
-
-      if (!forceRefresh) {
-        final staleRecipes = await _getCachedRecipes();
-        if (staleRecipes != null && mounted) {
-          setState(() {
-            _submittedRecipes = staleRecipes;
-            _isLoadingRecipes = false;
-          });
-          return;
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _submittedRecipes = [];
-          _isLoadingRecipes = false;
-        });
-      }
+      // ... existing error handling
     }
   }
 
@@ -2537,115 +2527,124 @@ class _ProfileScreenState extends State<ProfileScreen>
                     child: _buildSubmittedRecipesSection(),
                   ),
                   const SizedBox(height: 20),
-                  PremiumGate(
-                    feature: PremiumFeature.favoriteRecipes,
-                    featureName: 'Favorite Recipes',
-                    featureDescription: 'Save and organize your favorite recipes.',
-                    showSoftPreview: true,
-                    child: _sectionContainer(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Favorite Recipes',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          if (_isLoadingFavoritesCount) ...[
-                            const Center(
-                              child: Padding(
-                                padding: EdgeInsets.all(12),
-                                child: CircularProgressIndicator(),
-                              ),
-                            ),
-                          ] else ...[
-                            Text(
-                              _favoriteRecipesCount == 0
-                                  ? 'No favorite recipes yet. Start scanning to discover new recipes!'
-                                  : '$_favoriteRecipesCount favorite ${_favoriteRecipesCount == 1 ? 'recipe' : 'recipes'} saved',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey.shade600,
-                              ),
-                            ),
-                            if (_favoriteRecipesCount > 0) ...[
-                              const SizedBox(height: 12),
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton.icon(
-                                  onPressed: () async {
-                                    try {
-                                      await Navigator.pushNamed(context, '/favorite-recipes');
-                                      // Reload count when returning from favorites page
-                                      if (mounted) {
-                                        await _loadFavoriteRecipesCount();
-                                      }
-                                    } catch (e) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Favorites page unavailable'),
-                                        ),
-                                      );
-                                    }
-                                  },
-                                  icon: const Icon(Icons.favorite),
-                                  label: const Text('View Favorite Recipes'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ],
+                  // lib/pages/profile_screen.dart
+// REPLACE the entire block you provided with this:
+
+PremiumGate(
+  feature: PremiumFeature.favoriteRecipes,
+  featureName: 'Favorite Recipes',
+  featureDescription: 'Save and organize your favorite recipes.',
+  showSoftPreview: true,
+  child: _sectionContainer(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Favorite Recipes',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (_isLoadingFavoritesCount) ...[
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: CircularProgressIndicator(),
+            ),
+          ),
+        ] else ...[
+          Text(
+            _favoriteRecipesCount == 0
+                ? 'No favorite recipes yet. Start scanning to discover new recipes!'
+                : '$_favoriteRecipesCount favorite ${_favoriteRecipesCount == 1 ? 'recipe' : 'recipes'} saved',
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.grey.shade600,
+            ),
+          ),
+          if (_favoriteRecipesCount > 0) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  try {
+                    await Navigator.pushNamed(context, '/favorite-recipes');
+                    // Reload count when returning from favorites page
+                    if (mounted) {
+                      await _loadFavoriteRecipesCount();
+                    }
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Favorites page unavailable'),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const SizedBox(height: 20),
-                  _sectionContainer(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Danger Zone',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.red.shade700,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Permanently delete your account and all associated data. This action cannot be undone.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            onPressed:
-                                _isLoading ? null : _confirmDeleteAccount,
-                            icon: const Icon(Icons.delete_forever),
-                            label: const Text('Delete My Account'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.red,
-                              side: const BorderSide(color: Colors.red),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 100),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.favorite),
+                label: const Text('View Favorite Recipes'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ],
+    ),
+  ),
+),
+const SizedBox(height: 20),
+
+// 🔥 NEW: COOKBOOK SECTION - ADD THIS
+_sectionContainer(
+  child: const CookbookSection(),
+),
+const SizedBox(height: 20),
+
+// DANGER ZONE CONTINUES BELOW
+_sectionContainer(
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        'Danger Zone',
+        style: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+          color: Colors.red.shade700,
+        ),
+      ),
+      const SizedBox(height: 8),
+      const Text(
+        'Permanently delete your account and all associated data. This action cannot be undone.',
+        style: TextStyle(
+          fontSize: 12,
+          color: Colors.grey,
+        ),
+      ),
+      const SizedBox(height: 12),
+      SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: _isLoading ? null : _confirmDeleteAccount,
+          icon: const Icon(Icons.delete_forever),
+          label: const Text('Delete My Account'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.red,
+            side: const BorderSide(color: Colors.red),
+          ),
+        ),
+      ),
+    ],
+  ),
+),
+const SizedBox(height: 100),
                 ],
               ),
             ),

@@ -1,5 +1,5 @@
 // lib/services/submitted_recipes_service.dart
-// Handles user-submitted recipes (CRUD + caching)
+// Handles user-submitted recipes (CRUD + caching + email notifications)
 
 import 'dart:convert';
 
@@ -54,7 +54,7 @@ class SubmittedRecipesService {
   }
 
   // ==================================================
-  // SUBMIT NEW RECIPE
+  // SUBMIT NEW RECIPE (🔥 UPDATED with Email)
   // ==================================================
   static Future<void> submitRecipe(
     String recipeName,
@@ -64,6 +64,7 @@ class SubmittedRecipesService {
     AuthService.ensureLoggedIn();
 
     try {
+      // Insert recipe
       await DatabaseServiceCore.workerQuery(
         action: 'insert',
         table: 'submitted_recipes',
@@ -72,16 +73,79 @@ class SubmittedRecipesService {
           'recipe_name': recipeName,
           'ingredients': ingredients,
           'directions': directions,
+          'is_verified': false, // 🔥 NEW: Default to false
           'created_at': DateTime.now().toIso8601String(),
         },
       );
 
+      // 🔥 NEW: Send email notification
+      try {
+        await _sendRecipeSubmissionEmail(
+          recipeName: recipeName,
+          ingredients: ingredients,
+          directions: directions,
+        );
+      } catch (e) {
+        // Don't fail the whole submission if email fails
+        AppConfig.debugPrint('⚠️ Failed to send email notification: $e');
+      }
+
       // Clear cache
       await DatabaseServiceCore.clearCache(_CACHE_KEY);
 
-      // XP & achievements handled in xp_service / achievements_service
     } catch (e) {
       throw Exception('Failed to submit recipe: $e');
+    }
+  }
+
+  // ==================================================
+  // 🔥 NEW: SEND EMAIL NOTIFICATION
+  // ==================================================
+  static Future<void> _sendRecipeSubmissionEmail({
+    required String recipeName,
+    required String ingredients,
+    required String directions,
+  }) async {
+    try {
+      final userId = AuthService.currentUserId;
+      final userEmail = AuthService.currentUser?.email ?? 'Unknown';
+      
+      // Get username from profile
+      String userName = 'User';
+      try {
+        final profile = await DatabaseServiceCore.workerQuery(
+          action: 'select',
+          table: 'profiles',
+          columns: ['username'],
+          filters: {'id': userId},
+          limit: 1,
+        );
+        if (profile != null && (profile as List).isNotEmpty) {
+          userName = profile[0]['username'] ?? 'User';
+        }
+      } catch (_) {
+        // If profile fetch fails, just use 'User'
+      }
+
+      // Send email via Cloudflare Worker
+      await DatabaseServiceCore.workerQuery(
+        action: 'send_recipe_submission_email',
+        table: 'email_notifications', // 🔥 FIXED: Added required table parameter
+        data: {
+          'recipeName': recipeName,
+          'ingredients': ingredients,
+          'directions': directions,
+          'userName': userName,
+          'userEmail': userEmail,
+          'userId': userId,
+          'recipientEmail': 'Brittneyhanna@yahoo.com', // 🔥 UPDATED EMAIL
+        },
+      );
+      
+      AppConfig.debugPrint('✅ Recipe submission email sent successfully');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Email notification failed: $e');
+      // Don't rethrow - we don't want email failure to block recipe submission
     }
   }
 

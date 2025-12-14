@@ -10,7 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:liver_wise/services/grocery_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:liver_wise/widgets/add_to_cookbook_button.dart';
 // ✅ FIXED: Changed from ../widgets/ to package imports
 import 'package:liver_wise/widgets/premium_gate.dart';
 import 'package:liver_wise/controllers/premium_gate_controller.dart';
@@ -1479,7 +1479,6 @@ class _HomePageState extends State<HomePage>
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        // ✅ FIXED: Changed from withValues to withOpacity
         color: Colors.white.withOpacity(0.1),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -1507,7 +1506,7 @@ class _HomePageState extends State<HomePage>
                 onPressed: () => _toggleFavoriteRecipe(recipe),
               ),
             ),
-            Icon(Icons.expand_more, color: Colors.white),
+            const Icon(Icons.expand_more, color: Colors.white),
           ],
         ),
         iconColor: Colors.white,
@@ -1533,6 +1532,8 @@ class _HomePageState extends State<HomePage>
                   style: const TextStyle(fontSize: 12, color: Colors.white60),
                 ),
                 const SizedBox(height: 12),
+                
+                // 🔥 UPDATED: Added Cookbook button
                 Row(
                   children: [
                     Expanded(
@@ -1541,8 +1542,8 @@ class _HomePageState extends State<HomePage>
                         featureName: 'Favorite Recipes',
                         child: ElevatedButton.icon(
                           onPressed: () => _toggleFavoriteRecipe(recipe),
-                          icon: Icon(Icons.favorite),
-                          label: Text('Save Recipe'),
+                          icon: const Icon(Icons.favorite),
+                          label: const Text('Favorite'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.red,
                             foregroundColor: Colors.white,
@@ -1550,15 +1551,25 @@ class _HomePageState extends State<HomePage>
                         ),
                       ),
                     ),
-                    SizedBox(width: 12),
+                    const SizedBox(width: 8),
+                    
+                    // 🔥 NEW: Cookbook button
+                    AddToCookbookButton(
+                      recipeName: recipe.title,
+                      ingredients: recipe.ingredients.join(', '),
+                      directions: recipe.instructions,
+                      compact: true,
+                    ),
+                    const SizedBox(width: 8),
+                    
                     Expanded(
                       child: PremiumGate(
                         feature: PremiumFeature.groceryList,
                         featureName: 'Grocery List',
                         child: ElevatedButton.icon(
                           onPressed: () => _addRecipeIngredientsToGroceryList(recipe),
-                          icon: Icon(Icons.add_shopping_cart),
-                          label: Text('Add to List'),
+                          icon: const Icon(Icons.add_shopping_cart),
+                          label: const Text('Grocery'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.green,
                             foregroundColor: Colors.white,
@@ -1575,7 +1586,6 @@ class _HomePageState extends State<HomePage>
       ),
     );
   }
-
   // Rest of the file continues unchanged from here...
   // (All remaining methods stay the same)
 
@@ -1932,124 +1942,144 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-// ----------------------------------------------------
-// SCANNED RECIPE CARD
-// ----------------------------------------------------
-Widget _buildScannedRecipeCard(Map<String, String> recipe) {
-  final isFavorite = _isRecipeFavorited(recipe['name']!);
+  // ----------------------------------------------------
+  // SCANNED RECIPE CARD
+  // ----------------------------------------------------
+  Widget _buildScannedRecipeCard(Map<String, String> recipe) {
+    final isFavorite = _isRecipeFavorited(recipe['name']!);
 
-  return Container(
-    margin: const EdgeInsets.only(bottom: 16),
-    decoration: BoxDecoration(
-      color: Colors.white.withOpacity(0.9),
-      borderRadius: BorderRadius.circular(10),
-    ),
-    child: ExpansionTile(
-      title: Row(
-        children: [
-          Icon(Icons.restaurant, color: Colors.green),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              recipe['name']!,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(10),
       ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          PremiumGate(
-            feature: PremiumFeature.favoriteRecipes,
-            featureName: 'Favorite Recipes',
-            child: IconButton(
-              icon: Icon(
-                isFavorite ? Icons.favorite : Icons.favorite_border,
-                color: isFavorite ? Colors.red : Colors.grey,
-                size: 20,
+      child: ExpansionTile(
+        title: Row(
+          children: [
+            const Icon(Icons.restaurant, color: Colors.green),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                recipe['name']!,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-              onPressed: () {
-                final recipeObj = Recipe(
-                  title: recipe['name']!,
-                  description: 'Scanned recipe',
-                  ingredients: recipe['ingredients']!.split(', '),
-                  instructions: recipe['directions']!,
-                );
-                _toggleFavoriteRecipe(recipeObj);
-              },
             ),
-          ),
-          const Icon(Icons.expand_more),
-        ],
-      ),
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Ingredients:',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 8),
-              Text(recipe['ingredients']!),
-              const SizedBox(height: 16),
-              const Text('Directions:',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 8),
-              Text(recipe['directions']!),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: PremiumGate(
-                      feature: PremiumFeature.favoriteRecipes,
-                      featureName: 'Favorite Recipes',
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          final recipeObj = Recipe(
-                            title: recipe['name']!,
-                            description: 'Scanned recipe',
-                            ingredients: recipe['ingredients']!.split(', '),
-                            instructions: recipe['directions']!,
-                          );
-                          _toggleFavoriteRecipe(recipeObj);
-                        },
-                        icon: const Icon(Icons.favorite),
-                        label: const Text('Save Recipe'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: PremiumGate(
-                      feature: PremiumFeature.groceryList,
-                      featureName: 'Grocery List',
-                      child: ElevatedButton.icon(
-                        onPressed: () =>
-                            _addRecipeIngredientsToGroceryList(recipe),
-                        icon: const Icon(Icons.add_shopping_cart),
-                        label: const Text('Add to List'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+          ],
         ),
-      ],
-    ),
-  );
-}
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            PremiumGate(
+              feature: PremiumFeature.favoriteRecipes,
+              featureName: 'Favorite Recipes',
+              child: IconButton(
+                icon: Icon(
+                  isFavorite ? Icons.favorite : Icons.favorite_border,
+                  color: isFavorite ? Colors.red : Colors.grey,
+                  size: 20,
+                ),
+                onPressed: () {
+                  final recipeObj = Recipe(
+                    title: recipe['name']!,
+                    description: 'Scanned recipe',
+                    ingredients: recipe['ingredients']!.split(', '),
+                    instructions: recipe['directions']!,
+                  );
+                  _toggleFavoriteRecipe(recipeObj);
+                },
+              ),
+            ),
+            // 🔥 ADD: Cookbook button in header
+            AddToCookbookButton(
+              recipeName: recipe['name']!,
+              ingredients: recipe['ingredients']!,
+              directions: recipe['directions']!,
+              compact: true,
+            ),
+            const Icon(Icons.expand_more),
+          ],
+        ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Ingredients:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 8),
+                Text(recipe['ingredients']!),
+                const SizedBox(height: 16),
+                const Text('Directions:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 8),
+                Text(recipe['directions']!),
+                const SizedBox(height: 16),
+                
+                // 🔥 UPDATED: Action buttons with Cookbook
+                Row(
+                  children: [
+                    Expanded(
+                      child: PremiumGate(
+                        feature: PremiumFeature.favoriteRecipes,
+                        featureName: 'Favorite Recipes',
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            final recipeObj = Recipe(
+                              title: recipe['name']!,
+                              description: 'Scanned recipe',
+                              ingredients: recipe['ingredients']!.split(', '),
+                              instructions: recipe['directions']!,
+                            );
+                            _toggleFavoriteRecipe(recipeObj);
+                          },
+                          icon: const Icon(Icons.favorite),
+                          label: const Text('Favorite'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    
+                    // 🔥 ADD: Cookbook button
+                    AddToCookbookButton(
+                      recipeName: recipe['name']!,
+                      ingredients: recipe['ingredients']!,
+                      directions: recipe['directions']!,
+                      compact: true,
+                    ),
+                    const SizedBox(width: 8),
+                    
+                    Expanded(
+                      child: PremiumGate(
+                        feature: PremiumFeature.groceryList,
+                        featureName: 'Grocery List',
+                        child: ElevatedButton.icon(
+                          onPressed: () =>
+                              _addRecipeIngredientsToGroceryList(recipe),
+                          icon: const Icon(Icons.add_shopping_cart),
+                          label: const Text('Grocery'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
 
 // ----------------------------------------------------
 // HEALTH-BASED RECIPE SUGGESTIONS

@@ -1,4 +1,4 @@
-// lib/widgets/recipe_card.dart - FIXED: Prevents users from rating their own recipes
+// lib/widgets/recipe_card.dart - UPDATED: Added Cookbook button
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/ratings_service.dart';
 import 'package:liver_wise/services/submitted_recipes_service.dart';
@@ -10,6 +10,7 @@ import '../services/database_service_core.dart';
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
 import '../widgets/rating_dialog.dart';
+import '../widgets/add_to_cookbook_button.dart'; // 🔥 ADD THIS
 
 class RecipeCard extends StatefulWidget {
   final SubmittedRecipe recipe;
@@ -336,6 +337,25 @@ class _RecipeCardState extends State<RecipeCard> {
             // Recipe Name
             Row(
               children: [
+                if (widget.recipe.isVerified)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Icon(
+                      Icons.verified,
+                      size: 20,
+                      color: Colors.blue,
+                    ),
+                  ),
+                
+                Expanded(
+                  child: Text(
+                    widget.recipe.recipeName,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
                 Expanded(
                   child: Text(
                     widget.recipe.recipeName,
@@ -447,7 +467,7 @@ class _RecipeCardState extends State<RecipeCard> {
 
             const SizedBox(height: 12),
 
-            // Action Buttons
+            // 🔥 UPDATED: Action Buttons with Cookbook
             Row(
               children: [
                 Expanded(
@@ -463,6 +483,17 @@ class _RecipeCardState extends State<RecipeCard> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                
+                // 🔥 NEW: Cookbook button
+                AddToCookbookButton(
+                  recipeName: widget.recipe.recipeName,
+                  ingredients: widget.recipe.ingredients,
+                  directions: widget.recipe.directions,
+                  recipeId: widget.recipe.id,
+                  compact: true,
+                ),
+                const SizedBox(width: 8),
+                
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: _shareRecipe,
