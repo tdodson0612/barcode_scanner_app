@@ -76,7 +76,6 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
       ErrorHandlingService.handleError(
         context: context,
         error: e,
-        category: ErrorHandlingService.apiError,
         customMessage: "Error searching for food.",
       );
     } finally {

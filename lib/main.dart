@@ -30,6 +30,7 @@ import 'home_screen.dart';
 import 'pages/reset_password_page.dart';
 import 'package:liver_wise/pages/manual_barcode_entry_screen.dart';
 import 'package:liver_wise/pages/nutrition_search_screen.dart';
+import 'package:liver_wise/pages/saved_ingredients_screen.dart';
 
 
 /// 🔥 Background FCM handler (required for messages when app is terminated)

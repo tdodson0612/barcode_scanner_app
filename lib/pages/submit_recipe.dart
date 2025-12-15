@@ -309,15 +309,14 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
         });
       }
     } catch (e) {
-      if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.apiError,
-          customMessage: 'Error analyzing recipe nutrition',
-        );
-      }
-    } finally {
+        if (mounted) {
+          await ErrorHandlingService.handleError(
+            context: context,
+            error: e,
+            customMessage: 'Error analyzing recipe nutrition',
+          );
+        }
+      } finally {
       if (mounted) {
         setState(() => _isAnalyzingNutrition = false);
       }
@@ -593,118 +592,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
             ),
 
             const SizedBox(height: 20),
-
-            // 🔥 NEW: Recipe Nutrition Section
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white.withAlpha((0.9 * 255).toInt()),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.analytics,
-                          color: Colors.green, size: 22),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Recipe Nutrition (Saved Ingredients)',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'We will try to match saved ingredients to your ingredient list by name and estimate total nutrition.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton.icon(
-                      onPressed:
-                          _isAnalyzingNutrition ? null : _analyzeRecipeNutrition,
-                      icon: _isAnalyzingNutrition
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(
-                                  Colors.white,
-                                ),
-                              ),
-                            )
-                          : const Icon(Icons.calculate),
-                      label: Text(
-                        _isAnalyzingNutrition
-                            ? 'Analyzing...'
-                            : 'Analyze Recipe Nutrition',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green.shade700,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  if (_matchedNutritionIngredients.isNotEmpty) ...[
-                    const Text(
-                      'Matched Ingredients:',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    ..._matchedNutritionIngredients.map(
-                      (n) => Row(
-                        children: [
-                          const Icon(Icons.check,
-                              size: 14, color: Colors.green),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              n.productName,
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-
-                  if (_recipeNutrition != null)
-                    RecipeNutritionDisplay(
-                      nutrition: _recipeNutrition!,
-                    ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 30),
 
             // 🔥 NEW: Recipe Nutrition Section
             Container(

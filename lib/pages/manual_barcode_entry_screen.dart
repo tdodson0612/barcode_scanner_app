@@ -71,7 +71,6 @@ class _ManualBarcodeEntryScreenState extends State<ManualBarcodeEntryScreen> {
       ErrorHandlingService.handleError(
         context: context,
         error: e,
-        category: ErrorHandlingService.apiError,
         customMessage: "Error fetching product information.",
       );
     } finally {
