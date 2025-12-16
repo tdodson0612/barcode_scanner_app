@@ -1,5 +1,5 @@
 // lib/services/messaging_service.dart
-// ✅ FIXED: Proper unread count tracking and cache invalidation
+// ✅ FIXED: Proper unread count tracking and cache invalidation with database commit delays
 
 import 'dart:convert';
 import '../config/app_config.dart';
@@ -11,7 +11,7 @@ import '../widgets/menu_icon_with_badge.dart';
 import '../widgets/app_drawer.dart';
 
 class MessagingService {
-  // ✅ NEW: Track if we're currently updating read status to prevent race conditions
+  // ✅ Track if we're currently updating read status to prevent race conditions
   static bool _isMarkingAsRead = false;
 
   // ==============================================
@@ -130,10 +130,6 @@ class MessagingService {
       await DatabaseServiceCore.clearCache('cache_last_message_time_${uid}_$receiverId');
       await DatabaseServiceCore.clearCache('cache_last_message_time_${receiverId}_$uid');
       
-      // ✅ FIXED: Invalidate unread badge cache (receiver will get new unread message)
-      await MenuIconWithBadge.invalidateCache();
-      await AppDrawer.invalidateUnreadCache();
-      
       AppConfig.debugPrint('✅ Message sent, caches invalidated');
     } catch (e) {
       throw Exception('Failed to send message: $e');
@@ -231,25 +227,30 @@ class MessagingService {
 
       AppConfig.debugPrint('📝 Marking ${messageList.length} messages as read...');
 
-      // ✅ IMPROVED: Batch update instead of individual updates
+      // ✅ CRITICAL FIX: Update all messages and wait for completion
+      final updateFutures = <Future>[];
+      
       for (var msg in messageList) {
-        await DatabaseServiceCore.workerQuery(
+        final future = DatabaseServiceCore.workerQuery(
           action: 'update',
           table: 'messages',
           filters: {'id': msg['id']},
           data: {'is_read': true},
         );
+        updateFutures.add(future);
       }
       
-      // ✅ Clear message caches
+      // ✅ Wait for ALL updates to complete
+      await Future.wait(updateFutures);
+      
+      // ✅ Add small delay to ensure database commits
+      await Future.delayed(Duration(milliseconds: 200));
+      
+      // Clear message caches
       await DatabaseServiceCore.clearCache('cache_messages_${uid}_$senderId');
       await DatabaseServiceCore.clearCache('cache_last_message_time_${uid}_$senderId');
       
-      // ✅ CRITICAL: Invalidate unread badge cache AFTER all messages are marked
-      await MenuIconWithBadge.invalidateCache();
-      await AppDrawer.invalidateUnreadCache();
-      
-      AppConfig.debugPrint('✅ ${messageList.length} messages marked as read, badge cache invalidated');
+      AppConfig.debugPrint('✅ ${messageList.length} messages marked as read in database');
       
     } catch (e) {
       AppConfig.debugPrint('⚠️ Error marking messages as read: $e');
@@ -298,7 +299,7 @@ class MessagingService {
               lastMessage = msg;
             }
             
-            // ✅ NEW: Count unread messages from this friend
+            // ✅ Count unread messages from this friend
             if (msg['receiver'] == uid && msg['is_read'] == false) {
               unreadCount++;
             }
@@ -308,7 +309,7 @@ class MessagingService {
         chats.add({
           'friend': f,
           'lastMessage': lastMessage,
-          'unreadCount': unreadCount, // ✅ NEW: Add unread count per chat
+          'unreadCount': unreadCount,
         });
       }
 
@@ -329,7 +330,7 @@ class MessagingService {
   }
 
   // ==============================================
-  // ✅ NEW: GET UNREAD COUNT PER SENDER (for chat list badges)
+  // ✅ GET UNREAD COUNT PER SENDER (for chat list badges)
   // ==============================================
   static Future<Map<String, int>> getUnreadCountsBySender() async {
     if (AuthService.currentUserId == null) return {};
@@ -361,11 +362,23 @@ class MessagingService {
   }
 
   // ==============================================
-  // ✅ NEW: REFRESH BADGE (call this when entering messaging screens)
+  // ✅ REFRESH BADGE (call this when entering messaging screens)
   // ==============================================
   static Future<void> refreshUnreadBadge() async {
-    await MenuIconWithBadge.invalidateCache();
-    await AppDrawer.invalidateUnreadCache();
-    AppConfig.debugPrint('🔄 Unread badge refreshed');
+    try {
+      // Invalidate cache first
+      await MenuIconWithBadge.invalidateCache();
+      await AppDrawer.invalidateUnreadCache();
+      
+      // Small delay to ensure cache is cleared
+      await Future.delayed(Duration(milliseconds: 100));
+      
+      // Force refresh the badge widget with fresh data
+      MenuIconWithBadge.globalKey.currentState?.refresh();
+      
+      AppConfig.debugPrint('🔄 Unread badge refreshed with fresh data');
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Error refreshing badge: $e');
+    }
   }
 }

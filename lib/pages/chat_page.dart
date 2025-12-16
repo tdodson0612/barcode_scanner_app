@@ -1,3 +1,4 @@
+// lib/pages/chat_page.dart - FIXED: Proper badge refresh timing
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,34 +34,48 @@ class _ChatPageState extends State<ChatPage> {
   bool _isLoading = true;
   bool _isSending = false;
 
-  // Cache key for this conversation
   String get _cacheKey => 'messages_${AuthService.currentUserId}_${widget.friendId}';
 
   @override
   void initState() {
     super.initState();
-    _initializeChat(); // 🔥 FIXED: Use async initialization
+    _initializeChat();
   }
 
-  // 🔥 NEW: Proper async initialization
+  // ✅ FIXED: Proper initialization with delayed badge refresh
   Future<void> _initializeChat() async {
     // Load messages first
-    _loadMessages();
+    await _loadMessages();
     
-    // Then mark messages as read and invalidate badge cache
+    // Mark messages as read AFTER messages are loaded
     await _markMessagesAsRead();
+    
+    // ✅ CRITICAL FIX: Wait a bit for database to commit, then force refresh
+    await Future.delayed(Duration(milliseconds: 500));
+    await _refreshBadgeAfterRead();
   }
 
-  // 🔥 NEW: Separate method for marking as read
-  Future<void> _markMessagesAsRead() async {
+  // ✅ NEW: Dedicated method for badge refresh after marking as read
+  Future<void> _refreshBadgeAfterRead() async {
     try {
-      await MessagingService.markMessagesAsReadFrom(widget.friendId);
-      
-      // ✅ CRITICAL FIX: Invalidate badge cache immediately
+      // Force invalidate cache
       await MenuIconWithBadge.invalidateCache();
       await AppDrawer.invalidateUnreadCache();
       
-      print('✅ Messages marked as read, badge should update');
+      // Force the badge widget to reload with fresh data
+      MenuIconWithBadge.globalKey.currentState?.refresh();
+      
+      print('✅ Badge refreshed after marking messages as read');
+    } catch (e) {
+      print('⚠️ Error refreshing badge: $e');
+    }
+  }
+
+  Future<void> _markMessagesAsRead() async {
+    try {
+      // Mark messages as read in database
+      await MessagingService.markMessagesAsReadFrom(widget.friendId);
+      print('✅ Messages marked as read for friend: ${widget.friendId}');
     } catch (e) {
       print('⚠️ Error marking messages as read: $e');
     }
@@ -68,19 +83,35 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
-    // ✅ CRITICAL FIX: Final refresh when leaving chat
-    MessagingService.refreshUnreadBadge();
+    // ✅ FIXED: Final refresh when leaving chat with proper async handling
+    _performFinalCleanup();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  // Load messages from cache first, then fetch updates from server
+  // ✅ NEW: Async cleanup that doesn't block dispose
+  void _performFinalCleanup() {
+    Future.microtask(() async {
+      try {
+        await MenuIconWithBadge.invalidateCache();
+        await AppDrawer.invalidateUnreadCache();
+        
+        // Force refresh the badge widget
+        MenuIconWithBadge.globalKey.currentState?.refresh();
+        
+        print('✅ Final cleanup completed');
+      } catch (e) {
+        print('⚠️ Error in final cleanup: $e');
+      }
+    });
+  }
+
   Future<void> _loadMessages() async {
     try {
       setState(() => _isLoading = true);
       
-      // STEP 1: Load from cache immediately for instant display
+      // Load from cache immediately
       final cachedMessages = await _loadMessagesFromCache();
       if (cachedMessages.isNotEmpty && mounted) {
         setState(() {
@@ -90,11 +121,10 @@ class _ChatPageState extends State<ChatPage> {
         _scrollToBottom();
       }
       
-      // STEP 2: Fetch from server to get any new messages
+      // Fetch from server
       final serverMessages = await MessagingService.getMessages(widget.friendId);
       
       if (mounted) {
-        // Sort messages by timestamp in ascending order (oldest to newest)
         serverMessages.sort((a, b) {
           try {
             final timeA = DateTime.parse(a['created_at'] ?? '');
@@ -105,7 +135,6 @@ class _ChatPageState extends State<ChatPage> {
           }
         });
         
-        // STEP 3: Cache the fresh data
         await _saveMessagesToCache(serverMessages);
         
         setState(() {
@@ -119,7 +148,6 @@ class _ChatPageState extends State<ChatPage> {
       if (mounted) {
         setState(() => _isLoading = false);
         
-        // If we have cached messages, show them even if server fetch fails
         if (_messages.isEmpty) {
           await ErrorHandlingService.handleError(
             context: context,
@@ -130,14 +158,12 @@ class _ChatPageState extends State<ChatPage> {
             onRetry: _loadMessages,
           );
         } else {
-          // Silent failure - we already have cached data
           print('Failed to refresh messages from server, using cache: $e');
         }
       }
     }
   }
 
-  // Load messages from local cache
   Future<List<Map<String, dynamic>>> _loadMessagesFromCache() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -153,7 +179,6 @@ class _ChatPageState extends State<ChatPage> {
     return [];
   }
 
-  // Save messages to local cache
   Future<void> _saveMessagesToCache(List<Map<String, dynamic>> messages) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -164,21 +189,10 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  // Clear cache for this conversation (useful if needed)
-  Future<void> _clearCache() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_cacheKey);
-    } catch (e) {
-      print('Error clearing cache: $e');
-    }
-  }
-
   Future<void> _sendMessage() async {
     final content = _messageController.text.trim();
     if (content.isEmpty || _isSending) return;
 
-    // Create temporary message for optimistic UI update
     final tempMessage = {
      'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
      'sender': AuthService.currentUserId,
@@ -196,31 +210,27 @@ class _ChatPageState extends State<ChatPage> {
     _messageController.clear();
     _scrollToBottom();
 
-    // Optimistically cache the message
     await _saveMessagesToCache(_messages);
 
     try {
       await MessagingService.sendMessage(widget.friendId, content);
       
-      // ✅ CRITICAL FIX: Refresh badge after sending
+      // ✅ FIXED: Proper badge refresh after sending
+      await Future.delayed(Duration(milliseconds: 300));
       await MenuIconWithBadge.invalidateCache();
       await AppDrawer.invalidateUnreadCache();
+      MenuIconWithBadge.globalKey.currentState?.refresh();
       
       if (mounted) {
-        // Reload messages to get the actual message with proper ID
         await _loadMessages();
       }
     } catch (e) {
       if (mounted) {
-        // Remove the optimistic message on error
         setState(() {
           _messages.removeWhere((msg) => msg['is_temp'] == true);
         });
         
-        // Update cache to remove failed message
         await _saveMessagesToCache(_messages);
-        
-        // Restore the message text to the input field
         _messageController.text = content;
         
         await ErrorHandlingService.handleError(
@@ -252,7 +262,6 @@ class _ChatPageState extends State<ChatPage> {
 
   String _formatMessageTime(String timestamp) {
     try {
-      // Parse as UTC and convert to local time
       final utcDateTime = DateTime.parse(timestamp).toUtc();
       final localDateTime = utcDateTime.toLocal();
       final now = DateTime.now();
@@ -398,10 +407,15 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // ✅ CRITICAL FIX: Invalidate badge cache when leaving chat
+        // ✅ FIXED: Proper async handling when leaving chat
         await MenuIconWithBadge.invalidateCache();
         await AppDrawer.invalidateUnreadCache();
-        print('✅ Leaving chat, badge cache invalidated');
+        
+        // Force refresh the badge widget
+        await Future.delayed(Duration(milliseconds: 200));
+        MenuIconWithBadge.globalKey.currentState?.refresh();
+        
+        print('✅ Leaving chat, badge refreshed');
         return true;
       },
       child: Scaffold(
