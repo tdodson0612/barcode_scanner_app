@@ -10,6 +10,23 @@ import UIKit
     // ⚠️ DO NOT call FirebaseApp.configure() here!
     // Flutter's firebase_core plugin handles initialization from main.dart
     
+    // ✅ NEW: Setup badge clearing method channel
+    let controller : FlutterViewController = window?.rootViewController as! FlutterViewController
+    let badgeChannel = FlutterMethodChannel(name: "com.liverwise/badge",
+                                            binaryMessenger: controller.binaryMessenger)
+    
+    badgeChannel.setMethodCallHandler({
+      (call: FlutterMethodCall, result: @escaping FlutterResult) -> Void in
+      
+      if call.method == "clearBadge" {
+        // Clear the app badge
+        UIApplication.shared.applicationIconBadgeNumber = 0
+        result(true)
+      } else {
+        result(FlutterMethodNotImplemented)
+      }
+    })
+    
     // Register Flutter plugins
     GeneratedPluginRegistrant.register(with: self)
     
@@ -34,12 +51,12 @@ import UIKit
   
   // 🔔 Handle FCM token refresh
   override func application(_ application: UIApplication,
-                           didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+                            didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
     // Pass device token to Firebase (handled automatically by FlutterFire)
   }
   
   override func application(_ application: UIApplication,
-                           didFailToRegisterForRemoteNotificationsWithError error: Error) {
+                            didFailToRegisterForRemoteNotificationsWithError error: Error) {
     print("⚠️ Failed to register for remote notifications: \(error)")
   }
 }

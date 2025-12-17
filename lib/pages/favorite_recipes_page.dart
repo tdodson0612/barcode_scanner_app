@@ -851,6 +851,8 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
               ),
             ),
             SizedBox(height: 32),
+            
+            // Start Scanning button
             ElevatedButton.icon(
               onPressed: () {
                 Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
@@ -868,6 +870,31 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 elevation: 2,
+                minimumSize: Size(double.infinity, 56),
+              ),
+            ),
+            
+            SizedBox(height: 12),
+            
+            // Manual Barcode Entry button
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pushNamed(context, '/manual-barcode-entry');
+              },
+              icon: Icon(Icons.edit, size: 22),
+              label: Text(
+                'Manual Barcode Entry',
+                style: TextStyle(fontSize: 16),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 2,
+                minimumSize: Size(double.infinity, 56),
               ),
             ),
           ],

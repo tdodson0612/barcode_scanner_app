@@ -1,5 +1,6 @@
-// lib/pages/messages_page.dart - FIXED: Badge refresh on page load
+// lib/pages/messages_page.dart - FIXED: Badge refresh on page load + iOS badge clearing
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:liver_wise/services/friends_service.dart';
 import 'package:liver_wise/services/messaging_service.dart';
 import 'package:logger/logger.dart';
@@ -8,7 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../services/database_service_core.dart';
 import '../widgets/app_drawer.dart';
-import '../widgets/menu_icon_with_badge.dart'; // ✅ ADD THIS IMPORT
+import '../widgets/menu_icon_with_badge.dart';
 import 'chat_page.dart';
 import 'search_users_page.dart';
 
@@ -27,6 +28,18 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
   bool _isLoadingChats = true;
   bool _isLoadingRequests = true;
 
+  // ✅ NEW: Platform channel for clearing iOS badge
+  static const platform = MethodChannel('com.liverwise/badge');
+  
+  Future<void> _clearIOSBadge() async {
+    try {
+      await platform.invokeMethod('clearBadge');
+      print('✅ iOS badge cleared from messages page');
+    } catch (e) {
+      print('⚠️ Error clearing iOS badge: $e');
+    }
+  }
+
   // Cache configuration
   static const Duration _chatsCacheDuration = Duration(minutes: 1);
   static const Duration _requestsCacheDuration = Duration(minutes: 2);
@@ -36,8 +49,9 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     
-    // ✅ CRITICAL FIX: Refresh badge when entering messages page
+    // ✅ CRITICAL FIX: Refresh badge AND clear iOS badge when entering messages page
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _clearIOSBadge();
       await MessagingService.refreshUnreadBadge();
     });
     
@@ -483,7 +497,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
           final chat = _chats[index];
           final friend = chat['friend'];
           final lastMessage = chat['lastMessage'];
-          final unreadCount = chat['unreadCount'] ?? 0; // ✅ NEW: Get unread count per chat
+          final unreadCount = chat['unreadCount'] ?? 0;
           
           return Card(
             margin: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -501,7 +515,6 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                           )
                         : null,
                   ),
-                  // ✅ NEW: Show unread badge on avatar
                   if (unreadCount > 0)
                     Positioned(
                       right: 0,

@@ -420,27 +420,37 @@ class _GroceryListPageState extends State<GroceryListPage> {
     if (confirmed != true) return;
 
     try {
+      // Clear from database first
       await GroceryService.clearGroceryList();
       
+      // Invalidate cache
       await _invalidateGroceryListCache();
       
       if (mounted) {
+        // Dispose all existing controllers
+        for (var controllers in itemControllers) {
+          controllers['name']!.dispose();
+          controllers['quantity']!.dispose();
+          controllers['measurement']!.dispose();
+        }
+        
+        // Reset to single empty row
         setState(() {
-          for (var controllers in itemControllers) {
-            controllers['name']!.dispose();
-            controllers['quantity']!.dispose();
-            controllers['measurement']!.dispose();
-          }
-          itemControllers = [{
-            'quantity': TextEditingController(),
-            'measurement': TextEditingController(),
-            'name': TextEditingController(),
-          }];
+          itemControllers = [
+            {
+              'quantity': TextEditingController(),
+              'measurement': TextEditingController(),
+              'name': TextEditingController(),
+            }
+          ];
         });
+        
+        // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Grocery list cleared!'),
             backgroundColor: Colors.orange,
+            duration: Duration(seconds: 2),
           ),
         );
       }
@@ -450,6 +460,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
           SnackBar(
             content: Text('Error clearing grocery list: $e'),
             backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
           ),
         );
       }

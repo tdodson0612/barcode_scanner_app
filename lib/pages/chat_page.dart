@@ -1,5 +1,6 @@
-// lib/pages/chat_page.dart - FIXED: Proper badge refresh timing
+// lib/pages/chat_page.dart - FIXED: Proper badge refresh timing + iOS badge clearing
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -42,13 +43,28 @@ class _ChatPageState extends State<ChatPage> {
     _initializeChat();
   }
 
-  // ✅ FIXED: Proper initialization with delayed badge refresh
+  // ✅ NEW: Clear iOS badge using native platform channel
+  static const platform = MethodChannel('com.liverwise/badge');
+  
+  Future<void> _clearIOSBadge() async {
+    try {
+      await platform.invokeMethod('clearBadge');
+      print('✅ iOS badge cleared');
+    } catch (e) {
+      print('⚠️ Error clearing iOS badge: $e');
+    }
+  }
+
+  // ✅ FIXED: Proper initialization with delayed badge refresh + iOS badge clearing
   Future<void> _initializeChat() async {
     // Load messages first
     await _loadMessages();
     
     // Mark messages as read AFTER messages are loaded
     await _markMessagesAsRead();
+    
+    // ✅ NEW: Clear iOS badge
+    await _clearIOSBadge();
     
     // ✅ CRITICAL FIX: Wait a bit for database to commit, then force refresh
     await Future.delayed(Duration(milliseconds: 500));
@@ -407,7 +423,8 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // ✅ FIXED: Proper async handling when leaving chat
+        // ✅ FIXED: Proper async handling when leaving chat + clear iOS badge
+        await _clearIOSBadge();
         await MenuIconWithBadge.invalidateCache();
         await AppDrawer.invalidateUnreadCache();
         
@@ -415,7 +432,7 @@ class _ChatPageState extends State<ChatPage> {
         await Future.delayed(Duration(milliseconds: 200));
         MenuIconWithBadge.globalKey.currentState?.refresh();
         
-        print('✅ Leaving chat, badge refreshed');
+        print('✅ Leaving chat, badge refreshed and iOS badge cleared');
         return true;
       },
       child: Scaffold(
@@ -540,3 +557,5 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 }
+
+// ✅ COMPLETE - All badge clearing functionality added!
