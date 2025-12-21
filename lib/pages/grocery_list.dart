@@ -1,4 +1,4 @@
-// lib/pages/grocery_list.dart - UPDATED: Added measurement field (Qty, Measurement, Item)
+// lib/pages/grocery_list.dart - COMPLETE UPDATED VERSION
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,6 +7,7 @@ import 'dart:convert';
 import '../services/auth_service.dart';
 import '../services/grocery_service.dart';
 import '../models/grocery_item.dart';
+import '../services/error_handling_service.dart';
 
 class GroceryListPage extends StatefulWidget {
   final String? initialItem;
@@ -59,6 +60,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
   void _addScannedItem(String item) {
     if (mounted) {
       setState(() {
+        // Remove last empty row if exists
         if (itemControllers.isNotEmpty && 
             itemControllers.last['name']!.text.isEmpty) {
           itemControllers.last['name']!.dispose();
@@ -86,7 +88,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Added "$item" to grocery list'),
+          content: Text('✅ Added "$item" to grocery list'),
           backgroundColor: Colors.green,
           action: SnackBarAction(
             label: 'Save',
@@ -120,7 +122,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
       print('📦 Using cached grocery list (${items.length} items)');
       return items;
     } catch (e) {
-      print('Error loading cached grocery list: $e');
+      print('⚠️ Error loading cached grocery list: $e');
       return null;
     }
   }
@@ -135,7 +137,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
       await prefs.setString('grocery_list', json.encode(cacheData));
       print('💾 Cached ${items.length} grocery items');
     } catch (e) {
-      print('Error caching grocery list: $e');
+      print('⚠️ Error caching grocery list: $e');
     }
   }
 
@@ -145,7 +147,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
       await prefs.remove('grocery_list');
       print('🗑️ Invalidated grocery list cache');
     } catch (e) {
-      print('Error invalidating grocery list cache: $e');
+      print('⚠️ Error invalidating grocery list cache: $e');
     }
   }
 
@@ -167,7 +169,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
         name = parts.sublist(2).join(' ');
       }
     } else if (parts.length == 2) {
-      // Check if format is "quantity x name"
+      // Check if format is "quantity x name" or "quantity name"
       if (parts[1].toLowerCase() == 'x' || RegExp(r'^[\d.]+$').hasMatch(parts[0])) {
         final quantityMatch = RegExp(r'^([\d.]+)\s*x?\s*(.+)$').firstMatch(itemText);
         if (quantityMatch != null) {
@@ -185,7 +187,6 @@ class _GroceryListPageState extends State<GroceryListPage> {
   }
 
   // ========== LOAD FUNCTION WITH CACHING ==========
-
   Future<void> _loadGroceryList({bool forceRefresh = false}) async {
     try {
       // Try cache first unless force refresh
@@ -213,6 +214,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
                 });
               }
               
+              // Always add empty row at end
               itemControllers.add({
                 'quantity': TextEditingController(),
                 'measurement': TextEditingController(),
@@ -250,6 +252,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
             });
           }
           
+          // Always add empty row at end
           itemControllers.add({
             'quantity': TextEditingController(),
             'measurement': TextEditingController(),
@@ -297,11 +300,12 @@ class _GroceryListPageState extends State<GroceryListPage> {
             'name': TextEditingController(),
           }];
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error loading grocery list: $e'),
-            backgroundColor: Colors.red,
-          ),
+        
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Error loading grocery list',
         );
       }
     }
@@ -360,6 +364,18 @@ class _GroceryListPageState extends State<GroceryListPage> {
             return parts.join(' ');
           })
           .toList();
+      
+      if (items.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('⚠️ Add at least one item to save'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
           
       // Save to database
       await GroceryService.saveGroceryList(items);
@@ -373,19 +389,20 @@ class _GroceryListPageState extends State<GroceryListPage> {
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Grocery list saved!'),
+          SnackBar(
+            content: Text('✅ Saved ${items.length} item${items.length == 1 ? '' : 's'}!'),
             backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error saving grocery list: $e'),
-            backgroundColor: Colors.red,
-          ),
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Error saving grocery list',
         );
       }
     } finally {
@@ -448,7 +465,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
         // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Grocery list cleared!'),
+            content: Text('🗑️ Grocery list cleared!'),
             backgroundColor: Colors.orange,
             duration: Duration(seconds: 2),
           ),
@@ -456,12 +473,11 @@ class _GroceryListPageState extends State<GroceryListPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error clearing grocery list: $e'),
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 3),
-          ),
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Error clearing grocery list',
         );
       }
     }
@@ -482,7 +498,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('Grocery list refreshed'),
+                    content: Text('🔄 Grocery list refreshed'),
                     backgroundColor: Colors.blue,
                     duration: Duration(seconds: 1),
                   ),
@@ -517,6 +533,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
                     padding: const EdgeInsets.all(16),
                     child: Column(
                       children: [
+                        // Header
                         Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
@@ -531,18 +548,45 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                 color: Colors.green,
                               ),
                               const SizedBox(width: 12),
-                              const Text(
-                                'My Grocery List',
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black87,
+                              Expanded(
+                                child: const Text(
+                                  'My Grocery List',
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              ),
+                              // Item count badge
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.shade100,
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: Colors.green.shade300,
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Text(
+                                  '${itemControllers.where((c) => c['name']!.text.trim().isNotEmpty).length} items',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.green.shade700,
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                         ),
                         const SizedBox(height: 16),
+                        
+                        // List
                         Expanded(
                           child: Container(
                             padding: const EdgeInsets.all(16),
@@ -550,152 +594,164 @@ class _GroceryListPageState extends State<GroceryListPage> {
                               color: Colors.white.withAlpha((0.9 * 255).toInt()),
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: ListView.builder(
-                              itemCount: itemControllers.length,
-                              itemBuilder: (context, index) {
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: Row(
-                                    children: [
-                                      // Row number
-                                      Container(
-                                        width: 35,
-                                        height: 35,
-                                        decoration: BoxDecoration(
-                                          color: Colors.blue.shade100,
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                            color: Colors.blue.shade300,
-                                            width: 1,
-                                          ),
-                                        ),
-                                        child: Center(
-                                          child: Text(
-                                            '${index + 1}',
-                                            style: TextStyle(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.bold,
-                                              color: Colors.blue.shade700,
-                                            ),
-                                          ),
-                                        ),
+                            child: itemControllers.isEmpty
+                                ? const Center(
+                                    child: Text(
+                                      'No items yet. Start adding groceries!',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        color: Colors.grey,
                                       ),
-                                      const SizedBox(width: 12),
-                                      
-                                      // Quantity field
-                                      SizedBox(
-                                        width: 50,
-                                        child: TextField(
-                                          controller: itemControllers[index]['quantity'],
-                                          decoration: InputDecoration(
-                                            hintText: 'Qty',
-                                            hintStyle: TextStyle(fontSize: 11),
-                                            border: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(8),
-                                              borderSide: BorderSide(color: Colors.grey.shade300),
+                                    ),
+                                  )
+                                : ListView.builder(
+                                    itemCount: itemControllers.length,
+                                    itemBuilder: (context, index) {
+                                      return Padding(
+                                        padding: const EdgeInsets.only(bottom: 12),
+                                        child: Row(
+                                          children: [
+                                            // Row number
+                                            Container(
+                                              width: 35,
+                                              height: 35,
+                                              decoration: BoxDecoration(
+                                                color: Colors.blue.shade100,
+                                                shape: BoxShape.circle,
+                                                border: Border.all(
+                                                  color: Colors.blue.shade300,
+                                                  width: 1,
+                                                ),
+                                              ),
+                                              child: Center(
+                                                child: Text(
+                                                  '${index + 1}',
+                                                  style: TextStyle(
+                                                    fontSize: 14,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.blue.shade700,
+                                                  ),
+                                                ),
+                                              ),
                                             ),
-                                            focusedBorder: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(8),
-                                              borderSide: BorderSide(color: Colors.blue, width: 2),
+                                            const SizedBox(width: 12),
+                                            
+                                            // Quantity field
+                                            SizedBox(
+                                              width: 50,
+                                              child: TextField(
+                                                controller: itemControllers[index]['quantity'],
+                                                decoration: InputDecoration(
+                                                  hintText: 'Qty',
+                                                  hintStyle: const TextStyle(fontSize: 11),
+                                                  border: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    borderSide: BorderSide(color: Colors.grey.shade300),
+                                                  ),
+                                                  focusedBorder: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    borderSide: const BorderSide(color: Colors.blue, width: 2),
+                                                  ),
+                                                  contentPadding: const EdgeInsets.symmetric(
+                                                    horizontal: 6,
+                                                    vertical: 8,
+                                                  ),
+                                                  filled: true,
+                                                  fillColor: Colors.grey.shade50,
+                                                ),
+                                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                                inputFormatters: [
+                                                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                                                ],
+                                                style: const TextStyle(fontSize: 13),
+                                                textAlign: TextAlign.center,
+                                              ),
                                             ),
-                                            contentPadding: const EdgeInsets.symmetric(
-                                              horizontal: 6,
-                                              vertical: 8,
+                                            const SizedBox(width: 6),
+                                            
+                                            // Measurement field (lb, oz, kg, etc.)
+                                            SizedBox(
+                                              width: 55,
+                                              child: TextField(
+                                                controller: itemControllers[index]['measurement'],
+                                                decoration: InputDecoration(
+                                                  hintText: 'Unit',
+                                                  hintStyle: const TextStyle(fontSize: 11),
+                                                  border: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    borderSide: BorderSide(color: Colors.grey.shade300),
+                                                  ),
+                                                  focusedBorder: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    borderSide: const BorderSide(color: Colors.blue, width: 2),
+                                                  ),
+                                                  contentPadding: const EdgeInsets.symmetric(
+                                                    horizontal: 6,
+                                                    vertical: 8,
+                                                  ),
+                                                  filled: true,
+                                                  fillColor: Colors.grey.shade50,
+                                                ),
+                                                style: const TextStyle(fontSize: 13),
+                                                textAlign: TextAlign.center,
+                                              ),
                                             ),
-                                            filled: true,
-                                            fillColor: Colors.grey.shade50,
-                                          ),
-                                          keyboardType: TextInputType.number,
-                                          inputFormatters: [
-                                            FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                                            const SizedBox(width: 6),
+                                            
+                                            // Item name field
+                                            Expanded(
+                                              child: TextField(
+                                                controller: itemControllers[index]['name'],
+                                                decoration: InputDecoration(
+                                                  hintText: 'Enter item name...',
+                                                  border: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    borderSide: BorderSide(color: Colors.grey.shade300),
+                                                  ),
+                                                  focusedBorder: OutlineInputBorder(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    borderSide: const BorderSide(color: Colors.blue, width: 2),
+                                                  ),
+                                                  contentPadding: const EdgeInsets.symmetric(
+                                                    horizontal: 12,
+                                                    vertical: 8,
+                                                  ),
+                                                  filled: true,
+                                                  fillColor: Colors.grey.shade50,
+                                                ),
+                                                onChanged: (text) {
+                                                  if (index == itemControllers.length - 1 && text.isNotEmpty) {
+                                                    _addNewItem();
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                            
+                                            // Remove button
+                                            if (itemControllers.length > 1)
+                                              Padding(
+                                                padding: const EdgeInsets.only(left: 6),
+                                                child: IconButton(
+                                                  icon: Icon(
+                                                    Icons.remove_circle,
+                                                    color: Colors.red.shade400,
+                                                    size: 22,
+                                                  ),
+                                                  padding: EdgeInsets.zero,
+                                                  constraints: const BoxConstraints(),
+                                                  onPressed: () => _removeItem(index),
+                                                ),
+                                              ),
                                           ],
-                                          style: TextStyle(fontSize: 13),
-                                          textAlign: TextAlign.center,
                                         ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      
-                                      // Measurement field (lb, oz, kg, etc.)
-                                      SizedBox(
-                                        width: 55,
-                                        child: TextField(
-                                          controller: itemControllers[index]['measurement'],
-                                          decoration: InputDecoration(
-                                            hintText: 'Unit',
-                                            hintStyle: TextStyle(fontSize: 11),
-                                            border: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(8),
-                                              borderSide: BorderSide(color: Colors.grey.shade300),
-                                            ),
-                                            focusedBorder: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(8),
-                                              borderSide: BorderSide(color: Colors.blue, width: 2),
-                                            ),
-                                            contentPadding: const EdgeInsets.symmetric(
-                                              horizontal: 6,
-                                              vertical: 8,
-                                            ),
-                                            filled: true,
-                                            fillColor: Colors.grey.shade50,
-                                          ),
-                                          style: TextStyle(fontSize: 13),
-                                          textAlign: TextAlign.center,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      
-                                      // Item name field
-                                      Expanded(
-                                        child: TextField(
-                                          controller: itemControllers[index]['name'],
-                                          decoration: InputDecoration(
-                                            hintText: 'Enter item name...',
-                                            border: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(8),
-                                              borderSide: BorderSide(color: Colors.grey.shade300),
-                                            ),
-                                            focusedBorder: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(8),
-                                              borderSide: BorderSide(color: Colors.blue, width: 2),
-                                            ),
-                                            contentPadding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 8,
-                                            ),
-                                            filled: true,
-                                            fillColor: Colors.grey.shade50,
-                                          ),
-                                          onChanged: (text) {
-                                            if (index == itemControllers.length - 1 && text.isNotEmpty) {
-                                              _addNewItem();
-                                            }
-                                          },
-                                        ),
-                                      ),
-                                      
-                                      // Remove button
-                                      if (itemControllers.length > 1)
-                                        Padding(
-                                          padding: const EdgeInsets.only(left: 6),
-                                          child: IconButton(
-                                            icon: Icon(
-                                              Icons.remove_circle,
-                                              color: Colors.red.shade400,
-                                              size: 22,
-                                            ),
-                                            padding: EdgeInsets.zero,
-                                            constraints: BoxConstraints(),
-                                            onPressed: () => _removeItem(index),
-                                          ),
-                                        ),
-                                    ],
+                                      );
+                                    },
                                   ),
-                                );
-                              },
-                            ),
                           ),
                         ),
                         const SizedBox(height: 16),
+                        
+                        // Buttons
                         Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
@@ -710,7 +766,7 @@ class _GroceryListPageState extends State<GroceryListPage> {
                                 child: ElevatedButton.icon(
                                   onPressed: isSaving ? null : _saveGroceryList,
                                   icon: isSaving
-                                      ? SizedBox(
+                                      ? const SizedBox(
                                           width: 16,
                                           height: 16,
                                           child: CircularProgressIndicator(

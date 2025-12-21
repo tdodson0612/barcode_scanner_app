@@ -2,6 +2,7 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
+import 'package:liver_wise/services/local_draft_service.dart';
 
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -1303,6 +1304,112 @@ class _HomePageState extends State<HomePage>
       }
     }
   }
+  Future<void> _saveRecipeDraft() async {
+    if (_recipeSuggestions.isEmpty || _currentNutrition == null) {
+      ErrorHandlingService.showSimpleError(
+        context,
+        'No recipe to save. Please scan a product first.',
+      );
+      return;
+    }
+
+    // Show dialog to select which recipe to save
+    final selectedRecipe = await showDialog<Recipe>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Save Recipe as Draft'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Select a recipe to save:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            ..._getCurrentPageRecipes().map((recipe) {
+              return ListTile(
+                title: Text(recipe.title),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.pop(context, recipe),
+              );
+            }).toList(),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (selectedRecipe == null) return;
+
+    try {
+      // Convert Recipe ingredients to JSON format
+      final ingredientsJson = selectedRecipe.ingredients
+          .map((ing) => {
+                'quantity': '',
+                'measurement': '',
+                'name': ing,
+              })
+          .toList();
+
+      await LocalDraftService.saveDraft(
+        name: selectedRecipe.title,
+        ingredients: jsonEncode(ingredientsJson),
+        directions: selectedRecipe.instructions,
+      );
+
+      if (mounted) {
+        ErrorHandlingService.showSuccess(
+          context,
+          '✅ Recipe "${selectedRecipe.title}" saved as draft!',
+        );
+
+        // Ask if user wants to edit it now
+        final shouldEdit = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Draft Saved'),
+            content: Text(
+              'Recipe "${selectedRecipe.title}" has been saved.\n\n'
+              'Would you like to edit it now?'
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Later'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Edit Now'),
+              ),
+            ],
+          ),
+        );
+
+        if (shouldEdit == true && mounted) {
+          Navigator.pushNamed(context, '/submit-recipe');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to save recipe draft',
+        );
+      }
+    }
+  }
 
   // -----------------------------------------------------
   // ADD INGREDIENTS TO GROCERY LIST
@@ -1807,7 +1914,6 @@ class _HomePageState extends State<HomePage>
   // ✅ ALSO FIX: _buildScanningView() - Replace the Stack with Container
   Widget _buildScanningView() {
     return Container(
-      // ✅ FIXED: Use Container with decoration instead of Stack
       decoration: BoxDecoration(
         image: DecorationImage(
           image: AssetImage(
@@ -1815,11 +1921,11 @@ class _HomePageState extends State<HomePage>
                 ? 'assets/backgrounds/ipad_background.png'
                 : 'assets/backgrounds/home_background.png',
           ),
-          fit: BoxFit.cover, // ✅ Single image stretched to fill
+          fit: BoxFit.cover,
         ),
       ),
       child: SingleChildScrollView(
-        padding: EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: [
             const SizedBox(height: 20),
@@ -1885,6 +1991,19 @@ class _HomePageState extends State<HomePage>
                       label: const Text("Grocery List"),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.purple,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  const SizedBox(width: 8),
+
+                  // 🔥 NEW: Save Recipe Draft button (only show if recipes exist)
+                  if (_recipeSuggestions.isNotEmpty)
+                    ElevatedButton.icon(
+                      onPressed: _saveRecipeDraft,
+                      icon: const Icon(Icons.save_outlined),
+                      label: const Text("Save Draft"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade700,
                         foregroundColor: Colors.white,
                       ),
                     ),
@@ -2089,175 +2208,190 @@ class _HomePageState extends State<HomePage>
   }
 
 
-// ----------------------------------------------------
-// HEALTH-BASED RECIPE SUGGESTIONS
-// ----------------------------------------------------
-Widget _buildNutritionRecipeSuggestions() {
-  final hasKeywords = _keywordTokens.isNotEmpty;
-  final hasRecipes = _recipeSuggestions.isNotEmpty;
+  // ----------------------------------------------------
+  // HEALTH-BASED RECIPE SUGGESTIONS
+  // ----------------------------------------------------
+  Widget _buildNutritionRecipeSuggestions() {
+    final hasKeywords = _keywordTokens.isNotEmpty;
+    final hasRecipes = _recipeSuggestions.isNotEmpty;
 
-  if (!hasKeywords && !hasRecipes) return const SizedBox.shrink();
+    if (!hasKeywords && !hasRecipes) return const SizedBox.shrink();
 
-  return PremiumGate(
-    feature: PremiumFeature.viewRecipes,
-    featureName: 'Recipe Details',
-    featureDescription:
-        'View full recipe details with ingredients and directions.',
-    child: Container(
-      margin: const EdgeInsets.all(20),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.blue.shade800,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Health-Based Recipe Suggestions:',
-            style: TextStyle(
-              fontSize: 20,
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
+    return PremiumGate(
+      feature: PremiumFeature.viewRecipes,
+      featureName: 'Recipe Details',
+      featureDescription:
+          'View full recipe details with ingredients and directions.',
+      child: Container(
+        margin: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.blue.shade800,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
             ),
-          ),
-          const SizedBox(height: 12),
-
-          // ---------------------------
-          // KEYWORD BUTTONS
-          // ---------------------------
-          if (hasKeywords) ...[
-            const Text(
-              'Select your key search word(s):',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.white70,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 8),
-
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _keywordTokens.map((word) {
-                final selected = _selectedKeywords.contains(word);
-                return Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => _toggleKeyword(word),
-                    borderRadius: BorderRadius.circular(20),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: selected 
-                            ? Colors.green 
-                            : Colors.white.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: selected ? Colors.white : Colors.white30,
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Text(
-                        word,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                        ),
-                      ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with Save Draft button
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Health-Based Recipe Suggestions:',
+                    style: TextStyle(
+                      fontSize: 20,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                );
-              }).toList(),
+                ),
+                // ✅ NEW: Save Draft button
+                if (hasRecipes)
+                  IconButton(
+                    icon: const Icon(Icons.save_outlined, color: Colors.white),
+                    tooltip: 'Save Recipe as Draft',
+                    onPressed: _saveRecipeDraft,
+                  ),
+              ],
             ),
+            const SizedBox(height: 12),
 
-            const SizedBox(height: 14),
-
-            Align(
-              alignment: Alignment.centerRight,
-              child: ElevatedButton.icon(
-                onPressed:
-                    _isSearchingRecipes ? null : _searchRecipesBySelectedKeywords,
-                icon: _isSearchingRecipes
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : const Icon(Icons.search),
-                label: Text(
-                    _isSearchingRecipes ? 'Searching...' : 'Search Recipes'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                  foregroundColor: Colors.white,
+            // ---------------------------
+            // KEYWORD BUTTONS
+            // ---------------------------
+            if (hasKeywords) ...[
+              const Text(
+                'Select your key search word(s):',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-            ),
+              const SizedBox(height: 8),
 
-            const SizedBox(height: 18),
-
-            if (!hasRecipes)
-              const Text(
-                'No recipes yet. Select words above and tap Search.',
-                style: TextStyle(fontSize: 12, color: Colors.white60),
-              ),
-          ],
-
-          // ---------------------------
-          // RESULTS LIST (with pagination)
-          // ---------------------------
-          if (hasRecipes) ...[
-            const SizedBox(height: 8),
-            
-            // Show current page recipes
-            ..._getCurrentPageRecipes().map((r) => _buildNutritionRecipeCard(r)),
-            
-            // Pagination controls
-            if (_recipeSuggestions.length > _recipesPerPage) ...[
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Showing ${_currentRecipeIndex + 1}-${(_currentRecipeIndex + _recipesPerPage).clamp(0, _recipeSuggestions.length)} of ${_recipeSuggestions.length} recipes',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.white70,
-                    ),
-                  ),
-                  ElevatedButton.icon(
-                    onPressed: _loadNextRecipeSuggestions,
-                    icon: const Icon(Icons.arrow_forward, size: 16),
-                    label: const Text('Next Suggestions'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _keywordTokens.map((word) {
+                  final selected = _selectedKeywords.contains(word);
+                  return Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => _toggleKeyword(word),
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: selected 
+                              ? Colors.green 
+                              : Colors.white.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: selected ? Colors.white : Colors.white30,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Text(
+                          word,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  );
+                }).toList(),
               ),
+
+              const SizedBox(height: 14),
+
+              Align(
+                alignment: Alignment.centerRight,
+                child: ElevatedButton.icon(
+                  onPressed:
+                      _isSearchingRecipes ? null : _searchRecipesBySelectedKeywords,
+                  icon: _isSearchingRecipes
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Icon(Icons.search),
+                  label: Text(
+                      _isSearchingRecipes ? 'Searching...' : 'Search Recipes'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 18),
+
+              if (!hasRecipes)
+                const Text(
+                  'No recipes yet. Select words above and tap Search.',
+                  style: TextStyle(fontSize: 12, color: Colors.white60),
+                ),
+            ],
+
+            // ---------------------------
+            // RESULTS LIST (with pagination)
+            // ---------------------------
+            if (hasRecipes) ...[
+              const SizedBox(height: 8),
+              
+              // Show current page recipes
+              ..._getCurrentPageRecipes().map((r) => _buildNutritionRecipeCard(r)),
+              
+              // Pagination controls
+              if (_recipeSuggestions.length > _recipesPerPage) ...[
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Showing ${_currentRecipeIndex + 1}-${(_currentRecipeIndex + _recipesPerPage).clamp(0, _recipeSuggestions.length)} of ${_recipeSuggestions.length} recipes',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.white70,
+                      ),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: _loadNextRecipeSuggestions,
+                      icon: const Icon(Icons.arrow_forward, size: 16),
+                      label: const Text('Next Suggestions'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ],
-        ],
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 
 // ----------------------------------------------------
 // MAIN BUILD()

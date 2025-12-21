@@ -1,5 +1,5 @@
 // lib/pages/nutrition_search_screen.dart
-// Screen for searching nutrition information by food name
+// Fixed version with proper item selection handling
 
 import 'package:flutter/material.dart';
 import 'package:liver_wise/models/nutrition_info.dart';
@@ -7,7 +7,7 @@ import 'package:liver_wise/services/nutrition_api_service.dart';
 import 'package:liver_wise/widgets/nutrition_display.dart';
 import 'package:liver_wise/services/error_handling_service.dart';
 import 'package:liver_wise/services/search_history_service.dart';
-import 'package:liver_wise/liverhealthbar.dart'; // Needed for score calculation
+import 'package:liver_wise/liverhealthbar.dart';
 
 class NutritionSearchScreen extends StatefulWidget {
   const NutritionSearchScreen({super.key});
@@ -53,7 +53,7 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
     setState(() {
       _isLoading = true;
       _results = [];
-      _selectedItem = null;
+      _selectedItem = null; // Clear any previous selection
     });
 
     try {
@@ -83,6 +83,30 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
     }
   }
 
+  void _selectItem(NutritionInfo item) {
+    setState(() {
+      _selectedItem = item;
+    });
+    
+    // Scroll to show the nutrition display
+    // Small delay to ensure the widget is built first
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted) {
+        Scrollable.ensureVisible(
+          context,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      }
+    });
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selectedItem = null;
+    });
+  }
+
   Widget _buildHistorySection() {
     if (_searchHistory.isEmpty) return const SizedBox.shrink();
 
@@ -92,12 +116,11 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
         const Text(
           "Recent Searches",
           style: TextStyle(
-            fontSize: 16, 
+            fontSize: 16,
             fontWeight: FontWeight.bold,
           ),
         ),
         const SizedBox(height: 8),
-
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -111,7 +134,6 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
             );
           }).toList(),
         ),
-
         const SizedBox(height: 20),
       ],
     );
@@ -123,29 +145,60 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          "Results:",
-          style: TextStyle(
-            fontSize: 18, 
-            fontWeight: FontWeight.bold,
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              "Results:",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            if (_selectedItem != null)
+              TextButton.icon(
+                onPressed: _clearSelection,
+                icon: const Icon(Icons.close, size: 18),
+                label: const Text("Clear Selection"),
+              ),
+          ],
         ),
         const SizedBox(height: 12),
-
-        ..._results.map(
-          (item) => Card(
+        ..._results.map((item) {
+          final isSelected = _selectedItem?.productName == item.productName;
+          
+          return Card(
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
+              side: isSelected
+                  ? const BorderSide(color: Colors.green, width: 2)
+                  : BorderSide.none,
             ),
+            color: isSelected ? Colors.green.shade50 : null,
             child: ListTile(
-              title: Text(item.productName),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () {
-                setState(() => _selectedItem = item);
-              },
+              title: Text(
+                item.productName,
+                style: TextStyle(
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+              subtitle: isSelected
+                  ? const Text(
+                      "Selected - View details below",
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontSize: 12,
+                      ),
+                    )
+                  : null,
+              trailing: Icon(
+                isSelected ? Icons.check_circle : Icons.chevron_right,
+                color: isSelected ? Colors.green : null,
+              ),
+              onTap: () => _selectItem(item),
             ),
-          ),
-        ),
+          );
+        }),
       ],
     );
   }
@@ -176,6 +229,7 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
 
             const SizedBox(height: 16),
 
+            // SEARCH BUTTON
             SizedBox(
               width: double.infinity,
               height: 52,
@@ -198,6 +252,7 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
 
             const SizedBox(height: 20),
 
+            // LOADING INDICATOR
             if (_isLoading)
               const Center(child: CircularProgressIndicator()),
 
@@ -205,12 +260,22 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
             if (!_isLoading) _buildHistorySection(),
 
             // RESULTS LIST
-            _buildResultsList(),
+            if (!_isLoading) _buildResultsList(),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 20),
 
             // SELECTED NUTRITION DISPLAY
-            if (_selectedItem != null)
+            if (_selectedItem != null) ...[
+              const Divider(thickness: 2),
+              const SizedBox(height: 12),
+              const Text(
+                "Nutrition Information",
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
               NutritionDisplay(
                 nutrition: _selectedItem!,
                 liverScore: LiverHealthCalculator.calculate(
@@ -221,6 +286,7 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
                 ),
                 disclaimer: disclaimer,
               ),
+            ],
           ],
         ),
       ),
