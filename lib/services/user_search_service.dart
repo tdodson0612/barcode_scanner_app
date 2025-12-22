@@ -23,7 +23,7 @@ class UserSearchService {
       final response = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'user_profiles',
-        columns: ['id', 'email', 'username', 'first_name', 'last_name', 'avatar_url'],
+        columns: ['id', 'email', 'username', 'first_name', 'last_name', 'avatar_url', 'profile_picture_url'],
         limit: 200,
       );
 
@@ -53,6 +53,42 @@ class UserSearchService {
     } catch (e) {
       AppConfig.debugPrint('❌ Failed to search users: $e');
       throw Exception('Failed to search users: $e');
+    }
+  }
+
+  // ==================================================
+  // GET SUGGESTED FRIENDS (APP OWNERS)
+  // ==================================================
+
+  static Future<List<Map<String, dynamic>>> getSuggestedFriends(List<String> ownerIds) async {
+    AuthService.ensureLoggedIn();
+
+    try {
+      AppConfig.debugPrint('👥 Fetching suggested friends (app owners)...');
+
+      final response = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'user_profiles',
+        columns: ['id', 'email', 'username', 'first_name', 'last_name', 'avatar_url', 'profile_picture_url'],
+        limit: 200,
+      );
+
+      final List<dynamic> users = response as List;
+      final currentId = AuthService.currentUserId;
+      
+      // Filter to only include owner accounts (and not current user)
+      final List<Map<String, dynamic>> suggested = [];
+      for (var user in users) {
+        if (user['id'] != currentId && ownerIds.contains(user['id'])) {
+          suggested.add(user);
+        }
+      }
+
+      AppConfig.debugPrint('✅ Found ${suggested.length} suggested friends');
+      return suggested;
+    } catch (e) {
+      AppConfig.debugPrint('❌ Failed to fetch suggested friends: $e');
+      throw Exception('Failed to fetch suggested friends: $e');
     }
   }
 

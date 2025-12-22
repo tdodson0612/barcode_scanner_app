@@ -1,5 +1,5 @@
 // lib/pages/search_users_page.dart
-// Search Users with caching, debounced "search as you type", and animated UI
+// Search Users with caching, debounced "search as you type", animated UI, and suggested friends
 
 import 'dart:async';
 import 'dart:convert';
@@ -29,11 +29,19 @@ class _SearchUsersPageState extends State<SearchUsersPage>
   final Logger _logger = Logger();
 
   List<Map<String, dynamic>> _searchResults = [];
+  List<Map<String, dynamic>> _suggestedFriends = [];
   Map<String, Map<String, dynamic>> _friendshipStatuses = {};
 
   bool _isLoading = false;
+  bool _isLoadingSuggested = false;
   bool _hasSearched = false;
   String? _errorMessage;
+
+  // App owner account IDs
+  static const List<String> _ownerAccountIds = [
+    '1c23a38d-e90a-42a6-975a-5cf83d733e2e', // Terry D.
+    '4309b3f1-6d02-4327-8483-4643777431d1', // Admin Britt
+  ];
 
   // simple fade animation for main content
   late AnimationController _fadeController;
@@ -62,6 +70,9 @@ class _SearchUsersPageState extends State<SearchUsersPage>
     // initial query (e.g. when coming from another page)
     if (widget.initialQuery != null && widget.initialQuery!.isNotEmpty) {
       _searchUsers(widget.initialQuery!);
+    } else {
+      // Load suggested friends on initial load
+      _loadSuggestedFriends();
     }
   }
 
@@ -157,6 +168,47 @@ class _SearchUsersPageState extends State<SearchUsersPage>
     }
   }
 
+  // -------------------- SUGGESTED FRIENDS --------------------
+
+  Future<void> _loadSuggestedFriends() async {
+    setState(() {
+      _isLoadingSuggested = true;
+    });
+
+    try {
+      _logger.d('👥 Loading suggested friends (app owners)...');
+
+      final suggested = await UserSearchService.getSuggestedFriends(_ownerAccountIds);
+      
+      // Load friendship statuses for suggested friends
+      final statusMap = <String, Map<String, dynamic>>{};
+      for (final user in suggested) {
+        final userId = user['id'];
+        var status = await _getCachedFriendshipStatus(userId);
+        if (status == null) {
+          status = await FriendsService.checkFriendshipStatus(userId);
+          await _cacheFriendshipStatus(userId, status);
+        }
+        statusMap[userId] = status;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _suggestedFriends = suggested;
+        _friendshipStatuses = statusMap;
+        _isLoadingSuggested = false;
+      });
+
+      _fadeController.forward(from: 0.0);
+    } catch (e) {
+      _logger.e('❌ Error loading suggested friends: $e');
+      if (!mounted) return;
+      setState(() {
+        _isLoadingSuggested = false;
+      });
+    }
+  }
+
   // -------------------- DEBUG TEST --------------------
 
   Future<void> _runDebugTest() async {
@@ -166,7 +218,6 @@ class _SearchUsersPageState extends State<SearchUsersPage>
     });
 
     try {
-      // CHANGED: DatabaseService.debugTestUserSearch() -> UserSearchService.debugTestUserSearch()
       await UserSearchService.debugTestUserSearch();
 
       if (!mounted) return;
@@ -207,6 +258,8 @@ class _SearchUsersPageState extends State<SearchUsersPage>
         _friendshipStatuses = {};
         _hasSearched = false;
       });
+      // Reload suggested friends when search is cleared
+      _loadSuggestedFriends();
       return;
     }
 
@@ -214,6 +267,7 @@ class _SearchUsersPageState extends State<SearchUsersPage>
       _isLoading = true;
       _hasSearched = true;
       _errorMessage = null;
+      _suggestedFriends = []; // Clear suggested friends when searching
     });
 
     _fadeController.reset();
@@ -230,7 +284,6 @@ class _SearchUsersPageState extends State<SearchUsersPage>
         _logger.i('📱 Using cached results: ${results.length} users');
       } else {
         // 2) Fetch from database
-        // CHANGED: DatabaseService.searchUsers(query) -> UserSearchService.searchUsers(query)
         results = await UserSearchService.searchUsers(query);
         _logger.i('📱 Fetched fresh results: ${results.length} users');
         await _cacheSearchResults(query, results);
@@ -248,7 +301,6 @@ class _SearchUsersPageState extends State<SearchUsersPage>
         if (status != null) {
           cachedStatuses++;
         } else {
-          // CHANGED: DatabaseService.checkFriendshipStatus -> FriendsService.checkFriendshipStatus
           status = await FriendsService.checkFriendshipStatus(userId);
           freshStatuses++;
           await _cacheFriendshipStatus(userId, status);
@@ -296,7 +348,7 @@ class _SearchUsersPageState extends State<SearchUsersPage>
   void _onSearchChanged(String value) {
     _debounce?.cancel();
 
-    // don't auto-search on empty / short queries – just clear state
+    // don't auto-search on empty / short queries – just clear state and reload suggested
     if (value.trim().length < 2) {
       setState(() {
         _hasSearched = false;
@@ -304,6 +356,9 @@ class _SearchUsersPageState extends State<SearchUsersPage>
         _friendshipStatuses = {};
         _errorMessage = null;
       });
+      if (value.trim().isEmpty) {
+        _loadSuggestedFriends();
+      }
       return;
     }
 
@@ -316,7 +371,6 @@ class _SearchUsersPageState extends State<SearchUsersPage>
 
   Future<void> _sendFriendRequest(String userId) async {
     try {
-      // CHANGED: DatabaseService.sendFriendRequest -> FriendsService.sendFriendRequest
       await FriendsService.sendFriendRequest(userId);
 
       final newStatus = {
@@ -348,7 +402,6 @@ class _SearchUsersPageState extends State<SearchUsersPage>
 
   Future<void> _cancelFriendRequest(String userId) async {
     try {
-      // CHANGED: DatabaseService.cancelFriendRequest -> FriendsService.cancelFriendRequest
       await FriendsService.cancelFriendRequest(userId);
 
       final newStatus = {
@@ -499,14 +552,16 @@ class _SearchUsersPageState extends State<SearchUsersPage>
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 200),
       opacity: 1,
-      child: Card( 
+      child: Card(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: ListTile(
           leading: CircleAvatar(
             backgroundImage: user['avatar_url'] != null
                 ? NetworkImage(user['avatar_url'])
-                : null,
-            child: user['avatar_url'] == null
+                : user['profile_picture_url'] != null
+                    ? NetworkImage(user['profile_picture_url'])
+                    : null,
+            child: (user['avatar_url'] == null && user['profile_picture_url'] == null)
                 ? Text(
                     _buildUserDisplayName(user)[0].toUpperCase(),
                     style: const TextStyle(fontWeight: FontWeight.bold),
@@ -659,6 +714,43 @@ class _SearchUsersPageState extends State<SearchUsersPage>
     );
   }
 
+  Widget _buildSuggestedFriendsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.green.shade50,
+            border: Border.all(color: Colors.green.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.star, color: Colors.green.shade700, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Suggested friends for getting started',
+                style: TextStyle(
+                  color: Colors.green.shade900,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+        ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _suggestedFriends.length,
+          itemBuilder: (context, index) => _buildUserTile(_suggestedFriends[index]),
+        ),
+      ],
+    );
+  }
+
   // -------------------- BUILD --------------------
 
   @override
@@ -784,18 +876,22 @@ class _SearchUsersPageState extends State<SearchUsersPage>
             Expanded(
               child: FadeTransition(
                 opacity: _fadeAnimation,
-                child: _isLoading
+                child: _isLoading || _isLoadingSuggested
                     ? const Center(child: CircularProgressIndicator())
-                    : !_hasSearched
-                        ? _buildInitialPrompt()
-                        : _searchResults.isEmpty
-                            ? _buildEmptyResults()
-                            : ListView.builder(
-                                itemCount: _searchResults.length,
-                                itemBuilder: (context, index) =>
-                                    _buildUserTile(
-                                        _searchResults[index]),
-                              ),
+                    : !_hasSearched && _suggestedFriends.isNotEmpty
+                        ? SingleChildScrollView(
+                            child: _buildSuggestedFriendsSection(),
+                          )
+                        : !_hasSearched
+                            ? _buildInitialPrompt()
+                            : _searchResults.isEmpty
+                                ? _buildEmptyResults()
+                                : ListView.builder(
+                                    itemCount: _searchResults.length,
+                                    itemBuilder: (context, index) =>
+                                        _buildUserTile(
+                                            _searchResults[index]),
+                                  ),
               ),
             ),
           ],
