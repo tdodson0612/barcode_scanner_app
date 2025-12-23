@@ -1,5 +1,6 @@
 // lib/services/messaging_service.dart
 // ✅ FIXED: Proper unread count tracking and cache invalidation with database commit delays
+// ✅ FIXED: Using integers (0/1) for is_read field instead of booleans
 
 import 'dart:convert';
 import '../config/app_config.dart';
@@ -166,7 +167,7 @@ class MessagingService {
   }
 
   // ==============================================
-  // ✅ IMPROVED: MARK SINGLE MESSAGE READ (with debouncing)
+  // ✅ FIXED: MARK SINGLE MESSAGE READ (using integer)
   // ==============================================
   static Future<void> markMessageAsRead(String messageId) async {
     if (AuthService.currentUserId == null) return;
@@ -176,7 +177,7 @@ class MessagingService {
         action: 'update',
         table: 'messages',
         filters: {'id': messageId},
-        data: {'is_read': true},
+        data: {'is_read': 1},  // ✅ FIXED: Use integer 1 instead of boolean true
       );
       
       // ✅ Invalidate unread badge cache
@@ -190,7 +191,7 @@ class MessagingService {
   }
 
   // ==============================================
-  // ✅ FIXED: MARK ALL MESSAGES FROM USER AS READ (batch operation with proper locking)
+  // ✅ FIXED: MARK ALL MESSAGES FROM USER AS READ (using integer)
   // ==============================================
   static Future<void> markMessagesAsReadFrom(String senderId) async {
     if (AuthService.currentUserId == null) return;
@@ -235,7 +236,7 @@ class MessagingService {
           action: 'update',
           table: 'messages',
           filters: {'id': msg['id']},
-          data: {'is_read': true},
+          data: {'is_read': 1},  // ✅ FIXED: Use integer 1 instead of boolean true
         );
         updateFutures.add(future);
       }
@@ -299,8 +300,8 @@ class MessagingService {
               lastMessage = msg;
             }
             
-            // ✅ Count unread messages from this friend
-            if (msg['receiver'] == uid && msg['is_read'] == false) {
+            // ✅ Count unread messages from this friend (checking for integer 0)
+            if (msg['receiver'] == uid && msg['is_read'] == 0) {
               unreadCount++;
             }
           }

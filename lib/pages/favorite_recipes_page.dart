@@ -185,50 +185,23 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         }
       }
 
-      // ✅ LOAD FROM DATABASE VIA CLOUDFLARE WORKER (avoids Supabase egress cache)
-      final response = await http.post(
-        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'select',
-          'table': 'favorite_recipes_with_details',
-          'filters': {'user_id': currentUserId},
-          'orderBy': 'created_at',
-          'ascending': false,
-        }),
-      );
+      // ✅ USE THE SERVICE INSTEAD OF MANUAL QUERY
+      final recipes = await FavoriteRecipesService.getFavoriteRecipes();
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as List;
-       
-        if (mounted) {
-          final recipes = data.map((json) {
-            return FavoriteRecipe(
-              id: json['id'],
-              userId: json['user_id'] ?? '',
-              recipeName: json['title'] ?? '',
-              ingredients: json['ingredients'] ?? '',
-              directions: json['directions'] ?? '',
-              createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
-            );
-          }).toList();
+      if (mounted) {
+        setState(() {
+          _favoriteRecipes = recipes;
+          _isLoading = false;
+        });
 
-          setState(() {
-            _favoriteRecipes = recipes;
-            _isLoading = false;
-          });
-
-          // ✅ CACHE THE LOADED RECIPES
-          await _cacheFavorites(recipes);
-          print('✅ Loaded ${recipes.length} favorites from database');
-        }
-      } else {
-        throw Exception('Failed to load favorites: ${response.statusCode}');
+        // ✅ CACHE THE LOADED RECIPES
+        await _cacheFavorites(recipes);
+        print('✅ Loaded ${recipes.length} favorites from database');
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-       
+      
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
