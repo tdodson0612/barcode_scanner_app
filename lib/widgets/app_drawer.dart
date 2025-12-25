@@ -1,4 +1,4 @@
-// lib/widgets/app_drawer.dart - OPTIMIZED: Consolidated logout logic + cached unread count
+// lib/widgets/app_drawer.dart - FIXED: Badge updates properly when messages are read
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/messaging_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,29 +31,42 @@ class AppDrawer extends StatefulWidget {
     await prefs.remove(_cacheKey);
     await prefs.remove(_cacheTimeKey);
     
-    // Trigger refresh on the widget if it's mounted
-    globalKey.currentState?._loadUnreadCount();
+    // ✅ FIXED: Force refresh on the widget if it's mounted
+    globalKey.currentState?._loadUnreadCount(forceRefresh: true);
   }
 }
 
-class _AppDrawerState extends State<AppDrawer> {
+class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
   late final PremiumGateController _controller;
   int _unreadCount = 0;
 
-  static const Duration _cacheDuration = Duration(seconds: 30);
+  static const Duration _cacheDuration = Duration(seconds: 5); // ✅ Reduced for faster updates
 
   @override
   void initState() {
     super.initState();
     _controller = PremiumGateController();
     _controller.addListener(_onPremiumStateChanged);
+    
+    // ✅ NEW: Listen to app lifecycle changes
+    WidgetsBinding.instance.addObserver(this);
+    
     _loadUnreadCount();
   }
 
   @override
   void dispose() {
     _controller.removeListener(_onPremiumStateChanged);
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  // ✅ NEW: Refresh badge when app returns to foreground
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadUnreadCount(forceRefresh: true);
+    }
   }
 
   void _onPremiumStateChanged() {
@@ -62,28 +75,35 @@ class _AppDrawerState extends State<AppDrawer> {
     }
   }
 
-  Future<void> _loadUnreadCount() async {
+  // ✅ FIXED: Added forceRefresh parameter
+  Future<void> _loadUnreadCount({bool forceRefresh = false}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // Try to load from cache first
-      final cachedCount = prefs.getInt(AppDrawer._cacheKey);
-      final cachedTime = prefs.getInt(AppDrawer._cacheTimeKey);
-      
-      if (cachedCount != null && cachedTime != null) {
-        final cacheAge = DateTime.now().millisecondsSinceEpoch - cachedTime;
-        final isCacheValid = cacheAge < _cacheDuration.inMilliseconds;
+      // ✅ IMPROVED: Only use cache if not force refreshing
+      if (!forceRefresh) {
+        // Try to load from cache first
+        final cachedCount = prefs.getInt(AppDrawer._cacheKey);
+        final cachedTime = prefs.getInt(AppDrawer._cacheTimeKey);
         
-        if (isCacheValid) {
-          // Use cached value
-          if (mounted) {
-            setState(() => _unreadCount = cachedCount);
+        if (cachedCount != null && cachedTime != null) {
+          final cacheAge = DateTime.now().millisecondsSinceEpoch - cachedTime;
+          final isCacheValid = cacheAge < _cacheDuration.inMilliseconds;
+          
+          if (isCacheValid) {
+            // Use cached value
+            if (mounted) {
+              setState(() => _unreadCount = cachedCount);
+            }
+            print('📦 AppDrawer: Using cached count: $cachedCount');
+            return;
           }
-          return;
         }
+      } else {
+        print('🔄 AppDrawer: Force refresh requested');
       }
       
-      // Cache is stale or doesn't exist, fetch from database
+      // Cache is stale, doesn't exist, or force refresh - fetch from database
       final count = await MessagingService.getUnreadMessageCount();
       
       // Save to cache
@@ -93,8 +113,10 @@ class _AppDrawerState extends State<AppDrawer> {
       if (mounted) {
         setState(() => _unreadCount = count);
       }
+      
+      print('✅ AppDrawer: Fresh count loaded: $count');
     } catch (e) {
-      print('Error loading unread count: $e');
+      print('⚠️ AppDrawer: Error loading unread count: $e');
       
       // On error, try to use cached value even if stale
       try {
@@ -102,6 +124,7 @@ class _AppDrawerState extends State<AppDrawer> {
         final cachedCount = prefs.getInt(AppDrawer._cacheKey);
         if (cachedCount != null && mounted) {
           setState(() => _unreadCount = cachedCount);
+          print('⚠️ AppDrawer: Using stale cache: $cachedCount');
         }
       } catch (_) {}
     }
@@ -226,7 +249,7 @@ class _AppDrawerState extends State<AppDrawer> {
               },
             ),
             
-            // Messages with badge - using cached count
+            // ✅ FIXED: Messages with badge - properly refreshes when returning
             ListTile(
               leading: Stack(
                 clipBehavior: Clip.none,
@@ -288,17 +311,23 @@ class _AppDrawerState extends State<AppDrawer> {
                   : null,
               selected: widget.currentPage == 'messages',
               onTap: () async {
+                // Close drawer
                 Navigator.pop(context);
                 
-                // 🔥 FIX: Invalidate BOTH caches when user opens messages
-                await AppDrawer.invalidateUnreadCache();
-                await MenuIconWithBadge.invalidateCache();
-                
+                // ✅ FIXED: Navigate first, THEN set up the listener
                 if (widget.currentPage != 'messages') {
-                  Navigator.pushNamed(context, '/messages');
+                  // Navigate to messages and wait for return
+                  await Navigator.pushNamed(context, '/messages');
+                  
+                  // ✅ CRITICAL FIX: When user returns from messages, force refresh the badge
+                  print('🔄 Returned from messages page, refreshing badge...');
+                  await Future.delayed(Duration(milliseconds: 300)); // Wait for DB commits
+                  await AppDrawer.invalidateUnreadCache(); // This calls _loadUnreadCount(forceRefresh: true)
+                  await MenuIconWithBadge.invalidateCache();
                 }
               },
             ),
+            
             ListTile(
               leading: Icon(
                 Icons.person_search,
@@ -540,7 +569,7 @@ class _AppDrawerState extends State<AppDrawer> {
   void _showSignOutDialog(BuildContext context) {
     showDialog(
       context: context,
-      barrierDismissible: true, // Allow dismissing by tapping outside
+      barrierDismissible: true,
       builder: (dialogContext) => AlertDialog(
         title: Text('Sign Out'),
         content: Text('Are you sure you want to sign out?'),
@@ -551,10 +580,7 @@ class _AppDrawerState extends State<AppDrawer> {
           ),
           ElevatedButton(
             onPressed: () async {
-              // Close confirmation dialog first
               Navigator.of(dialogContext).pop();
-              
-              // Perform logout with loading indicator
               await _performLogout(context);
             },
             style: ElevatedButton.styleFrom(
@@ -568,14 +594,12 @@ class _AppDrawerState extends State<AppDrawer> {
     );
   }
 
-  /// Consolidated logout logic - single source of truth
   Future<void> _performLogout(BuildContext context) async {
-    // Show loading dialog
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (loadingContext) => WillPopScope(
-        onWillPop: () async => false, // Prevent back button
+        onWillPop: () async => false,
         child: Center(
           child: Card(
             child: Padding(
@@ -596,32 +620,21 @@ class _AppDrawerState extends State<AppDrawer> {
     
     try {
       final prefs = await SharedPreferences.getInstance();
-      
-      // Clear the saved route BEFORE logging out
       await prefs.remove('last_route');
-      
-      // Sign out from Supabase
       await AuthService.signOut();
-      
-      // Clear all preferences
       await prefs.clear();
-      
-      // Clear database cache
       await DatabaseServiceCore.clearAllUserCache();
       
-      // Dismiss loading dialog if still mounted
       if (context.mounted) {
         Navigator.of(context).pop();
       }
       
-      // Navigate to login and clear all routes
       if (context.mounted) {
         Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
       }
     } catch (e) {
       print('Error during logout: $e');
       
-      // Dismiss loading dialog
       if (context.mounted) {
         Navigator.of(context).pop();
         
