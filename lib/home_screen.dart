@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 import 'package:liver_wise/services/local_draft_service.dart';
-
+import 'package:liver_wise/services/saved_ingredients_service.dart';  
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
@@ -243,10 +243,21 @@ class NutritionApiService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
+        
+        // 🔥 DEBUG: Print raw API response
+        if (AppConfig.enableDebugPrints) {
+          print('📡 OpenFoodFacts API Response:');
+          print('  Status: ${data['status']}');
+          print('  Product name: ${data['product']?['product_name']}');
+          print('  Nutriments keys: ${data['product']?['nutriments']?.keys.toList()}');
+          print('  Sample nutriment: ${data['product']?['nutriments']?['energy-kcal_100g']}');
+        }
+        
         if (data['status'] == 1) {
           return NutritionInfo.fromJson(data);
         }
       }
+      
       return null;
     } catch (e) {
       if (AppConfig.enableDebugPrints) {
@@ -1098,6 +1109,19 @@ class _HomePageState extends State<HomePage>
         throw Exception('Error scanning barcode: ${e.toString()}');
       }
 
+      // 🔥 DEBUG: Log the nutrition data
+      if (nutrition != null) {
+        AppConfig.debugPrint('✅ Nutrition data received:');
+        AppConfig.debugPrint('  Product: ${nutrition.productName}');
+        AppConfig.debugPrint('  Calories: ${nutrition.calories}');
+        AppConfig.debugPrint('  Fat: ${nutrition.fat}');
+        AppConfig.debugPrint('  Sugar: ${nutrition.sugar}');
+        AppConfig.debugPrint('  Sodium: ${nutrition.sodium}');
+      } else {
+        AppConfig.debugPrint('❌ Nutrition is null');
+      }
+
+
       if (nutrition == null) {
         if (mounted && !_isDisposed) {
           setState(() {
@@ -1304,6 +1328,97 @@ class _HomePageState extends State<HomePage>
       }
     }
   }
+
+  // -----------------------------------------------------
+  // SAVE SCANNED INGREDIENT TO SAVED INGREDIENTS
+  // -----------------------------------------------------
+  Future<void> _saveCurrentIngredient() async {
+    if (_currentNutrition == null) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'No nutrition data available to save',
+        );
+      }
+      return;
+    }
+
+    try {
+      // Check if already saved
+      final alreadySaved = await SavedIngredientsService.isSaved(
+        _currentNutrition!.productName,
+      );
+
+      if (alreadySaved) {
+        if (mounted) {
+          final shouldUpdate = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Already Saved'),
+              content: Text(
+                '"${_currentNutrition!.productName}" is already in your saved ingredients.\n\n'
+                'Do you want to update it?'
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Update'),
+                ),
+              ],
+            ),
+          );
+
+          if (shouldUpdate != true) return;
+        }
+      }
+
+      // Save the ingredient
+      await SavedIngredientsService.saveIngredient(_currentNutrition!);
+
+      if (mounted) {
+        ErrorHandlingService.showSuccess(
+          context,
+          '✅ Saved "${_currentNutrition!.productName}" to ingredients!',
+        );
+
+        // Ask if user wants to view saved ingredients
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Ingredient saved successfully'),
+            backgroundColor: Colors.green,
+            action: SnackBarAction(
+              label: 'VIEW',
+              textColor: Colors.white,
+              onPressed: () {
+                Navigator.pushNamed(context, '/saved-ingredients');
+              },
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to save ingredient',
+        );
+      }
+    }
+  }
+
+
+
   Future<void> _saveRecipeDraft() async {
     if (_recipeSuggestions.isEmpty || _currentNutrition == null) {
       ErrorHandlingService.showSimpleError(
@@ -1984,6 +2099,19 @@ class _HomePageState extends State<HomePage>
                     ),
                   const SizedBox(width: 8),
 
+                  // 🔥 NEW: Save Ingredient button (Issue #2, #3, #10 fix)
+                  if (_currentNutrition != null && _nutritionText.isNotEmpty)
+                    ElevatedButton.icon(
+                      onPressed: _saveCurrentIngredient,
+                      icon: const Icon(Icons.bookmark_add),
+                      label: const Text("Save Ingredient"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  const SizedBox(width: 8),
+
                   if (_nutritionText.isNotEmpty)
                     ElevatedButton.icon(
                       onPressed: _addNutritionToGroceryList,
@@ -1996,7 +2124,7 @@ class _HomePageState extends State<HomePage>
                     ),
                   const SizedBox(width: 8),
 
-                  // 🔥 NEW: Save Recipe Draft button (only show if recipes exist)
+                  // Save Recipe Draft button (only show if recipes exist)
                   if (_recipeSuggestions.isNotEmpty)
                     ElevatedButton.icon(
                       onPressed: _saveRecipeDraft,

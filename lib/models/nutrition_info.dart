@@ -1,3 +1,5 @@
+//nutrition_info.dart
+
 class NutritionInfo {
   final String productName;
   final double fat;

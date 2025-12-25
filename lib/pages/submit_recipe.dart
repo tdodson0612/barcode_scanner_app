@@ -164,8 +164,21 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
   }
 
   // SAVE DRAFT LOCALLY
+  // SAVE DRAFT LOCALLY
   Future<void> _saveRecipe() async {
     if (!_formKey.currentState!.validate()) return;
+
+    final validIngredients = _ingredients.where((i) => i.isValid).toList();
+    
+    if (validIngredients.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please add at least one valid ingredient'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
 
     setState(() => isSubmitting = true);
 
@@ -184,18 +197,56 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       _isSaved = true;
       await _loadDrafts();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Draft saved locally!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Draft saved!',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        'Saved "${name}" with ${validIngredients.length} ingredient${validIngredients.length == 1 ? '' : 's'}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+            action: SnackBarAction(
+              label: 'VIEW DRAFTS',
+              textColor: Colors.white,
+              onPressed: () {
+                setState(() => _tabIndex = 1);
+              },
+            ),
+          ),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error saving draft: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving draft: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
-      setState(() => isSubmitting = false);
+      if (mounted) {
+        setState(() => isSubmitting = false);
+      }
     }
   }
 
@@ -249,6 +300,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
   }
 
   // SUBMIT RECIPE TO DATABASE
+  // SUBMIT RECIPE TO DATABASE
   Future<void> _submitRecipe() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -256,12 +308,50 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     if (validIngredients.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please add at least one ingredient'),
+          content: Text('Please add at least one valid ingredient'),
           backgroundColor: Colors.orange,
         ),
       );
       return;
     }
+
+    // 🔥 NEW: Confirm before submitting
+    final shouldSubmit = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Submit Recipe?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Recipe: ${_nameController.text.trim()}'),
+            const SizedBox(height: 8),
+            Text('Ingredients: ${validIngredients.length}'),
+            const SizedBox(height: 16),
+            const Text(
+              'This will share your recipe with the community.',
+              style: TextStyle(fontSize: 14, fontStyle: FontStyle.italic),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Submit'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldSubmit != true) return;
 
     setState(() => isSubmitting = true);
 
@@ -281,29 +371,136 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
         _loadedDraftName = null;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Recipe submitted to community successfully!'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Recipe submitted to community successfully!',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
 
-      _nameController.clear();
-      _directionsController.clear();
-      setState(() {
-        _ingredients = [IngredientRow()];
-      });
+        // Clear form
+        _nameController.clear();
+        _directionsController.clear();
+        setState(() {
+          _ingredients = [IngredientRow()];
+          _isSaved = false;
+          _loadedDraftName = null;
+        });
 
-      Navigator.pop(context, true);
+        // Return to previous screen with success flag
+        Navigator.pop(context, true);
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error submitting recipe: $e')),
-      );
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to submit recipe',
+          onRetry: _submitRecipe,
+        );
+      }
     } finally {
-      setState(() => isSubmitting = false);
+      if (mounted) {
+        setState(() => isSubmitting = false);
+      }
     }
   }
 
+// 🔥 NEW: Update existing draft
+  Future<void> _updateDraft() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final validIngredients = _ingredients.where((i) => i.isValid).toList();
+    
+    if (validIngredients.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please add at least one valid ingredient'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    if (_loadedDraftName == null) {
+      // No draft loaded, just save as new
+      _saveRecipe();
+      return;
+    }
+
+    setState(() => isSubmitting = true);
+
+    try {
+      final name = _nameController.text.trim();
+      final ing = _serializeIngredients();
+      final dir = _directionsController.text.trim();
+
+      // If name changed, delete old draft
+      if (_loadedDraftName != name) {
+        await LocalDraftService.deleteDraft(_loadedDraftName!);
+      }
+
+      await LocalDraftService.saveDraft(
+        name: name,
+        ingredients: ing,
+        directions: dir,
+      );
+
+      _loadedDraftName = name;
+      _isSaved = true;
+      await _loadDrafts();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Draft "$name" updated!',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.blue,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating draft: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => isSubmitting = false);
+      }
+    }
+  }
+
+  // Analyze recipe nutrition
   // Analyze recipe nutrition
   Future<void> _analyzeRecipeNutrition() async {
     final validIngredients = _ingredients.where((i) => i.isValid).toList();
@@ -326,12 +523,49 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
     try {
       final saved = await SavedIngredientsService.loadSavedIngredients();
+      
+      // 🔥 FIXED: Better error message with actionable guidance
       if (saved.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('No saved ingredients found yet.'),
-              backgroundColor: Colors.orange,
+          setState(() => _isAnalyzingNutrition = false);
+          
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Row(
+                children: const [
+                  Icon(Icons.info_outline, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Text('No Saved Ingredients'),
+                ],
+              ),
+              content: const Text(
+                'You don\'t have any saved ingredients yet.\n\n'
+                'To analyze recipe nutrition:\n'
+                '1. Go to Home screen\n'
+                '2. Scan a product barcode\n'
+                '3. Click "Save Ingredient"\n'
+                '4. Come back and analyze\n\n'
+                'Saved ingredients help us calculate accurate nutrition for your recipes!'
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.pushNamed(context, '/');
+                  },
+                  icon: const Icon(Icons.home),
+                  label: const Text('Go to Home'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
             ),
           );
         }
@@ -340,12 +574,34 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
       final List<NutritionInfo> matches = [];
 
+      // 🔥 IMPROVED: More flexible ingredient matching
       for (var ingredient in validIngredients) {
         final name = ingredient.name.trim().toLowerCase();
         
+        // Skip very short ingredient names (like "salt", "oil")
+        if (name.length < 3) continue;
+        
         final found = saved.where((item) {
           final itemName = item.productName.toLowerCase();
-          return itemName.contains(name) || name.contains(itemName);
+          
+          // Match if ingredient name is in product name OR product name is in ingredient
+          // Also try matching individual words
+          final nameWords = name.split(' ');
+          final itemWords = itemName.split(' ');
+          
+          // Direct contains check
+          if (itemName.contains(name) || name.contains(itemName)) {
+            return true;
+          }
+          
+          // Word-by-word matching (at least 1 word must match)
+          for (var word in nameWords) {
+            if (word.length >= 3 && itemWords.any((iw) => iw.contains(word))) {
+              return true;
+            }
+          }
+          
+          return false;
         }).toList();
 
         for (var item in found) {
@@ -360,10 +616,77 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
       if (matches.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('No matching saved ingredients found in this recipe yet.'),
-              backgroundColor: Colors.orange,
+          setState(() => _isAnalyzingNutrition = false);
+          
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Row(
+                children: [
+                  Icon(Icons.search_off, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Text('No Matches Found'),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'We couldn\'t match your recipe ingredients to saved items.\n'
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    'Recipe ingredients:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  ...validIngredients.take(5).map((ing) => 
+                    Padding(
+                      padding: EdgeInsets.only(left: 8, top: 4),
+                      child: Text('• ${ing.name}'),
+                    )
+                  ),
+                  if (validIngredients.length > 5)
+                    Padding(
+                      padding: EdgeInsets.only(left: 8, top: 4),
+                      child: Text('... and ${validIngredients.length - 5} more'),
+                    ),
+                  SizedBox(height: 12),
+                  Text(
+                    'You have ${saved.length} saved ingredient${saved.length == 1 ? '' : 's'}:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  ...saved.take(3).map((item) => 
+                    Padding(
+                      padding: EdgeInsets.only(left: 8, top: 4),
+                      child: Text('• ${item.productName}'),
+                    )
+                  ),
+                  if (saved.length > 3)
+                    Padding(
+                      padding: EdgeInsets.only(left: 8, top: 4),
+                      child: Text('... and ${saved.length - 3} more'),
+                    ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('OK'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.pushNamed(context, '/saved-ingredients');
+                  },
+                  icon: Icon(Icons.bookmark),
+                  label: Text('View Saved'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
             ),
           );
         }
@@ -377,6 +700,17 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
           _matchedNutritionIngredients = matches;
           _recipeNutrition = totals;
         });
+        
+        // 🔥 NEW: Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '✅ Matched ${matches.length} ingredient${matches.length == 1 ? '' : 's'}!'
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -419,52 +753,215 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
   Widget _buildDraftList() {
     if (_drafts.isEmpty) {
-      return const Center(
-        child: Text("No drafts saved."),
+      return Center(
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          margin: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white.withAlpha((0.9 * 255).toInt()),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.bookmark_border, size: 64, color: Colors.grey.shade400),
+              const SizedBox(height: 16),
+              const Text(
+                "No drafts saved yet",
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Save your recipes as drafts to edit them later",
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
     return ListView(
+      padding: const EdgeInsets.all(10),
       children: _drafts.keys.map((name) {
         final draft = _drafts[name];
         return Card(
-          margin: const EdgeInsets.all(10),
+          margin: const EdgeInsets.only(bottom: 12),
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           child: ListTile(
-            title: Text(name),
-            subtitle: Text("Last updated: ${draft["updated_at"]}"),
-            trailing: IconButton(
-              icon: const Icon(Icons.delete, color: Colors.red),
-              onPressed: () async {
-                await LocalDraftService.deleteDraft(name);
-                await _loadDrafts();
-              },
+            contentPadding: const EdgeInsets.all(16),
+            leading: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green.shade100,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(Icons.receipt_long, color: Colors.green.shade700),
+            ),
+            title: Text(
+              name,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 4),
+                Text(
+                  "Last updated: ${_formatDateTime(draft["updated_at"])}",
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Text(
+                        'DRAFT',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.edit, color: Colors.blue),
+                  tooltip: 'Edit Draft',
+                  onPressed: () {
+                    _loadDraftForEditing(name, draft);
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  tooltip: 'Delete Draft',
+                  onPressed: () => _confirmDeleteDraft(name),
+                ),
+              ],
             ),
             onTap: () {
-              setState(() {
-                _nameController.text = draft["name"];
-                _directionsController.text = draft["directions"];
-                
-                // Parse ingredients
-                try {
-                  final List<dynamic> parsed = jsonDecode(draft["ingredients"]);
-                  _ingredients = parsed.map((e) => IngredientRow.fromJson(e)).toList();
-                } catch (e) {
-                  _ingredients = [IngredientRow(name: draft["ingredients"])];
-                }
-                
-                if (_ingredients.isEmpty) {
-                  _ingredients = [IngredientRow()];
-                }
-                
-                _loadedDraftName = name;
-                _isSaved = true;
-                _tabIndex = 0;
-              });
+              _loadDraftForEditing(name, draft);
             },
           ),
         );
       }).toList(),
     );
+  }
+
+  // 🔥 NEW: Helper method to format date/time
+  String _formatDateTime(String? dateTime) {
+    if (dateTime == null) return 'Unknown';
+    
+    try {
+      final dt = DateTime.parse(dateTime);
+      final now = DateTime.now();
+      final difference = now.difference(dt);
+      
+      if (difference.inDays == 0) {
+        if (difference.inHours == 0) {
+          return '${difference.inMinutes} minutes ago';
+        }
+        return '${difference.inHours} hours ago';
+      } else if (difference.inDays == 1) {
+        return 'Yesterday';
+      } else if (difference.inDays < 7) {
+        return '${difference.inDays} days ago';
+      } else {
+        return '${dt.month}/${dt.day}/${dt.year}';
+      }
+    } catch (e) {
+      return dateTime;
+    }
+  }
+
+  // 🔥 NEW: Separate method for loading draft with better UX
+  void _loadDraftForEditing(String name, Map<String, dynamic> draft) {
+    setState(() {
+      _nameController.text = draft["name"] ?? '';
+      _directionsController.text = draft["directions"] ?? '';
+      
+      // Parse ingredients
+      try {
+        final List<dynamic> parsed = jsonDecode(draft["ingredients"]);
+        _ingredients = parsed.map((e) => IngredientRow.fromJson(e)).toList();
+      } catch (e) {
+        _ingredients = [IngredientRow(name: draft["ingredients"] ?? '')];
+      }
+      
+      if (_ingredients.isEmpty) {
+        _ingredients = [IngredientRow()];
+      }
+      
+      _loadedDraftName = name;
+      _isSaved = true;
+      _tabIndex = 0; // Switch to Submit Recipe tab
+    });
+    
+    // Show success message
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Loaded "$name" for editing'),
+        backgroundColor: Colors.blue,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // 🔥 NEW: Confirm before deleting draft
+  Future<void> _confirmDeleteDraft(String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Draft'),
+        content: Text('Are you sure you want to delete "$name"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed == true) {
+      await LocalDraftService.deleteDraft(name);
+      await _loadDrafts();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Deleted "$name"'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildIngredientRow(int index) {
@@ -911,16 +1408,59 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
               ),
               child: Column(
                 children: [
+                  // 🔥 NEW: Show which draft is being edited
+                  if (_loadedDraftName != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit_note, color: Colors.blue.shade700),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Editing Draft',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.blue.shade700,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  _loadedDraftName!,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.blue.shade900,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  
                   Row(
                     children: [
                       Expanded(
                         child: SizedBox(
                           height: 54,
                           child: ElevatedButton.icon(
-                            onPressed: isSubmitting ? null : _saveRecipe,
+                            onPressed: isSubmitting ? null : (_loadedDraftName != null ? _updateDraft : _saveRecipe),
                             icon: Icon(_isSaved ? Icons.check_circle : Icons.save, size: 20),
                             label: Text(
-                              _isSaved ? 'Saved!' : 'Save Draft',
+                              _isSaved 
+                                  ? 'Saved!' 
+                                  : (_loadedDraftName != null ? 'Update Draft' : 'Save Draft'),
                               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                             ),
                             style: ElevatedButton.styleFrom(
@@ -997,18 +1537,21 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                                 showDialog(
                                   context: context,
                                   builder: (context) => AlertDialog(
-                                    title: const Text('Discard Recipe?'),
-                                    content: const Text('Are you sure? All changes will be lost.'),
+                                    title: const Text('Discard Changes?'),
+                                    content: const Text(
+                                      'You have unsaved changes. Are you sure you want to discard them?'
+                                    ),
                                     actions: [
                                       TextButton(
                                         onPressed: () => Navigator.pop(context),
-                                        child: const Text('Keep Writing'),
+                                        child: const Text('Keep Editing'),
                                       ),
                                       TextButton(
                                         onPressed: () {
                                           Navigator.pop(context);
                                           Navigator.pop(context);
                                         },
+                                        style: TextButton.styleFrom(foregroundColor: Colors.red),
                                         child: const Text('Discard'),
                                       ),
                                     ],
