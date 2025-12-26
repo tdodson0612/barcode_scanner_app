@@ -2533,7 +2533,7 @@ Widget build(BuildContext context) {
     appBar: AppBar(
       leading: Builder(
         builder: (context) => IconButton(
-          icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),
+          icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),  // ✅ ADD: key parameter
           onPressed: () => Scaffold.of(context).openDrawer(),
         ),
       ),

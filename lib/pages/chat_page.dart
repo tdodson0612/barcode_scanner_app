@@ -1,4 +1,4 @@
-// lib/pages/chat_page.dart - FIXED: Proper badge refresh timing + iOS badge clearing
+// lib/pages/chat_page.dart - FIXED: Badge in AppBar + proper drawer
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -66,7 +66,7 @@ class _ChatPageState extends State<ChatPage> {
     // ✅ NEW: Clear iOS badge
     await _clearIOSBadge();
     
-    // ✅ CRITICAL FIX: Wait a bit for database to commit, then force refresh
+    // ✅ CRITICAL FIX: Wait for database to commit, then force refresh
     await Future.delayed(Duration(milliseconds: 500));
     await _refreshBadgeAfterRead();
   }
@@ -210,12 +210,12 @@ class _ChatPageState extends State<ChatPage> {
     if (content.isEmpty || _isSending) return;
 
     final tempMessage = {
-     'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
-     'sender': AuthService.currentUserId,
-     'receiver': widget.friendId,
-     'content': content,
-     'created_at': DateTime.now().toUtc().toIso8601String(),
-     'is_temp': true,
+      'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
+      'sender': AuthService.currentUserId,
+      'receiver': widget.friendId,
+      'content': content,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'is_temp': true,
     };
 
     setState(() {
@@ -437,6 +437,13 @@ class _ChatPageState extends State<ChatPage> {
       },
       child: Scaffold(
         appBar: AppBar(
+          // ✅ CRITICAL FIX: Add badge to AppBar leading
+          leading: Builder(
+            builder: (context) => IconButton(
+              icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+            ),
+          ),
           title: Row(
             children: [
               CircleAvatar(
@@ -491,6 +498,8 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ],
         ),
+        // ✅ CRITICAL FIX: Add drawer
+        drawer: AppDrawer(currentPage: 'messages'),
         body: Column(
           children: [
             Expanded(
