@@ -803,6 +803,120 @@ class _HomePageState extends State<HomePage>
     });
   }
 
+  Future<void> _debugCheckAllCaches() async {
+    print('\n========================================');
+    print('🔍 DEBUG: Checking ALL cache keys...');
+    print('========================================\n');
+    
+    final prefs = await SharedPreferences.getInstance();
+    final allKeys = prefs.getKeys().toList()..sort();
+    
+    // Filter for message/unread related keys
+    final relevantKeys = allKeys.where((key) => 
+      key.toLowerCase().contains('unread') ||
+      key.toLowerCase().contains('message') ||
+      key.toLowerCase().contains('badge') ||
+      key.toLowerCase().contains('cached')
+    ).toList();
+    
+    print('📊 Total cache keys: ${allKeys.length}');
+    print('📬 Message/badge related keys: ${relevantKeys.length}\n');
+    
+    if (relevantKeys.isEmpty) {
+      print('✅ No message/badge cache keys found (this is suspicious!)\n');
+    } else {
+      print('🔎 RELEVANT CACHE KEYS:\n');
+      
+      for (final key in relevantKeys) {
+        final value = prefs.get(key);
+        print('Key: $key');
+        print('  Type: ${value.runtimeType}');
+        
+        if (value is String) {
+          try {
+            final decoded = jsonDecode(value);
+            final preview = decoded.toString();
+            print('  Value (parsed): ${preview.length > 200 ? preview.substring(0, 200) + '...' : preview}');
+          } catch (_) {
+            final preview = value.length > 100 ? value.substring(0, 100) + '...' : value;
+            print('  Value: $preview');
+          }
+        } else {
+          print('  Value: $value');
+        }
+        print('');
+      }
+    }
+    
+    // Check specific known keys
+    print('\n🎯 CHECKING SPECIFIC BADGE CACHE KEYS:\n');
+    
+    final knownKeys = [
+      'cached_unread_count',
+      'cached_unread_count_time',
+      'cache_messages_${AuthService.currentUserId}',
+      'user_chats',
+      'friend_requests',
+    ];
+    
+    for (final key in knownKeys) {
+      final value = prefs.get(key);
+      if (value != null) {
+        print('✅ Found: $key');
+        print('   Value: $value');
+        print('   Type: ${value.runtimeType}\n');
+      } else {
+        print('❌ Missing: $key\n');
+      }
+    }
+    
+    // Check timestamp freshness
+    final cachedTime = prefs.getInt('cached_unread_count_time');
+    if (cachedTime != null) {
+      final age = DateTime.now().millisecondsSinceEpoch - cachedTime;
+      final ageSeconds = (age / 1000).round();
+      print('⏰ Badge cache age: $ageSeconds seconds');
+      print('   Fresh?: ${age < 3000 ? "YES ✅" : "NO ❌ (stale!)"}\n');
+    }
+    
+    print('========================================');
+    print('🔍 DEBUG CHECK COMPLETE');
+    print('========================================\n');
+  }
+
+  Future<void> _debugClearAllCaches() async {
+    print('\n🗑️ NUCLEAR OPTION: Clearing ALL caches...\n');
+    
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Get all message-related keys
+    final keys = prefs.getKeys().where((key) => 
+      key.toLowerCase().contains('unread') ||
+      key.toLowerCase().contains('message') ||
+      key.toLowerCase().contains('badge') ||
+      key.toLowerCase().contains('cached') ||
+      key.toLowerCase().contains('chat')
+    ).toList();
+    
+    print('Found ${keys.length} cache keys to clear:');
+    for (final key in keys) {
+      print('  - $key');
+      await prefs.remove(key);
+    }
+    
+    print('\n✅ All message/badge caches cleared!');
+    print('🔄 Now force refresh the badge...\n');
+    
+    // Force refresh badge
+    await MenuIconWithBadge.invalidateCache();
+    await AppDrawer.invalidateUnreadCache();
+    
+    // Force the widget to rebuild
+    MenuIconWithBadge.globalKey.currentState?.refresh();
+    
+    print('✅ Badge refresh triggered!\n');
+  }
+
 // -----------------------------
 // SCANNING & PHOTO OPERATIONS
 // -----------------------------
@@ -2525,6 +2639,9 @@ class _HomePageState extends State<HomePage>
 // MAIN BUILD()
 // ----------------------------------------------------
 @override
+// Replace your entire build() method with this corrected version:
+
+@override
 Widget build(BuildContext context) {
   super.build(context);
 
@@ -2533,7 +2650,7 @@ Widget build(BuildContext context) {
     appBar: AppBar(
       leading: Builder(
         builder: (context) => IconButton(
-          icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),  // ✅ ADD: key parameter
+          icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),
           onPressed: () => Scaffold.of(context).openDrawer(),
         ),
       ),
@@ -2568,6 +2685,32 @@ Widget build(BuildContext context) {
       currentPage: 'home',
     ),
     body: _showInitialView ? _buildInitialView() : _buildScanningView(),
+    // 🐛 TEMPORARY DEBUG BUTTONS (properly placed as Scaffold property)
+    floatingActionButton: Column(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        FloatingActionButton(
+          heroTag: 'debug1',
+          mini: true,
+          backgroundColor: Colors.orange,
+          child: const Icon(Icons.bug_report, color: Colors.white),
+          onPressed: _debugCheckAllCaches,
+          tooltip: 'Check Caches',
+        ),
+        const SizedBox(height: 8),
+        FloatingActionButton(
+          heroTag: 'debug2',
+          mini: true,
+          backgroundColor: Colors.red,
+          child: const Icon(Icons.delete_sweep, color: Colors.white),
+          onPressed: () async {
+            await _debugClearAllCaches();
+            setState(() {}); // Force rebuild
+          },
+          tooltip: 'Clear All Caches',
+        ),
+      ],
+    ),
   );
 }
 }
