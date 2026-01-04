@@ -1,6 +1,5 @@
 // lib/services/messaging_service.dart
-// ✅ FIXED: Proper unread count tracking and cache invalidation with database commit delays
-// ✅ FIXED: Using integers (0/1) for is_read field instead of booleans
+// ✅ FIXED: Better logging and guaranteed state updates with ALL original methods
 
 import 'dart:convert';
 import '../config/app_config.dart';
@@ -138,13 +137,17 @@ class MessagingService {
   }
 
   // ==============================================
-  // ✅ FIXED: UNREAD MESSAGE COUNT (with better error handling)
+  // ✅ FIXED: UNREAD MESSAGE COUNT (with better logging)
   // ==============================================
   static Future<int> getUnreadMessageCount() async {
-    if (AuthService.currentUserId == null) return 0;
+    if (AuthService.currentUserId == null) {
+      print('❌ getUnreadMessageCount: No user ID');
+      return 0;
+    }
 
     try {
       final uid = AuthService.currentUserId!;
+      print('📬 Fetching unread count for user: $uid');
 
       final response = await DatabaseServiceCore.workerQuery(
         action: 'select',
@@ -157,11 +160,16 @@ class MessagingService {
       );
 
       final count = (response as List).length;
-      AppConfig.debugPrint('📬 Unread message count: $count');
+      print('📬 Database returned $count unread messages');
+      
+      // Show sample of messages for debugging
+      if (count > 0 && AppConfig.enableDebugPrints) {
+        print('📬 Sample unread messages: ${response.take(3).toList()}');
+      }
       
       return count;
     } catch (e) {
-      AppConfig.debugPrint('⚠️ Error getting unread count: $e');
+      print('⚠️ Error getting unread count: $e');
       return 0;
     }
   }
@@ -177,7 +185,7 @@ class MessagingService {
         action: 'update',
         table: 'messages',
         filters: {'id': messageId},
-        data: {'is_read': 1},  // ✅ FIXED: Use integer 1 instead of boolean true
+        data: {'is_read': 1},
       );
       
       // ✅ Invalidate unread badge cache
@@ -236,7 +244,7 @@ class MessagingService {
           action: 'update',
           table: 'messages',
           filters: {'id': msg['id']},
-          data: {'is_read': 1},  // ✅ FIXED: Use integer 1 instead of boolean true
+          data: {'is_read': 1},
         );
         updateFutures.add(future);
       }
@@ -244,8 +252,8 @@ class MessagingService {
       // ✅ Wait for ALL updates to complete
       await Future.wait(updateFutures);
       
-      // ✅ Add small delay to ensure database commits
-      await Future.delayed(Duration(milliseconds: 200));
+      // ✅ Add delay to ensure database commits
+      await Future.delayed(Duration(milliseconds: 500)); // Increased from 200ms
       
       // Clear message caches
       await DatabaseServiceCore.clearCache('cache_messages_${uid}_$senderId');
@@ -363,23 +371,29 @@ class MessagingService {
   }
 
   // ==============================================
-  // ✅ REFRESH BADGE (call this when entering messaging screens)
+  // ✅ FIXED: REFRESH BADGE (call this when entering messaging screens)
   // ==============================================
   static Future<void> refreshUnreadBadge() async {
     try {
-      // Invalidate cache first
+      print('🔄 refreshUnreadBadge() called');
+      
+      // Step 1: Invalidate ALL caches
       await MenuIconWithBadge.invalidateCache();
       await AppDrawer.invalidateUnreadCache();
       
-      // Small delay to ensure cache is cleared
-      await Future.delayed(Duration(milliseconds: 100));
+      // Step 2: Wait for cache to clear
+      await Future.delayed(Duration(milliseconds: 200));
       
-      // Force refresh the badge widget with fresh data
+      // Step 3: Force fetch fresh count
+      final freshCount = await getUnreadMessageCount();
+      print('🔄 Fresh count fetched: $freshCount');
+      
+      // Step 4: Force widget to rebuild with new data
       MenuIconWithBadge.globalKey.currentState?.refresh();
       
-      AppConfig.debugPrint('🔄 Unread badge refreshed with fresh data');
+      print('✅ Badge refresh complete with count: $freshCount');
     } catch (e) {
-      AppConfig.debugPrint('⚠️ Error refreshing badge: $e');
+      print('⚠️ Error refreshing badge: $e');
     }
   }
 }

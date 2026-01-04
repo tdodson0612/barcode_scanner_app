@@ -1,4 +1,4 @@
-// lib/widgets/app_drawer.dart - FIXED: Badge updates properly when messages are read
+// lib/widgets/app_drawer.dart - COMPLETE FIXED VERSION
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/messaging_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,11 +25,13 @@ class AppDrawer extends StatefulWidget {
   // Global key to access the state from anywhere
   static final GlobalKey<_AppDrawerState> globalKey = GlobalKey<_AppDrawerState>();
   
-  /// Call this when user opens messages to invalidate cache
+  /// ✅ FIXED: Call this when user opens messages to invalidate cache
   static Future<void> invalidateUnreadCache() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_cacheKey);
     await prefs.remove(_cacheTimeKey);
+    
+    print('🔄 AppDrawer cache invalidated');
     
     // ✅ FIXED: Force refresh on the widget if it's mounted
     globalKey.currentState?._loadUnreadCount(forceRefresh: true);
@@ -40,7 +42,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
   late final PremiumGateController _controller;
   int _unreadCount = 0;
 
-  static const Duration _cacheDuration = Duration(seconds: 5); // ✅ Reduced for faster updates
+  static const Duration _cacheDuration = Duration(seconds: 5);
 
   @override
   void initState() {
@@ -48,7 +50,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
     _controller = PremiumGateController();
     _controller.addListener(_onPremiumStateChanged);
     
-    // ✅ NEW: Listen to app lifecycle changes
+    // ✅ Listen to app lifecycle changes
     WidgetsBinding.instance.addObserver(this);
     
     _loadUnreadCount();
@@ -61,7 +63,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // ✅ NEW: Refresh badge when app returns to foreground
+  // ✅ Refresh badge when app returns to foreground
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -75,12 +77,12 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ FIXED: Added forceRefresh parameter
+  // ✅ FIXED: Added forceRefresh parameter and better logic
   Future<void> _loadUnreadCount({bool forceRefresh = false}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // ✅ IMPROVED: Only use cache if not force refreshing
+      // ✅ Only use cache if NOT force refreshing
       if (!forceRefresh) {
         // Try to load from cache first
         final cachedCount = prefs.getInt(AppDrawer._cacheKey);
@@ -104,6 +106,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
       }
       
       // Cache is stale, doesn't exist, or force refresh - fetch from database
+      print('📡 AppDrawer: Fetching fresh count from database...');
       final count = await MessagingService.getUnreadMessageCount();
       
       // Save to cache

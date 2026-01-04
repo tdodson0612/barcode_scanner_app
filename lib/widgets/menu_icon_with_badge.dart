@@ -1,5 +1,5 @@
 // lib/widgets/menu_icon_with_badge.dart
-// ✅ FIXED: Force rebuild on refresh + better state management
+// ✅ FIXED: Guaranteed widget rebuild + better state management
 
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/messaging_service.dart';
@@ -23,12 +23,12 @@ class MenuIconWithBadge extends StatefulWidget {
       await prefs.remove(_cacheKey);
       await prefs.remove(_cacheTimeKey);
       
-      AppConfig.debugPrint('🔄 Unread message cache invalidated');
+      print('🔄 MenuIcon cache invalidated');
       
-      // ✅ CRITICAL: Trigger immediate refresh with force rebuild
+      // ✅ CRITICAL: Force immediate refresh
       globalKey.currentState?._loadUnreadCount(forceRefresh: true);
     } catch (e) {
-      AppConfig.debugPrint('⚠️ Error invalidating cache: $e');
+      print('⚠️ Error invalidating MenuIcon cache: $e');
     }
   }
 }
@@ -37,14 +37,17 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> with WidgetsBindi
   int _unreadCount = 0;
   bool _isLoading = false;
   
-  // ✅ REDUCED: Very short cache for more responsive updates
   static const Duration _cacheDuration = Duration(seconds: 3);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadUnreadCount();
+    
+    // ✅ CRITICAL: Load immediately on init
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadUnreadCount(forceRefresh: true);
+    });
   }
 
   @override
@@ -56,37 +59,29 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> with WidgetsBindi
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      AppConfig.debugPrint('📱 App resumed, refreshing unread badge...');
+      print('📱 App resumed, refreshing MenuIcon badge...');
       _loadUnreadCount(forceRefresh: true);
     }
   }
 
-  // ✅ FIXED: Force rebuild even if count doesn't change
+  // ✅ FIXED: Public refresh method that GUARANTEES rebuild
   Future<void> refresh() async {
-    AppConfig.debugPrint('🔄 Manual refresh requested');
+    print('🔄 MenuIcon.refresh() called - forcing full reload');
     await _loadUnreadCount(forceRefresh: true);
-    
-    // ✅ CRITICAL: Force rebuild to ensure UI updates
-    if (mounted) {
-      setState(() {
-        // This forces the widget to rebuild even if _unreadCount hasn't changed
-        // which is important for clearing stale visual state
-      });
-    }
   }
 
   Future<void> _loadUnreadCount({bool forceRefresh = false}) async {
     if (_isLoading && !forceRefresh) {
-      AppConfig.debugPrint('⏭️ Already loading unread count, skipping...');
+      print('⏭️ MenuIcon already loading, skipping...');
       return;
     }
 
-    _isLoading = true;
+    setState(() => _isLoading = true);
 
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // ✅ Try cache first (unless forced)
+      // ✅ Only use cache if NOT force refreshing
       if (!forceRefresh) {
         final cachedCount = prefs.getInt(MenuIconWithBadge._cacheKey);
         final cachedTime = prefs.getInt(MenuIconWithBadge._cacheTimeKey);
@@ -97,20 +92,23 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> with WidgetsBindi
           
           if (isCacheValid) {
             if (mounted) {
-              setState(() => _unreadCount = cachedCount);
+              setState(() {
+                _unreadCount = cachedCount;
+                _isLoading = false;
+              });
             }
-            AppConfig.debugPrint('✅ MenuIcon: Using cached unread count: $cachedCount');
-            _isLoading = false;
+            print('✅ MenuIcon: Using cached count: $cachedCount');
             return;
           } else {
-            AppConfig.debugPrint('⏰ MenuIcon: Cache expired, fetching fresh count...');
+            print('⏰ MenuIcon: Cache expired (${(cacheAge / 1000).round()}s old)');
           }
         }
       } else {
-        AppConfig.debugPrint('🔄 MenuIcon: Force refresh - bypassing cache');
+        print('🔄 MenuIcon: Force refresh - bypassing cache');
       }
       
-      // ✅ CRITICAL: Always fetch fresh from database on force refresh
+      // ✅ CRITICAL: Always fetch fresh from database
+      print('📡 MenuIcon: Fetching fresh count from database...');
       final count = await MessagingService.getUnreadMessageCount();
       
       // Save to cache
@@ -118,27 +116,35 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> with WidgetsBindi
       await prefs.setInt(MenuIconWithBadge._cacheTimeKey, DateTime.now().millisecondsSinceEpoch);
       
       if (mounted) {
-        setState(() => _unreadCount = count);
+        setState(() {
+          _unreadCount = count;
+          _isLoading = false;
+        });
       }
       
-      AppConfig.debugPrint('✅ MenuIcon: Fresh unread count loaded: $count');
+      print('✅ MenuIcon: Fresh count loaded and displayed: $count');
       
     } catch (e) {
-      AppConfig.debugPrint('⚠️ MenuIcon: Error loading unread count: $e');
+      print('⚠️ MenuIcon: Error loading unread count: $e');
       
       // On error, try to use cached value even if stale
       try {
         final prefs = await SharedPreferences.getInstance();
         final cachedCount = prefs.getInt(MenuIconWithBadge._cacheKey);
         if (cachedCount != null && mounted) {
-          setState(() => _unreadCount = cachedCount);
-          AppConfig.debugPrint('⚠️ MenuIcon: Using stale cache due to error: $cachedCount');
+          setState(() {
+            _unreadCount = cachedCount;
+            _isLoading = false;
+          });
+          print('⚠️ MenuIcon: Using stale cache due to error: $cachedCount');
         }
       } catch (_) {
-        AppConfig.debugPrint('❌ MenuIcon: Could not load cached count either');
+        print('❌ MenuIcon: Could not load cached count either');
       }
     } finally {
-      _isLoading = false;
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
