@@ -1,4 +1,7 @@
-// lib/widgets/app_drawer.dart - COMPLETE FIXED VERSION
+// lib/widgets/app_drawer.dart - FIXED VERSION
+// ✅ Added public refresh() method to fix the undefined method error
+
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/messaging_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,24 +28,30 @@ class AppDrawer extends StatefulWidget {
   // Global key to access the state from anywhere
   static final GlobalKey<_AppDrawerState> globalKey = GlobalKey<_AppDrawerState>();
   
-  /// ✅ FIXED: Call this when user opens messages to invalidate cache
+  /// ✅ FIXED: Call this to invalidate cache and force refresh
   static Future<void> invalidateUnreadCache() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_cacheKey);
-    await prefs.remove(_cacheTimeKey);
-    
-    print('🔄 AppDrawer cache invalidated');
-    
-    // ✅ FIXED: Force refresh on the widget if it's mounted
-    globalKey.currentState?._loadUnreadCount(forceRefresh: true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_cacheKey);
+      await prefs.remove(_cacheTimeKey);
+      
+      print('🔄 AppDrawer cache invalidated');
+      
+      // ✅ FIXED: Call the public refresh() method instead
+      await globalKey.currentState?.refresh();
+    } catch (e) {
+      print('⚠️ Error invalidating AppDrawer cache: $e');
+    }
   }
 }
 
 class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
   late final PremiumGateController _controller;
   int _unreadCount = 0;
+  Timer? _autoRefreshTimer;
 
-  static const Duration _cacheDuration = Duration(seconds: 5);
+  // ✅ FIXED: Reduced cache duration to 2 seconds (same as MenuIcon)
+  static const Duration _cacheDuration = Duration(seconds: 2);
 
   @override
   void initState() {
@@ -50,23 +59,37 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
     _controller = PremiumGateController();
     _controller.addListener(_onPremiumStateChanged);
     
-    // ✅ Listen to app lifecycle changes
     WidgetsBinding.instance.addObserver(this);
     
-    _loadUnreadCount();
+    // Load immediately
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadUnreadCount(forceRefresh: true);
+    });
+    
+    // ✅ FIXED: Auto-refresh every 3 seconds
+    _autoRefreshTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) {
+        if (mounted) {
+          print('⏰ AppDrawer auto-refresh triggered');
+          _loadUnreadCount(forceRefresh: true);
+        }
+      },
+    );
   }
 
   @override
   void dispose() {
+    _autoRefreshTimer?.cancel();
     _controller.removeListener(_onPremiumStateChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  // ✅ Refresh badge when app returns to foreground
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      print('📱 App resumed, refreshing AppDrawer badge...');
       _loadUnreadCount(forceRefresh: true);
     }
   }
@@ -77,14 +100,17 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ FIXED: Added forceRefresh parameter and better logic
+  // ✅ NEW: Public method that can be called from outside
+  Future<void> refresh() async {
+    await _loadUnreadCount(forceRefresh: true);
+  }
+
   Future<void> _loadUnreadCount({bool forceRefresh = false}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // ✅ Only use cache if NOT force refreshing
+      // Only use cache if NOT force refreshing
       if (!forceRefresh) {
-        // Try to load from cache first
         final cachedCount = prefs.getInt(AppDrawer._cacheKey);
         final cachedTime = prefs.getInt(AppDrawer._cacheTimeKey);
         
@@ -93,43 +119,56 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
           final isCacheValid = cacheAge < _cacheDuration.inMilliseconds;
           
           if (isCacheValid) {
-            // Use cached value
             if (mounted) {
               setState(() => _unreadCount = cachedCount);
             }
-            print('📦 AppDrawer: Using cached count: $cachedCount');
+            print('✅ AppDrawer: Using valid cache: $cachedCount (${(cacheAge / 1000).toStringAsFixed(1)}s old)');
             return;
+          } else {
+            print('⏰ AppDrawer: Cache STALE (${(cacheAge / 1000).toStringAsFixed(1)}s old) - refreshing...');
           }
+        } else {
+          print('❌ AppDrawer: No cache found - fetching fresh...');
         }
       } else {
         print('🔄 AppDrawer: Force refresh requested');
       }
       
-      // Cache is stale, doesn't exist, or force refresh - fetch from database
-      print('📡 AppDrawer: Fetching fresh count from database...');
+      // Fetch fresh count from database
+      print('📡 AppDrawer: Fetching from MessagingService.getUnreadMessageCount()...');
       final count = await MessagingService.getUnreadMessageCount();
       
-      // Save to cache
+      // Save to cache with current timestamp
+      final now = DateTime.now().millisecondsSinceEpoch;
       await prefs.setInt(AppDrawer._cacheKey, count);
-      await prefs.setInt(AppDrawer._cacheTimeKey, DateTime.now().millisecondsSinceEpoch);
+      await prefs.setInt(AppDrawer._cacheTimeKey, now);
       
       if (mounted) {
         setState(() => _unreadCount = count);
       }
       
-      print('✅ AppDrawer: Fresh count loaded: $count');
-    } catch (e) {
-      print('⚠️ AppDrawer: Error loading unread count: $e');
+      print('✅ AppDrawer: Fresh count = $count (cached at $now)');
       
-      // On error, try to use cached value even if stale
+    } catch (e) {
+      print('❌ AppDrawer: Error loading unread count: $e');
+      
+      // On error, try to use stale cache
       try {
         final prefs = await SharedPreferences.getInstance();
         final cachedCount = prefs.getInt(AppDrawer._cacheKey);
         if (cachedCount != null && mounted) {
           setState(() => _unreadCount = cachedCount);
-          print('⚠️ AppDrawer: Using stale cache: $cachedCount');
+          print('⚠️ AppDrawer: Using stale cache due to error: $cachedCount');
+        } else {
+          if (mounted) {
+            setState(() => _unreadCount = 0);
+          }
         }
-      } catch (_) {}
+      } catch (_) {
+        if (mounted) {
+          setState(() => _unreadCount = 0);
+        }
+      }
     }
   }
 
@@ -314,19 +353,28 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
                   : null,
               selected: widget.currentPage == 'messages',
               onTap: () async {
-                // Close drawer
+                // Close drawer first
                 Navigator.pop(context);
                 
-                // ✅ FIXED: Navigate first, THEN set up the listener
                 if (widget.currentPage != 'messages') {
-                  // Navigate to messages and wait for return
+                  // Navigate and wait for return
                   await Navigator.pushNamed(context, '/messages');
                   
-                  // ✅ CRITICAL FIX: When user returns from messages, force refresh the badge
-                  print('🔄 Returned from messages page, refreshing badge...');
-                  await Future.delayed(Duration(milliseconds: 300)); // Wait for DB commits
-                  await AppDrawer.invalidateUnreadCache(); // This calls _loadUnreadCount(forceRefresh: true)
-                  await MenuIconWithBadge.invalidateCache();
+                  // ✅ CRITICAL: When returning, force refresh with delay
+                  print('🔄 User returned from messages, refreshing badges...');
+                  
+                  // Wait for database commits to complete
+                  await Future.delayed(Duration(milliseconds: 800));
+                  
+                  // Force refresh both badge systems
+                  await MessagingService.refreshUnreadBadge();
+                  
+                  // Refresh this drawer's badge
+                  if (mounted) {
+                    await _loadUnreadCount(forceRefresh: true);
+                  }
+                  
+                  print('✅ Badge refresh complete');
                 }
               },
             ),
@@ -386,7 +434,10 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
               ListTile(
                 leading: Icon(Icons.bookmark, color: Colors.green),
                 title: Text("Saved Ingredients"),
-                onTap: () => Navigator.pushNamed(context, '/saved-ingredients'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushNamed(context, '/saved-ingredients');
+                },
               ),
               
               ListTile(

@@ -1,6 +1,7 @@
 // lib/widgets/menu_icon_with_badge.dart
-// ✅ FIXED: Guaranteed widget rebuild + better state management
+// ✅ HOTFIX: Force refresh on every build + auto-refresh timer
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/messaging_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,8 +26,8 @@ class MenuIconWithBadge extends StatefulWidget {
       
       print('🔄 MenuIcon cache invalidated');
       
-      // ✅ CRITICAL: Force immediate refresh
-      globalKey.currentState?._loadUnreadCount(forceRefresh: true);
+      // Force immediate refresh
+      globalKey.currentState?.refresh();
     } catch (e) {
       print('⚠️ Error invalidating MenuIcon cache: $e');
     }
@@ -36,22 +37,36 @@ class MenuIconWithBadge extends StatefulWidget {
 class _MenuIconWithBadgeState extends State<MenuIconWithBadge> with WidgetsBindingObserver {
   int _unreadCount = 0;
   bool _isLoading = false;
+  Timer? _autoRefreshTimer;
   
-  static const Duration _cacheDuration = Duration(seconds: 3);
+  // ✅ HOTFIX: Reduced cache duration to 2 seconds
+  static const Duration _cacheDuration = Duration(seconds: 2);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     
-    // ✅ CRITICAL: Load immediately on init
+    // Load immediately
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadUnreadCount(forceRefresh: true);
     });
+    
+    // ✅ HOTFIX: Auto-refresh every 3 seconds
+    _autoRefreshTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) {
+        if (mounted) {
+          print('⏰ Auto-refresh timer triggered for MenuIcon');
+          _loadUnreadCount(forceRefresh: true);
+        }
+      },
+    );
   }
 
   @override
   void dispose() {
+    _autoRefreshTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -64,7 +79,7 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> with WidgetsBindi
     }
   }
 
-  // ✅ FIXED: Public refresh method that GUARANTEES rebuild
+  // Public refresh method
   Future<void> refresh() async {
     print('🔄 MenuIcon.refresh() called - forcing full reload');
     await _loadUnreadCount(forceRefresh: true);
@@ -76,12 +91,12 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> with WidgetsBindi
       return;
     }
 
-    setState(() => _isLoading = true);
-
     try {
+      setState(() => _isLoading = true);
+
       final prefs = await SharedPreferences.getInstance();
       
-      // ✅ Only use cache if NOT force refreshing
+      // Check cache freshness
       if (!forceRefresh) {
         final cachedCount = prefs.getInt(MenuIconWithBadge._cacheKey);
         final cachedTime = prefs.getInt(MenuIconWithBadge._cacheTimeKey);
@@ -97,23 +112,26 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> with WidgetsBindi
                 _isLoading = false;
               });
             }
-            print('✅ MenuIcon: Using cached count: $cachedCount');
+            print('✅ MenuIcon: Using valid cache: $cachedCount (${(cacheAge / 1000).toStringAsFixed(1)}s old)');
             return;
           } else {
-            print('⏰ MenuIcon: Cache expired (${(cacheAge / 1000).round()}s old)');
+            print('⏰ MenuIcon: Cache STALE (${(cacheAge / 1000).toStringAsFixed(1)}s old) - refreshing...');
           }
+        } else {
+          print('❌ MenuIcon: No cache found - fetching fresh...');
         }
       } else {
-        print('🔄 MenuIcon: Force refresh - bypassing cache');
+        print('🔄 MenuIcon: Force refresh requested');
       }
       
-      // ✅ CRITICAL: Always fetch fresh from database
-      print('📡 MenuIcon: Fetching fresh count from database...');
+      // Fetch fresh count
+      print('📡 MenuIcon: Fetching from MessagingService.getUnreadMessageCount()...');
       final count = await MessagingService.getUnreadMessageCount();
       
-      // Save to cache
+      // Save to cache with current timestamp
+      final now = DateTime.now().millisecondsSinceEpoch;
       await prefs.setInt(MenuIconWithBadge._cacheKey, count);
-      await prefs.setInt(MenuIconWithBadge._cacheTimeKey, DateTime.now().millisecondsSinceEpoch);
+      await prefs.setInt(MenuIconWithBadge._cacheTimeKey, now);
       
       if (mounted) {
         setState(() {
@@ -122,12 +140,12 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> with WidgetsBindi
         });
       }
       
-      print('✅ MenuIcon: Fresh count loaded and displayed: $count');
+      print('✅ MenuIcon: Fresh count = $count (cached at $now)');
       
     } catch (e) {
-      print('⚠️ MenuIcon: Error loading unread count: $e');
+      print('❌ MenuIcon: Error loading unread count: $e');
       
-      // On error, try to use cached value even if stale
+      // Try to use stale cache on error
       try {
         final prefs = await SharedPreferences.getInstance();
         final cachedCount = prefs.getInt(MenuIconWithBadge._cacheKey);
@@ -137,13 +155,22 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> with WidgetsBindi
             _isLoading = false;
           });
           print('⚠️ MenuIcon: Using stale cache due to error: $cachedCount');
+        } else {
+          if (mounted) {
+            setState(() {
+              _unreadCount = 0;
+              _isLoading = false;
+            });
+          }
         }
       } catch (_) {
-        print('❌ MenuIcon: Could not load cached count either');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
+        print('❌ MenuIcon: Could not load cached count');
+        if (mounted) {
+          setState(() {
+            _unreadCount = 0;
+            _isLoading = false;
+          });
+        }
       }
     }
   }
@@ -153,25 +180,25 @@ class _MenuIconWithBadgeState extends State<MenuIconWithBadge> with WidgetsBindi
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        Icon(Icons.menu),
+        const Icon(Icons.menu),
         if (_unreadCount > 0)
           Positioned(
             right: -2,
             top: -2,
             child: Container(
-              padding: EdgeInsets.all(4),
+              padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
                 color: Colors.red,
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.white, width: 1.5),
               ),
-              constraints: BoxConstraints(
+              constraints: const BoxConstraints(
                 minWidth: 16,
                 minHeight: 16,
               ),
               child: Text(
                 _unreadCount > 9 ? '9+' : '$_unreadCount',
-                style: TextStyle(
+                style: const TextStyle(
                   color: Colors.white,
                   fontSize: 9,
                   fontWeight: FontWeight.bold,
