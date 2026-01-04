@@ -1,5 +1,5 @@
-// lib/widgets/app_drawer.dart - FIXED VERSION
-// ✅ Added public refresh() method to fix the undefined method error
+// lib/widgets/app_drawer.dart - WITH DEBUG BUTTON
+// ✅ Added debug button for badge diagnostics
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -21,14 +21,11 @@ class AppDrawer extends StatefulWidget {
   @override
   State<AppDrawer> createState() => _AppDrawerState();
   
-  // Same cache keys as MenuIconWithBadge to share cache
   static const String _cacheKey = 'cached_unread_count';
   static const String _cacheTimeKey = 'cached_unread_count_time';
   
-  // Global key to access the state from anywhere
   static final GlobalKey<_AppDrawerState> globalKey = GlobalKey<_AppDrawerState>();
   
-  /// ✅ FIXED: Call this to invalidate cache and force refresh
   static Future<void> invalidateUnreadCache() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -37,7 +34,6 @@ class AppDrawer extends StatefulWidget {
       
       print('🔄 AppDrawer cache invalidated');
       
-      // ✅ FIXED: Call the public refresh() method instead
       await globalKey.currentState?.refresh();
     } catch (e) {
       print('⚠️ Error invalidating AppDrawer cache: $e');
@@ -50,7 +46,6 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
   int _unreadCount = 0;
   Timer? _autoRefreshTimer;
 
-  // ✅ FIXED: Reduced cache duration to 2 seconds (same as MenuIcon)
   static const Duration _cacheDuration = Duration(seconds: 2);
 
   @override
@@ -61,12 +56,10 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
     
     WidgetsBinding.instance.addObserver(this);
     
-    // Load immediately
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadUnreadCount(forceRefresh: true);
     });
     
-    // ✅ FIXED: Auto-refresh every 3 seconds
     _autoRefreshTimer = Timer.periodic(
       const Duration(seconds: 3),
       (_) {
@@ -100,7 +93,6 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ NEW: Public method that can be called from outside
   Future<void> refresh() async {
     await _loadUnreadCount(forceRefresh: true);
   }
@@ -109,7 +101,6 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // Only use cache if NOT force refreshing
       if (!forceRefresh) {
         final cachedCount = prefs.getInt(AppDrawer._cacheKey);
         final cachedTime = prefs.getInt(AppDrawer._cacheTimeKey);
@@ -134,11 +125,9 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
         print('🔄 AppDrawer: Force refresh requested');
       }
       
-      // Fetch fresh count from database
       print('📡 AppDrawer: Fetching from MessagingService.getUnreadMessageCount()...');
       final count = await MessagingService.getUnreadMessageCount();
       
-      // Save to cache with current timestamp
       final now = DateTime.now().millisecondsSinceEpoch;
       await prefs.setInt(AppDrawer._cacheKey, count);
       await prefs.setInt(AppDrawer._cacheTimeKey, now);
@@ -152,7 +141,6 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
     } catch (e) {
       print('❌ AppDrawer: Error loading unread count: $e');
       
-      // On error, try to use stale cache
       try {
         final prefs = await SharedPreferences.getInstance();
         final cachedCount = prefs.getInt(AppDrawer._cacheKey);
@@ -291,7 +279,6 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
               },
             ),
             
-            // ✅ FIXED: Messages with badge - properly refreshes when returning
             ListTile(
               leading: Stack(
                 clipBehavior: Clip.none,
@@ -353,23 +340,17 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
                   : null,
               selected: widget.currentPage == 'messages',
               onTap: () async {
-                // Close drawer first
                 Navigator.pop(context);
                 
                 if (widget.currentPage != 'messages') {
-                  // Navigate and wait for return
                   await Navigator.pushNamed(context, '/messages');
                   
-                  // ✅ CRITICAL: When returning, force refresh with delay
                   print('🔄 User returned from messages, refreshing badges...');
                   
-                  // Wait for database commits to complete
                   await Future.delayed(Duration(milliseconds: 800));
                   
-                  // Force refresh both badge systems
                   await MessagingService.refreshUnreadBadge();
                   
-                  // Refresh this drawer's badge
                   if (mounted) {
                     await _loadUnreadCount(forceRefresh: true);
                   }
@@ -580,6 +561,44 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
                 }
               },
             ),
+            
+            ListTile(
+              leading: Icon(
+                Icons.star,
+                color: _controller.isPremium ? Colors.amber : Colors.grey,
+              ),
+              title: Text(
+                _controller.isPremium ? 'Premium Active' : 'Upgrade to Premium',
+                style: TextStyle(
+                  color: _controller.isPremium ? Colors.amber : null,
+                  fontWeight: _controller.isPremium ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+              trailing: _controller.isPremium 
+                  ? Icon(Icons.check_circle, color: Colors.green)
+                  : Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/purchase');
+              },
+            ),
+            
+            Divider(),
+            
+            // 🐛 DEBUG BUTTON (TEMPORARY)
+            ListTile(
+              leading: Icon(Icons.bug_report, color: Colors.orange),
+              title: Text(
+                '🐛 Debug Badges',
+                style: TextStyle(color: Colors.orange, fontWeight: FontWeight.w600),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushNamed(context, '/badge-debug');
+              },
+            ),
+            
+            Divider(),
             
             ListTile(
               leading: Icon(

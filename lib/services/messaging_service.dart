@@ -1,5 +1,5 @@
 // lib/services/messaging_service.dart
-// ✅ COMPLETE FIXED VERSION - Fixed the _loadUnreadCount call
+// ✅ FIXED VERSION - Using boolean true/false instead of integers for is_read
 
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -113,6 +113,7 @@ class MessagingService {
     try {
       final uid = AuthService.currentUserId!;
 
+      // ✅ FIXED: Use boolean false instead of integer 0
       await DatabaseServiceCore.workerQuery(
         action: 'insert',
         table: 'messages',
@@ -120,7 +121,7 @@ class MessagingService {
           'sender': uid,
           'receiver': receiverId,
           'content': content,
-          'is_read': 0,
+          'is_read': false, // ← CHANGED from 0 to false
           'created_at': DateTime.now().toUtc().toIso8601String(),
         },
       );
@@ -138,7 +139,7 @@ class MessagingService {
   }
 
   // ==============================================
-  // ✅ FIXED: UNREAD MESSAGE COUNT (with better logging)
+  // ✅ FIXED: UNREAD MESSAGE COUNT (using boolean)
   // ==============================================
   static Future<int> getUnreadMessageCount() async {
     if (AuthService.currentUserId == null) {
@@ -150,13 +151,14 @@ class MessagingService {
       final uid = AuthService.currentUserId!;
       print('📬 Fetching unread count for user: $uid');
 
+      // ✅ FIXED: Use boolean false instead of integer 0
       final response = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'messages',
         columns: ['id'],
         filters: {
           'receiver': uid,
-          'is_read': 0,
+          'is_read': false, // ← CHANGED from 0 to false
         },
       );
 
@@ -176,17 +178,18 @@ class MessagingService {
   }
 
   // ==============================================
-  // ✅ FIXED: MARK SINGLE MESSAGE READ (using integer)
+  // ✅ FIXED: MARK SINGLE MESSAGE READ (using boolean)
   // ==============================================
   static Future<void> markMessageAsRead(String messageId) async {
     if (AuthService.currentUserId == null) return;
 
     try {
+      // ✅ FIXED: Use boolean true instead of integer 1
       await DatabaseServiceCore.workerQuery(
         action: 'update',
         table: 'messages',
         filters: {'id': messageId},
-        data: {'is_read': 1},
+        data: {'is_read': true}, // ← CHANGED from 1 to true
       );
       
       // ✅ Invalidate unread badge cache immediately
@@ -216,7 +219,7 @@ class MessagingService {
     try {
       final uid = AuthService.currentUserId!;
 
-      // ✅ FIXED: Get unread messages first
+      // ✅ FIXED: Get unread messages using boolean false
       final messages = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'messages',
@@ -224,7 +227,7 @@ class MessagingService {
         filters: {
           'receiver': uid,
           'sender': senderId,
-          'is_read': 0,
+          'is_read': false, // ← CHANGED from 0 to false
         },
       );
 
@@ -237,13 +240,13 @@ class MessagingService {
 
       AppConfig.debugPrint('📝 Marking ${messageList.length} messages as read...');
 
-      // ✅ CRITICAL: Update all messages in parallel
+      // ✅ CRITICAL: Update all messages in parallel using boolean true
       final updateFutures = messageList.map((msg) {
         return DatabaseServiceCore.workerQuery(
           action: 'update',
           table: 'messages',
           filters: {'id': msg['id']},
-          data: {'is_read': 1},
+          data: {'is_read': true}, // ← CHANGED from 1 to true
         );
       }).toList();
       
@@ -309,8 +312,9 @@ class MessagingService {
               lastMessage = msg;
             }
             
-            // ✅ Count unread messages from this friend (checking for integer 0)
-            if (msg['receiver'] == uid && msg['is_read'] == 0) {
+            // ✅ FIXED: Check for boolean false instead of integer 0
+            // Also handle case where database might return integer 0
+            if (msg['receiver'] == uid && (msg['is_read'] == false || msg['is_read'] == 0)) {
               unreadCount++;
             }
           }
@@ -340,7 +344,7 @@ class MessagingService {
   }
 
   // ==============================================
-  // ✅ GET UNREAD COUNT PER SENDER (for chat list badges)
+  // ✅ FIXED: GET UNREAD COUNT PER SENDER (using boolean)
   // ==============================================
   static Future<Map<String, int>> getUnreadCountsBySender() async {
     if (AuthService.currentUserId == null) return {};
@@ -348,13 +352,14 @@ class MessagingService {
     try {
       final uid = AuthService.currentUserId!;
 
+      // ✅ FIXED: Use boolean false instead of integer 0
       final response = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'messages',
         columns: ['sender'],
         filters: {
           'receiver': uid,
-          'is_read': 0,
+          'is_read': false, // ← CHANGED from 0 to false
         },
       );
 

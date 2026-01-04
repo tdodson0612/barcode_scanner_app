@@ -468,18 +468,18 @@ packages:
     dependency: "direct main"
     description:
       name: google_mlkit_barcode_scanning
-      sha256: "60171e66d05a57f19d4a4e4422bbd8d448569db9ab59f3c5e13bbea2492598c7"
+      sha256: "5852d1daa007a05b33f99e3e3fa34227c49d9c41bc92a85d820666a57fd5c35f"
       url: "https://pub.dev"
     source: hosted
-    version: "0.7.0"
+    version: "0.13.0"
   google_mlkit_commons:
     dependency: "direct main"
     description:
       name: google_mlkit_commons
-      sha256: "42c31500be3aba08bcc2cf45d5af648affc40e46684f437b8383084657e982cf"
+      sha256: "7e9a6d6e66b44aa8cfe944bda9bc3346c52486dd890ca49e5bc98845cda40d7f"
       url: "https://pub.dev"
     source: hosted
-    version: "0.4.0"
+    version: "0.9.0"
   google_mobile_ads:
     dependency: "direct main"
     description:
@@ -748,10 +748,10 @@ packages:
     dependency: transitive
     description:
       name: meta
-      sha256: "23f08335362185a5ea2ad3a4e597f1375e78bce8a040df5c600c8d3552ef2394"
+      sha256: e3641ec5d63ebf0d9b41bd43201a66e3fc79a65db5f61fc181f04cd27aab950c
       url: "https://pub.dev"
     source: hosted
-    version: "1.17.0"
+    version: "1.16.0"
   mime:
     dependency: transitive
     description:
@@ -1137,10 +1137,10 @@ packages:
     dependency: transitive
     description:
       name: test_api
-      sha256: ab2726c1a94d3176a45960b6234466ec367179b87dd74f1611adb1f3b5fb9d55
+      sha256: "522f00f556e73044315fa4585ec3270f1808a4b186c936e612cab0b565ff1e00"
       url: "https://pub.dev"
     source: hosted
-    version: "0.7.7"
+    version: "0.7.6"
   timezone:
     dependency: transitive
     description:
