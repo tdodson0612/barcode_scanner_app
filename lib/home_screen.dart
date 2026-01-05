@@ -1,4 +1,4 @@
-// lib/home_screen.dart 
+// lib/home_screen.dart - FULLY FIXED VERSION
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
@@ -60,18 +60,8 @@ class Recipe {
       );
 }
 
-
-
 class RecipeGenerator {
-  /// Search recipes by one or more keywords (button selections).
-  ///
-  /// Rules:
-  /// 1. Try AND (all keywords) first.
-  /// 2. If none, fall back to OR (any keyword).
-  /// 3. Sort by match count (most matches first).
-  /// 4. Return up to 2 recipes.
   static Future<List<Recipe>> searchByKeywords(List<String> rawKeywords) async {
-    // Normalize & dedupe keywords
     final keywords = rawKeywords
         .map((w) => w.trim().toLowerCase())
         .where((w) => w.isNotEmpty)
@@ -81,22 +71,19 @@ class RecipeGenerator {
     AppConfig.debugPrint('🔎 Selected keywords: $keywords');
 
     if (keywords.isEmpty) {
-      AppConfig.debugPrint(
-        '⚠️ No keywords selected, falling back to healthy defaults.',
-      );
+      AppConfig.debugPrint('⚠️ No keywords selected, falling back to healthy defaults.');
       return _getHealthyRecipes();
     }
 
     try {
       AppConfig.debugPrint('📡 Sending multi-keyword search: $keywords');
 
-      // Send ALL keywords to worker in one request
       final response = await http.post(
         Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'action': 'search_recipes',
-          'keyword': keywords, // Worker handles array now
+          'keyword': keywords,
           'limit': 50,
         }),
       );
@@ -111,16 +98,13 @@ class RecipeGenerator {
 
       final data = jsonDecode(response.body);
 
-      // Handle new worker response format
       if (data is Map<String, dynamic>) {
         final results = data['results'] as List? ?? [];
         final matchType = data['matchType'] ?? 'UNKNOWN';
         final searchedKeywords = data['searchedKeywords'] as List? ?? [];
         final totalResults = data['totalResults'] ?? 0;
 
-        AppConfig.debugPrint(
-          '✅ Search complete: $matchType match, $totalResults total results',
-        );
+        AppConfig.debugPrint('✅ Search complete: $matchType match, $totalResults total results');
         AppConfig.debugPrint('🔍 Searched keywords: $searchedKeywords');
 
         if (results.isEmpty) {
@@ -137,7 +121,6 @@ class RecipeGenerator {
         return recipes;
       }
 
-      // Fallback for old response format (shouldn't happen)
       AppConfig.debugPrint('⚠️ Unexpected response format, using defaults');
       return _getHealthyRecipes();
 
@@ -146,7 +129,7 @@ class RecipeGenerator {
       return _getHealthyRecipes();
     }
   }
-  /// Still available if you use liverHealthScore → static suggestions anywhere.
+
   static List<Recipe> generateSuggestions(int liverHealthScore) {
     if (liverHealthScore >= 75) {
       return _getHealthyRecipes();
@@ -161,28 +144,14 @@ class RecipeGenerator {
         Recipe(
           title: 'Mediterranean Salmon Bowl',
           description: 'Heart-healthy salmon with fresh vegetables',
-          ingredients: [
-            'Fresh salmon',
-            'Mixed greens',
-            'Olive oil',
-            'Lemon',
-            'Cherry tomatoes',
-          ],
-          instructions:
-              'Grill salmon, serve over greens with olive oil and lemon dressing.',
+          ingredients: ['Fresh salmon', 'Mixed greens', 'Olive oil', 'Lemon', 'Cherry tomatoes'],
+          instructions: 'Grill salmon, serve over greens with olive oil and lemon dressing.',
         ),
         Recipe(
           title: 'Quinoa Vegetable Stir-fry',
           description: 'Protein-rich quinoa with colorful vegetables',
-          ingredients: [
-            'Quinoa',
-            'Bell peppers',
-            'Broccoli',
-            'Carrots',
-            'Soy sauce',
-          ],
-          instructions:
-              'Cook quinoa, stir-fry vegetables, combine and season.',
+          ingredients: ['Quinoa', 'Bell peppers', 'Broccoli', 'Carrots', 'Soy sauce'],
+          instructions: 'Cook quinoa, stir-fry vegetables, combine and season.',
         ),
       ];
 
@@ -191,21 +160,13 @@ class RecipeGenerator {
           title: 'Baked Chicken with Sweet Potato',
           description: 'Lean protein with nutrient-rich sweet potato',
           ingredients: ['Chicken breast', 'Sweet potato', 'Herbs', 'Olive oil'],
-          instructions:
-              'Season chicken, bake with sweet potato slices until golden.',
+          instructions: 'Season chicken, bake with sweet potato slices until golden.',
         ),
         Recipe(
           title: 'Lentil Soup',
           description: 'Fiber-rich soup to support liver health',
-          ingredients: [
-            'Red lentils',
-            'Carrots',
-            'Celery',
-            'Onions',
-            'Vegetable broth',
-          ],
-          instructions:
-              'Sauté vegetables, add lentils and broth, simmer until tender.',
+          ingredients: ['Red lentils', 'Carrots', 'Celery', 'Onions', 'Vegetable broth'],
+          instructions: 'Sauté vegetables, add lentils and broth, simmer until tender.',
         ),
       ];
 
@@ -220,8 +181,7 @@ class RecipeGenerator {
           title: 'Steamed Vegetables with Brown Rice',
           description: 'Simple, clean eating option',
           ingredients: ['Brown rice', 'Broccoli', 'Carrots', 'Zucchini', 'Herbs'],
-          instructions:
-              'Steam vegetables, serve over cooked brown rice with herbs.',
+          instructions: 'Steam vegetables, serve over cooked brown rice with herbs.',
         ),
       ];
 }
@@ -244,7 +204,6 @@ class NutritionApiService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         
-        // 🔥 DEBUG: Print raw API response
         if (AppConfig.enableDebugPrints) {
           print('📡 OpenFoodFacts API Response:');
           print('  Status: ${data['status']}');
@@ -267,6 +226,7 @@ class NutritionApiService {
     }
   }
 }
+
 class BarcodeScannerService {
   static Future<String?> scanBarcode(String imagePath) async {
     if (imagePath.isEmpty) return null;
@@ -294,8 +254,6 @@ class BarcodeScannerService {
   }
 }
 
-// lib/home_screen.dart - PART 2 OF 5
-
 class HomePage extends StatefulWidget {
   final bool isPremium;
   const HomePage({super.key, this.isPremium = false});
@@ -319,7 +277,6 @@ class _HomePageState extends State<HomePage>
   NutritionInfo? _currentNutrition;
 
   late final PremiumGateController _premiumController;
-  // ✅ REMOVED: StreamSubscription? _premiumSubscription;
 
   bool _isPremium = false;
   int _remainingScans = 3;
@@ -336,7 +293,6 @@ class _HomePageState extends State<HomePage>
   final ImagePicker _picker = ImagePicker();
   final TextEditingController _searchController = TextEditingController();
 
-  // ⭐ FINAL — only declared once
   List<String> _keywordTokens = [];
   Set<String> _selectedKeywords = {};
   bool _isSearchingRecipes = false;
@@ -387,7 +343,6 @@ class _HomePageState extends State<HomePage>
   @override
   void dispose() {
     _isDisposed = true;
-    // ✅ FIXED: Remove listener properly (no cancel())
     _premiumController.removeListener(_onPremiumStateChanged);
     _interstitialAd?.dispose();
     _rewardedAd?.dispose();
@@ -395,49 +350,85 @@ class _HomePageState extends State<HomePage>
     super.dispose();
   }
 
-// ✅ FIXED: Proper ChangeNotifier listener pattern with scheduled updates
   void _initializePremiumController() {
     _premiumController = PremiumGateController();
-
-    // Add listener directly - addListener returns void, not StreamSubscription
     _premiumController.addListener(_onPremiumStateChanged);
     
-    // Initialize state AFTER build phase using addPostFrameCallback
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _onPremiumStateChanged();
     });
   }
 
-
   void _onPremiumStateChanged() {
     if (!mounted || _isDisposed) return;
     
-    // Schedule the setState for after the current build phase
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && !_isDisposed) {
+        final wasPremium = _isPremium;
+        final isPremiumNow = _premiumController.isPremium;
+        
         setState(() {
-          _isPremium = _premiumController.isPremium;
+          _isPremium = isPremiumNow;
           _remainingScans = _premiumController.remainingScans;
           _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
         });
+        
+        // ⭐ If user became premium, dispose all ads
+        if (!wasPremium && isPremiumNow) {
+          if (AppConfig.enableDebugPrints) {
+            print("🎉 User became PREMIUM - disposing all ads");
+          }
+          
+          _interstitialAd?.dispose();
+          _interstitialAd = null;
+          _isAdReady = false;
+          
+          _rewardedAd?.dispose();
+          _rewardedAd = null;
+          _isRewardedAdReady = false;
+        }
+        
+        // ⭐ If user lost premium, reload ads
+        if (wasPremium && !isPremiumNow) {
+          if (AppConfig.enableDebugPrints) {
+            print("⬇️ User lost PREMIUM - loading ads");
+          }
+          
+          _loadInterstitialAd();
+          _loadRewardedAd();
+        }
       }
     });
   }
 
   Future<void> _initializeAsync() async {
     try {
-      // Delay initial refresh to avoid build phase issues
       await Future.delayed(const Duration(milliseconds: 100));
       
       if (!mounted || _isDisposed) return;
       
+      // ⭐ CRITICAL: Load premium status FIRST, before ads
       await _premiumController.refresh();
+      
+      if (AppConfig.enableDebugPrints) {
+        print("🔐 Premium status after refresh: $_isPremium");
+      }
+      
+      // ⭐ Now load ads ONLY if user is free
+      if (!_isPremium) {
+        if (AppConfig.enableDebugPrints) {
+          print("📺 Loading ads for FREE user");
+        }
+        _loadInterstitialAd();
+        _loadRewardedAd();
+      } else {
+        if (AppConfig.enableDebugPrints) {
+          print("🚫 Skipping ads for PREMIUM user");
+        }
+      }
+      
       await _loadFavoriteRecipes();
       await _syncFavoritesFromDatabase();
-
-      // These WILL be added in next portion
-      _loadInterstitialAd();
-      _loadRewardedAd();
 
     } catch (e) {
       if (mounted) {
@@ -452,26 +443,36 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-
-    // ----------------------------------------------------
-  // ADS — REQUIRED METHODS
-  // ----------------------------------------------------
-
-  // Load Interstitial Ad
   void _loadInterstitialAd() {
-    if (_isDisposed) return;
+    if (_isDisposed || _isPremium) {
+      if (AppConfig.enableDebugPrints && _isPremium) {
+        print("🚫 Not loading interstitial - user is PREMIUM");
+      }
+      return;
+    }
 
     InterstitialAd.load(
       adUnitId: AppConfig.interstitialAdId,
       request: const AdRequest(),
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
-          if (!_isDisposed) {
+          // ⭐ CRITICAL: Check premium status again after ad loads
+          final isPremiumNow = _premiumController.isPremium;
+          
+          if (!_isDisposed && !isPremiumNow) {
             _interstitialAd = ad;
             _isAdReady = true;
             ad.setImmersiveMode(true);
+            
+            if (AppConfig.enableDebugPrints) {
+              print("✅ Interstitial ad loaded (FREE user)");
+            }
           } else {
+            // User became premium while ad was loading - dispose it
             ad.dispose();
+            if (AppConfig.enableDebugPrints) {
+              print("🚫 Disposed ad - user is PREMIUM (became premium during load)");
+            }
           }
         },
         onAdFailedToLoad: (error) {
@@ -484,48 +485,84 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  // Load Rewarded Ad
   void _loadRewardedAd() {
-    if (_isDisposed) return;
+    if (_isDisposed || _isPremium) {
+      if (AppConfig.enableDebugPrints && _isPremium) {
+        print("🚫 Not loading rewarded ad - user is PREMIUM");
+      }
+      return;
+    }
 
     RewardedAd.load(
       adUnitId: AppConfig.rewardedAdId,
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
         onAdLoaded: (ad) {
-          if (!_isDisposed) {
+          // ⭐ CRITICAL: Check premium status again after ad loads
+          final isPremiumNow = _premiumController.isPremium;
+          
+          if (!_isDisposed && !isPremiumNow) {
             _rewardedAd = ad;
             _isRewardedAdReady = true;
+            
+            if (AppConfig.enableDebugPrints) {
+              print("✅ Rewarded ad loaded (FREE user)");
+            }
           } else {
+            // User became premium while ad was loading - dispose it
             ad.dispose();
+            if (AppConfig.enableDebugPrints) {
+              print("🚫 Disposed rewarded ad - user is PREMIUM (became premium during load)");
+            }
           }
         },
         onAdFailedToLoad: (error) {
           _isRewardedAdReady = false;
           if (AppConfig.enableDebugPrints) {
-            print("❌ Rewarded failed to load: $error");
+            print("❌ Rewarded ad failed to load: $error");
           }
         },
       ),
     );
   }
 
-  // Show Interstitial Ad
+  // ✅ FIXED: Never show ads to premium users (with double-check)
   void _showInterstitialAd(VoidCallback onAdClosed) {
-    if (_isDisposed || !_isAdReady || _interstitialAd == null) {
+    // ⭐ CRITICAL: Double-check premium status at show time
+    final isPremiumNow = _premiumController.isPremium;
+    
+    if (_isDisposed || isPremiumNow || !_isAdReady || _interstitialAd == null) {
+      if (AppConfig.enableDebugPrints) {
+        if (isPremiumNow) {
+          print("🚫 BLOCKED AD: User is PREMIUM");
+        } else if (!_isAdReady) {
+          print("⚠️ Ad not ready");
+        } else if (_interstitialAd == null) {
+          print("⚠️ No ad loaded");
+        }
+      }
       onAdClosed();
       return;
+    }
+
+    if (AppConfig.enableDebugPrints) {
+      print("📺 Showing interstitial ad to FREE user");
     }
 
     _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
       onAdDismissedFullScreenContent: (ad) {
         ad.dispose();
-        _loadInterstitialAd();
+        // Only reload if still free user
+        if (!_premiumController.isPremium) {
+          _loadInterstitialAd();
+        }
         onAdClosed();
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
         ad.dispose();
-        _loadInterstitialAd();
+        if (!_premiumController.isPremium) {
+          _loadInterstitialAd();
+        }
         onAdClosed();
       },
     );
@@ -533,7 +570,6 @@ class _HomePageState extends State<HomePage>
     _interstitialAd!.show();
     _isAdReady = false;
   }
-
 
   Future<void> _syncFavoritesFromDatabase() async {
     try {
@@ -562,11 +598,8 @@ class _HomePageState extends State<HomePage>
             recipeName: json['recipe_name'] ?? json['title'] ?? '',
             ingredients: json['ingredients'] ?? '',
             directions: json['directions'] ?? '',
-            createdAt:
-                DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
-            updatedAt: json['updated_at'] != null
-                ? DateTime.tryParse(json['updated_at'])
-                : null,
+            createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
+            updatedAt: json['updated_at'] != null ? DateTime.tryParse(json['updated_at']) : null,
           );
         }).toList();
 
@@ -581,10 +614,6 @@ class _HomePageState extends State<HomePage>
       print('⚠️ Error syncing favorites from database: $e');
     }
   }
-
-  // -----------------------------------------------------
-  // ⭐ NEW KEYWORD SYSTEM (NO LLM)
-  // -----------------------------------------------------
 
   void _initKeywordButtonsFromProductName(String productName) {
     final tokens = productName
@@ -621,11 +650,10 @@ class _HomePageState extends State<HomePage>
     try {
       setState(() {
         _isSearchingRecipes = true;
-        _currentRecipeIndex = 0; // ⭐ RESET pagination on new search
+        _currentRecipeIndex = 0;
       });
 
-      final recipes =
-          await RecipeGenerator.searchByKeywords(_selectedKeywords.toList());
+      final recipes = await RecipeGenerator.searchByKeywords(_selectedKeywords.toList());
 
       if (mounted && !_isDisposed) {
         setState(() => _recipeSuggestions = recipes);
@@ -653,15 +681,13 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-// Add these methods AFTER _searchRecipesBySelectedKeywords()
-
   void _loadNextRecipeSuggestions() {
     if (_recipeSuggestions.isEmpty) return;
     
     setState(() {
       _currentRecipeIndex += _recipesPerPage;
       if (_currentRecipeIndex >= _recipeSuggestions.length) {
-        _currentRecipeIndex = 0; // Loop back to start
+        _currentRecipeIndex = 0;
       }
     });
   }
@@ -669,8 +695,7 @@ class _HomePageState extends State<HomePage>
   List<Recipe> _getCurrentPageRecipes() {
     if (_recipeSuggestions.isEmpty) return [];
     
-    final endIndex = (_currentRecipeIndex + _recipesPerPage)
-        .clamp(0, _recipeSuggestions.length);
+    final endIndex = (_currentRecipeIndex + _recipesPerPage).clamp(0, _recipeSuggestions.length);
     
     return _recipeSuggestions.sublist(_currentRecipeIndex, endIndex);
   }
@@ -698,8 +723,7 @@ class _HomePageState extends State<HomePage>
   Future<void> _saveFavoritesToLocalCache(List<FavoriteRecipe> favorites) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final serialized =
-          favorites.map((recipe) => jsonEncode(recipe.toCache())).toList();
+      final serialized = favorites.map((recipe) => jsonEncode(recipe.toCache())).toList();
 
       await prefs.setStringList('favorite_recipes_detailed', serialized);
       print('✅ Synced favorites to cache');
@@ -708,22 +732,15 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // PASTE THIS INTO home_screen.dart
-  // REPLACE your existing _toggleFavoriteRecipe() method (around line 684)
-
   Future<void> _toggleFavoriteRecipe(Recipe recipe) async {
     try {
       final name = recipe.title;
       final ingredients = recipe.ingredients.join(', ');
       final directions = recipe.instructions;
 
-      // ⭐ FIXED: Check if already favorited using improved service
-      final existing = await FavoriteRecipesService.findExistingFavorite(
-        recipeName: name,
-      );
+      final existing = await FavoriteRecipesService.findExistingFavorite(recipeName: name);
 
       if (existing != null) {
-        // Recipe is favorited - remove it
         if (existing.id == null) {
           throw Exception('Favorite recipe has no ID — cannot remove');
         }
@@ -738,14 +755,11 @@ class _HomePageState extends State<HomePage>
           ErrorHandlingService.showSuccess(context, 'Removed from favorites');
         }
       } else {
-        // Recipe is not favorited - add it
         try {
           final created = await FavoriteRecipesService.addFavoriteRecipe(
             name,
             ingredients,
             directions,
-            // ⭐ TODO: If you have recipe.id from recipe_master, pass it here:
-            // recipeId: recipe.id,
           );
 
           setState(() => _favoriteRecipes.add(created));
@@ -756,7 +770,6 @@ class _HomePageState extends State<HomePage>
           }
         } catch (e) {
           if (e.toString().contains('already in your favorites')) {
-            // Handle duplicate error gracefully
             if (mounted) {
               ErrorHandlingService.showSimpleError(
                 context,
@@ -765,7 +778,7 @@ class _HomePageState extends State<HomePage>
             }
             return;
           }
-          rethrow; // Other errors bubble up
+          rethrow;
         }
       }
     } catch (e) {
@@ -811,7 +824,6 @@ class _HomePageState extends State<HomePage>
     final prefs = await SharedPreferences.getInstance();
     final allKeys = prefs.getKeys().toList()..sort();
     
-    // Filter for message/unread related keys
     final relevantKeys = allKeys.where((key) => 
       key.toLowerCase().contains('unread') ||
       key.toLowerCase().contains('message') ||
@@ -848,7 +860,6 @@ class _HomePageState extends State<HomePage>
       }
     }
     
-    // Check specific known keys
     print('\n🎯 CHECKING SPECIFIC BADGE CACHE KEYS:\n');
     
     final knownKeys = [
@@ -870,7 +881,6 @@ class _HomePageState extends State<HomePage>
       }
     }
     
-    // Check timestamp freshness
     final cachedTime = prefs.getInt('cached_unread_count_time');
     if (cachedTime != null) {
       final age = DateTime.now().millisecondsSinceEpoch - cachedTime;
@@ -889,7 +899,6 @@ class _HomePageState extends State<HomePage>
     
     final prefs = await SharedPreferences.getInstance();
     
-    // Get all message-related keys
     final keys = prefs.getKeys().where((key) => 
       key.toLowerCase().contains('unread') ||
       key.toLowerCase().contains('message') ||
@@ -907,19 +916,13 @@ class _HomePageState extends State<HomePage>
     print('\n✅ All message/badge caches cleared!');
     print('🔄 Now force refresh the badge...\n');
     
-    // Force refresh badge
     await MenuIconWithBadge.invalidateCache();
     await AppDrawer.invalidateUnreadCache();
     
-    // Force the widget to rebuild
     MenuIconWithBadge.globalKey.currentState?.refresh();
     
     print('✅ Badge refresh triggered!\n');
   }
-
-// -----------------------------
-// SCANNING & PHOTO OPERATIONS
-// -----------------------------
 
   Future<void> _performScan() async {
     try {
@@ -928,9 +931,27 @@ class _HomePageState extends State<HomePage>
         return;
       }
 
-      if (!_isPremium) {
+      // ⭐ CRITICAL: Check premium status from controller directly
+      final isPremiumNow = _premiumController.isPremium;
+      
+      if (AppConfig.enableDebugPrints) {
+        print("🔍 Scan requested - Premium: $isPremiumNow, Ad Ready: $_isAdReady");
+      }
+
+      // Only show ad to FREE users with loaded ads
+      if (!isPremiumNow && _isAdReady) {
+        if (AppConfig.enableDebugPrints) {
+          print("📺 Showing ad before scan (FREE user)");
+        }
         _showInterstitialAd(() => _executePerformScan());
       } else {
+        if (AppConfig.enableDebugPrints) {
+          if (isPremiumNow) {
+            print("✅ Skipping ad (PREMIUM user)");
+          } else {
+            print("⚠️ Skipping ad (no ad ready)");
+          }
+        }
         _executePerformScan();
       }
 
@@ -997,10 +1018,6 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // -----------------------------
-  // CAMERA HANDLING
-  // -----------------------------
-
   Future<void> _takePhoto() async {
     try {
       if (!_premiumController.canAccessFeature(PremiumFeature.scan)) {
@@ -1008,9 +1025,27 @@ class _HomePageState extends State<HomePage>
         return;
       }
 
-      if (!_isPremium) {
+      // ⭐ CRITICAL: Check premium status from controller directly
+      final isPremiumNow = _premiumController.isPremium;
+      
+      if (AppConfig.enableDebugPrints) {
+        print("📸 Photo requested - Premium: $isPremiumNow, Ad Ready: $_isAdReady");
+      }
+
+      // Only show ad to FREE users with loaded ads
+      if (!isPremiumNow && _isAdReady) {
+        if (AppConfig.enableDebugPrints) {
+          print("📺 Showing ad before photo (FREE user)");
+        }
         _showInterstitialAd(() => _executeTakePhoto());
       } else {
+        if (AppConfig.enableDebugPrints) {
+          if (isPremiumNow) {
+            print("✅ Skipping ad (PREMIUM user)");
+          } else {
+            print("⚠️ Skipping ad (no ad ready)");
+          }
+        }
         _executeTakePhoto();
       }
 
@@ -1026,14 +1061,16 @@ class _HomePageState extends State<HomePage>
     }
   }
 
+  // ✅ FIXED: Improved camera handling with better timeouts
   Future<void> _executeTakePhoto() async {
     if (_isDisposed) return;
 
-    // ✅ NEW: Cleanup any existing image before taking new one
     if (_imageFile != null) {
       try {
-        await _imageFile!.delete();
-        AppConfig.debugPrint('🗑️ Deleted old image file');
+        if (await _imageFile!.exists()) {
+          await _imageFile!.delete();
+          AppConfig.debugPrint('🗑️ Deleted old image file');
+        }
       } catch (e) {
         AppConfig.debugPrint('⚠️ Could not delete old image: $e');
       }
@@ -1054,66 +1091,82 @@ class _HomePageState extends State<HomePage>
         });
       }
 
-      // ✅ FIXED: More lenient settings + better error handling
       XFile? pickedFile;
       
       try {
         pickedFile = await _picker.pickImage(
           source: ImageSource.camera,
-          imageQuality: 65,              // Reduced for faster processing
-          maxWidth: 720,                 // Reduced from 800
-          maxHeight: 720,                // Reduced from 800
+          imageQuality: 70,
+          maxWidth: 1024,
+          maxHeight: 1024,
           preferredCameraDevice: CameraDevice.rear,
         ).timeout(
-          const Duration(seconds: 45),  // ✅ Increased timeout from 30s
+          const Duration(seconds: 90),
           onTimeout: () {
-            throw TimeoutException('Camera took too long. Please try again.');
+            throw TimeoutException('Camera timed out after 90 seconds');
           },
         );
+      } on TimeoutException catch (e) {
+        throw TimeoutException(
+          'Camera operation timed out.\n\n'
+          'Tips:\n'
+          '• Close any background apps using the camera\n'
+          '• Ensure sufficient device storage\n'
+          '• Restart the app if problem persists'
+        );
       } catch (e) {
-        // ✅ NEW: Handle specific camera errors
-        if (e.toString().contains('camera_access_denied')) {
-          throw Exception('Camera access denied. Please enable camera permissions in Settings.');
-        } else if (e.toString().contains('operation_in_progress')) {
-          throw Exception('Camera is already open. Please close it and try again.');
-        } else if (e is TimeoutException) {
-          throw TimeoutException('Camera operation timed out. Please ensure your device has enough memory and try again.');
+        final errorString = e.toString().toLowerCase();
+        
+        if (errorString.contains('camera_access_denied') || errorString.contains('permission')) {
+          throw Exception(
+            'Camera permission denied.\n\n'
+            'Please enable camera access in your device Settings:\n'
+            'Settings > Apps > Liver Wise > Permissions > Camera'
+          );
+        } else if (errorString.contains('no camera available')) {
+          throw Exception('No camera found on this device');
+        } else if (errorString.contains('already in use')) {
+          throw Exception(
+            'Camera is already in use by another app.\n\n'
+            'Please close other camera apps and try again.'
+          );
         }
+        
         rethrow;
       }
 
       if (pickedFile == null) {
-        // User cancelled - reset to home
         if (mounted && !_isDisposed) {
           _resetToHome();
         }
         return;
       }
 
-      // ✅ NEW: Verify file exists and is valid
       final file = File(pickedFile.path);
       
       try {
         final exists = await file.exists();
-        
         if (!exists) {
-          throw Exception('Captured image file not found');
+          throw Exception('Image file not found after capture');
         }
 
-        // ✅ NEW: Check file size
         final fileSize = await file.length();
         
         if (fileSize == 0) {
           throw Exception('Captured image is empty. Please try again.');
         }
         
+        if (fileSize < 1024) {
+          throw Exception('Captured image is too small. Please try again.');
+        }
+        
         if (fileSize > 10 * 1024 * 1024) {
-          AppConfig.debugPrint('⚠️ Large image file: ${fileSize / (1024 * 1024)}MB');
-          
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Image is large (${(fileSize / (1024 * 1024)).toStringAsFixed(1)}MB). Processing may take longer.'),
+                content: Text(
+                  'Image is large (${(fileSize / (1024 * 1024)).toStringAsFixed(1)}MB). Processing may take longer.'
+                ),
                 backgroundColor: Colors.orange,
                 duration: Duration(seconds: 3),
               ),
@@ -1124,51 +1177,175 @@ class _HomePageState extends State<HomePage>
         if (mounted && !_isDisposed) {
           setState(() => _imageFile = file);
           
-          AppConfig.debugPrint('✅ Image captured: ${fileSize / 1024}KB');
+          AppConfig.debugPrint('✅ Image captured: ${(fileSize / 1024).toStringAsFixed(1)}KB');
           
-          // ✅ NEW: Auto-analyze after successful capture
           if (mounted) {
-            // Small delay to ensure UI updates
             await Future.delayed(Duration(milliseconds: 300));
             _submitPhoto();
           }
         }
+        
       } catch (e) {
-        // Clean up invalid file
         try {
-          await file.delete();
+          if (await file.exists()) {
+            await file.delete();
+          }
         } catch (_) {}
         rethrow;
       }
 
     } on TimeoutException catch (e) {
       if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.imageError,
-          customMessage: 'Camera operation timed out. Please ensure:\n• Your device has sufficient storage\n• Camera app is not running in background\n• Device has enough memory available',
-          onRetry: _executeTakePhoto,
-        );
+        await _showCameraTimeoutDialog(e.message ?? 'Camera operation timed out');
       }
     } catch (e) {
       if (mounted) {
-        await ErrorHandlingService.handleError(
+        final errorMessage = e.toString().replaceFirst('Exception: ', '');
+        
+        await showDialog(
           context: context,
-          error: e,
-          category: ErrorHandlingService.imageError,
-          customMessage: 'Failed to take photo',
-          onRetry: _executeTakePhoto,
+          builder: (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.error_outline, color: Colors.orange),
+                SizedBox(width: 8),
+                Expanded(child: Text('Camera Error')),
+              ],
+            ),
+            content: Text(errorMessage),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _resetToHome();
+                },
+                child: Text('Cancel'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _executeTakePhoto();
+                },
+                icon: Icon(Icons.camera_alt),
+                label: Text('Try Again'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
         );
       }
     }
   }
 
-  // ✅ IMPROVED: Better barcode scanning with timeouts
+  // ✅ NEW: Improved timeout dialog
+  Future<void> _showCameraTimeoutDialog(String message) async {
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.2),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.wifi_off, color: Colors.orange),
+            ),
+            SizedBox(width: 12),
+            Expanded(child: Text('Connection Issue')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.lightbulb_outline, 
+                        color: Colors.blue.shade700, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Tips for Better Results:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 8),
+                  _buildTipRow('Close background apps'),
+                  _buildTipRow('Ensure sufficient storage space'),
+                  _buildTipRow('Check WiFi or cellular connection'),
+                  _buildTipRow('Restart the app if needed'),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _resetToHome();
+            },
+            child: Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _executeTakePhoto();
+            },
+            icon: Icon(Icons.refresh),
+            label: Text('Try Again'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTipRow(String text) {
+    return Padding(
+      padding: EdgeInsets.only(left: 8, top: 4),
+      child: Row(
+        children: [
+          Icon(Icons.arrow_right, size: 16, color: Colors.blue.shade700),
+          SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(fontSize: 13, color: Colors.blue.shade900),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _submitPhoto() async {
     if (_imageFile == null || _isDisposed) return;
 
-    // ✅ NEW: Verify file still exists before processing
     final fileExists = await _imageFile!.exists();
     if (!fileExists) {
       if (mounted) {
@@ -1199,13 +1376,11 @@ class _HomePageState extends State<HomePage>
         });
       }
 
-      // ✅ FIXED: Increased timeout and better error handling
       NutritionInfo? nutrition;
       
       try {
-        nutrition = await BarcodeScannerService.scanAndLookup(_imageFile!.path)
-            .timeout(
-          const Duration(seconds: 20),  // ✅ Increased from 15s
+        nutrition = await BarcodeScannerService.scanAndLookup(_imageFile!.path).timeout(
+          const Duration(seconds: 20),
           onTimeout: () {
             throw TimeoutException('Barcode scanning is taking too long. This may be due to:\n• Poor barcode quality\n• Poor lighting conditions\n• Network connection issues');
           },
@@ -1215,7 +1390,6 @@ class _HomePageState extends State<HomePage>
           rethrow;
         }
         
-        // Handle specific scanning errors
         if (e.toString().contains('network')) {
           throw Exception('Network error while looking up product. Please check your connection and try again.');
         }
@@ -1223,7 +1397,6 @@ class _HomePageState extends State<HomePage>
         throw Exception('Error scanning barcode: ${e.toString()}');
       }
 
-      // 🔥 DEBUG: Log the nutrition data
       if (nutrition != null) {
         AppConfig.debugPrint('✅ Nutrition data received:');
         AppConfig.debugPrint('  Product: ${nutrition.productName}');
@@ -1235,7 +1408,6 @@ class _HomePageState extends State<HomePage>
         AppConfig.debugPrint('❌ Nutrition is null');
       }
 
-
       if (nutrition == null) {
         if (mounted && !_isDisposed) {
           setState(() {
@@ -1244,7 +1416,6 @@ class _HomePageState extends State<HomePage>
             _isLoading = false;
           });
           
-          // ✅ NEW: Show helpful error with retry option
           if (mounted) {
             showDialog(
               context: context,
@@ -1300,10 +1471,8 @@ class _HomePageState extends State<HomePage>
         calories: nutrition.calories,
       );
 
-      // Generate ingredient keyword buttons from product name
       _initKeywordButtonsFromProductName(nutrition.productName);
 
-      // Auto-search recipes based on keywords
       if (_keywordTokens.isNotEmpty) {
         _searchRecipesBySelectedKeywords();
       }
@@ -1317,7 +1486,6 @@ class _HomePageState extends State<HomePage>
           _currentNutrition = nutrition;
         });
 
-        // ✅ FIXED: Better success message
         String message;
         if (_premiumController.isPremium) {
           message = '✅ Analysis successful! You have unlimited scans.';
@@ -1363,9 +1531,6 @@ class _HomePageState extends State<HomePage>
       }
     }
   }
-  // -----------------------------
-  // SUPPORT UTILITIES
-  // -----------------------------
 
   String _buildNutritionDisplay(NutritionInfo nutrition) {
     return "Product: ${nutrition.productName}\n"
@@ -1443,9 +1608,6 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // -----------------------------------------------------
-  // SAVE SCANNED INGREDIENT TO SAVED INGREDIENTS
-  // -----------------------------------------------------
   Future<void> _saveCurrentIngredient() async {
     if (_currentNutrition == null) {
       if (mounted) {
@@ -1458,7 +1620,6 @@ class _HomePageState extends State<HomePage>
     }
 
     try {
-      // Check if already saved
       final alreadySaved = await SavedIngredientsService.isSaved(
         _currentNutrition!.productName,
       );
@@ -1494,7 +1655,6 @@ class _HomePageState extends State<HomePage>
         }
       }
 
-      // Save the ingredient
       await SavedIngredientsService.saveIngredient(_currentNutrition!);
 
       if (mounted) {
@@ -1503,7 +1663,6 @@ class _HomePageState extends State<HomePage>
           '✅ Saved "${_currentNutrition!.productName}" to ingredients!',
         );
 
-        // Ask if user wants to view saved ingredients
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Ingredient saved successfully'),
@@ -1531,8 +1690,6 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-
-
   Future<void> _saveRecipeDraft() async {
     if (_recipeSuggestions.isEmpty || _currentNutrition == null) {
       ErrorHandlingService.showSimpleError(
@@ -1542,7 +1699,6 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    // Show dialog to select which recipe to save
     final selectedRecipe = await showDialog<Recipe>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1577,7 +1733,6 @@ class _HomePageState extends State<HomePage>
     if (selectedRecipe == null) return;
 
     try {
-      // Convert Recipe ingredients to JSON format
       final ingredientsJson = selectedRecipe.ingredients
           .map((ing) => {
                 'quantity': '',
@@ -1598,7 +1753,6 @@ class _HomePageState extends State<HomePage>
           '✅ Recipe "${selectedRecipe.title}" saved as draft!',
         );
 
-        // Ask if user wants to edit it now
         final shouldEdit = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -1640,9 +1794,6 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // -----------------------------------------------------
-  // ADD INGREDIENTS TO GROCERY LIST
-  // -----------------------------------------------------
   Future<void> _addRecipeIngredientsToGroceryList(dynamic recipe) async {
     try {
       List<String> ingredients = [];
@@ -1691,9 +1842,6 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // -----------------------------------------------------
-  // MANUAL RECIPE CREATION FROM NUTRITION
-  // -----------------------------------------------------
   Future<void> _makeRecipeFromNutrition() async {
     if (_currentNutrition == null) {
       if (mounted) {
@@ -1708,7 +1856,6 @@ class _HomePageState extends State<HomePage>
     try {
       final productName = _currentNutrition!.productName;
 
-      // 🚀 NEW: Use existing keyword extraction (same system as recipe search)
       _initKeywordButtonsFromProductName(productName);
 
       final keywordString = _keywordTokens.join(', ');
@@ -1747,10 +1894,6 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-
-  // -----------------------------------------------------
-  // NUTRITION RECIPE CARD UI
-  // -----------------------------------------------------
   Widget _buildNutritionRecipeCard(Recipe recipe) {
     final isFavorite = _isRecipeFavorited(recipe.title);
 
@@ -1811,7 +1954,6 @@ class _HomePageState extends State<HomePage>
                 ),
                 const SizedBox(height: 12),
                 
-                // 🔥 UPDATED: Added Cookbook button
                 Row(
                   children: [
                     Expanded(
@@ -1831,7 +1973,6 @@ class _HomePageState extends State<HomePage>
                     ),
                     const SizedBox(width: 8),
                     
-                    // 🔥 NEW: Cookbook button
                     AddToCookbookButton(
                       recipeName: recipe.title,
                       ingredients: recipe.ingredients.join(', '),
@@ -1864,15 +2005,6 @@ class _HomePageState extends State<HomePage>
       ),
     );
   }
-  // Rest of the file continues unchanged from here...
-  // (All remaining methods stay the same)
-
-  // -----------------------------------------------------
-  // INITIAL HOME VIEW
-  // -----------------------------------------------------
-  
-  // lib/home_screen.dart - BACKGROUND IMAGE FIX
-  // Replace your _buildInitialView() method with this version
 
   Widget _buildInitialView() {
     return Container(
@@ -1890,9 +2022,6 @@ class _HomePageState extends State<HomePage>
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // -----------------------------------------
-            // WELCOME CARD
-            // -----------------------------------------
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -1926,9 +2055,6 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 30),
 
-            // -----------------------------------------
-            // MAIN ACTION CARD (SCAN + BUTTONS)
-            // -----------------------------------------
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -1944,7 +2070,6 @@ class _HomePageState extends State<HomePage>
               ),
               child: Column(
                 children: [
-                  // Premium Scan Status
                   if (!_isPremium)
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -1989,9 +2114,6 @@ class _HomePageState extends State<HomePage>
 
                   const SizedBox(height: 16),
 
-                  // -----------------------------------------
-                  // SCAN BUTTON
-                  // -----------------------------------------
                   SizedBox(
                     width: double.infinity,
                     height: 56,
@@ -2038,9 +2160,6 @@ class _HomePageState extends State<HomePage>
 
                   const SizedBox(height: 24),
 
-                  // -----------------------------------------
-                  // MANUAL BARCODE ENTRY BUTTON
-                  // -----------------------------------------
                   SizedBox(
                     width: double.infinity,
                     height: 56,
@@ -2067,9 +2186,6 @@ class _HomePageState extends State<HomePage>
 
                   const SizedBox(height: 12),
 
-                  // -----------------------------------------
-                  // SEARCH FOOD NAME BUTTON
-                  // -----------------------------------------
                   SizedBox(
                     width: double.infinity,
                     height: 56,
@@ -2097,9 +2213,6 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 30),
 
-            // -----------------------------------------
-            // RECIPE SUGGESTIONS SECTION
-            // -----------------------------------------
             if (_scannedRecipes.isNotEmpty)
               PremiumGate(
                 feature: PremiumFeature.viewRecipes,
@@ -2140,7 +2253,6 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  // ✅ ALSO FIX: _buildScanningView() - Replace the Stack with Container
   Widget _buildScanningView() {
     return Container(
       decoration: BoxDecoration(
@@ -2159,7 +2271,6 @@ class _HomePageState extends State<HomePage>
           children: [
             const SizedBox(height: 20),
 
-            // IMAGE PREVIEW
             if (_imageFile != null)
               Container(
                 decoration: BoxDecoration(
@@ -2185,7 +2296,6 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 20),
 
-            // BUTTON ROW
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
@@ -2213,7 +2323,6 @@ class _HomePageState extends State<HomePage>
                     ),
                   const SizedBox(width: 8),
 
-                  // 🔥 NEW: Save Ingredient button (Issue #2, #3, #10 fix)
                   if (_currentNutrition != null && _nutritionText.isNotEmpty)
                     ElevatedButton.icon(
                       onPressed: _saveCurrentIngredient,
@@ -2238,7 +2347,6 @@ class _HomePageState extends State<HomePage>
                     ),
                   const SizedBox(width: 8),
 
-                  // Save Recipe Draft button (only show if recipes exist)
                   if (_recipeSuggestions.isNotEmpty)
                     ElevatedButton.icon(
                       onPressed: _saveRecipeDraft,
@@ -2266,7 +2374,6 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 20),
 
-            // LOADING
             if (_isLoading)
               Container(
                 padding: const EdgeInsets.all(16),
@@ -2283,7 +2390,6 @@ class _HomePageState extends State<HomePage>
                 ),
               ),
 
-            // NUTRITION INFO
             if (_nutritionText.isNotEmpty)
               Container(
                 padding: const EdgeInsets.all(16),
@@ -2311,9 +2417,6 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  // ----------------------------------------------------
-  // SCANNED RECIPE CARD
-  // ----------------------------------------------------
   Widget _buildScannedRecipeCard(Map<String, String> recipe) {
     final isFavorite = _isRecipeFavorited(recipe['name']!);
 
@@ -2359,7 +2462,6 @@ class _HomePageState extends State<HomePage>
                 },
               ),
             ),
-            // 🔥 ADD: Cookbook button in header
             AddToCookbookButton(
               recipeName: recipe['name']!,
               ingredients: recipe['ingredients']!,
@@ -2386,7 +2488,6 @@ class _HomePageState extends State<HomePage>
                 Text(recipe['directions']!),
                 const SizedBox(height: 16),
                 
-                // 🔥 UPDATED: Action buttons with Cookbook
                 Row(
                   children: [
                     Expanded(
@@ -2414,7 +2515,6 @@ class _HomePageState extends State<HomePage>
                     ),
                     const SizedBox(width: 8),
                     
-                    // 🔥 ADD: Cookbook button
                     AddToCookbookButton(
                       recipeName: recipe['name']!,
                       ingredients: recipe['ingredients']!,
@@ -2449,10 +2549,6 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-
-  // ----------------------------------------------------
-  // HEALTH-BASED RECIPE SUGGESTIONS
-  // ----------------------------------------------------
   Widget _buildNutritionRecipeSuggestions() {
     final hasKeywords = _keywordTokens.isNotEmpty;
     final hasRecipes = _recipeSuggestions.isNotEmpty;
@@ -2481,7 +2577,6 @@ class _HomePageState extends State<HomePage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header with Save Draft button
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -2495,7 +2590,6 @@ class _HomePageState extends State<HomePage>
                     ),
                   ),
                 ),
-                // ✅ NEW: Save Draft button
                 if (hasRecipes)
                   IconButton(
                     icon: const Icon(Icons.save_outlined, color: Colors.white),
@@ -2506,9 +2600,6 @@ class _HomePageState extends State<HomePage>
             ),
             const SizedBox(height: 12),
 
-            // ---------------------------
-            // KEYWORD BUTTONS
-            // ---------------------------
             if (hasKeywords) ...[
               const Text(
                 'Select your key search word(s):',
@@ -2590,16 +2681,11 @@ class _HomePageState extends State<HomePage>
                 ),
             ],
 
-            // ---------------------------
-            // RESULTS LIST (with pagination)
-            // ---------------------------
             if (hasRecipes) ...[
               const SizedBox(height: 8),
               
-              // Show current page recipes
               ..._getCurrentPageRecipes().map((r) => _buildNutritionRecipeCard(r)),
               
-              // Pagination controls
               if (_recipeSuggestions.length > _recipesPerPage) ...[
                 const SizedBox(height: 12),
                 Row(
@@ -2635,82 +2721,75 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-// ----------------------------------------------------
-// MAIN BUILD()
-// ----------------------------------------------------
-@override
-// Replace your entire build() method with this corrected version:
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
 
-@override
-Widget build(BuildContext context) {
-  super.build(context);
-
-  return Scaffold(
-    drawerEnableOpenDragGesture: false,
-    appBar: AppBar(
-      leading: Builder(
-        builder: (context) => IconButton(
-          icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),
-          onPressed: () => Scaffold.of(context).openDrawer(),
-        ),
-      ),
-      title: SizedBox(
-        height: 40,
-        child: TextField(
-          controller: _searchController,
-          decoration: InputDecoration(
-            hintText: 'Search users...',
-            hintStyle: const TextStyle(color: Colors.white70),
-            prefixIcon:
-                const Icon(Icons.person_search, color: Colors.white, size: 20),
-            suffixIcon: IconButton(
-              icon: const Icon(Icons.search, color: Colors.white),
-              onPressed: () => _searchUsers(_searchController.text),
-            ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(25),
-              borderSide: BorderSide.none,
-            ),
-            filled: true,
-            fillColor: Colors.white.withOpacity(0.2),
+    return Scaffold(
+      drawerEnableOpenDragGesture: false,
+      appBar: AppBar(
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),
+            onPressed: () => Scaffold.of(context).openDrawer(),
           ),
-          style: const TextStyle(color: Colors.white),
-          onSubmitted: (value) => _searchUsers(value),
         ),
+        title: SizedBox(
+          height: 40,
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Search users...',
+              hintStyle: const TextStyle(color: Colors.white70),
+              prefixIcon:
+                  const Icon(Icons.person_search, color: Colors.white, size: 20),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.search, color: Colors.white),
+                onPressed: () => _searchUsers(_searchController.text),
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(25),
+                borderSide: BorderSide.none,
+              ),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.2),
+            ),
+            style: const TextStyle(color: Colors.white),
+            onSubmitted: (value) => _searchUsers(value),
+          ),
+        ),
+        backgroundColor: Colors.green,
       ),
-      backgroundColor: Colors.green,
-    ),
-    drawer: AppDrawer(
-      key: AppDrawer.globalKey,
-      currentPage: 'home',
-    ),
-    body: _showInitialView ? _buildInitialView() : _buildScanningView(),
-    // 🐛 TEMPORARY DEBUG BUTTONS (properly placed as Scaffold property)
-    floatingActionButton: Column(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        FloatingActionButton(
-          heroTag: 'debug1',
-          mini: true,
-          backgroundColor: Colors.orange,
-          child: const Icon(Icons.bug_report, color: Colors.white),
-          onPressed: _debugCheckAllCaches,
-          tooltip: 'Check Caches',
-        ),
-        const SizedBox(height: 8),
-        FloatingActionButton(
-          heroTag: 'debug2',
-          mini: true,
-          backgroundColor: Colors.red,
-          child: const Icon(Icons.delete_sweep, color: Colors.white),
-          onPressed: () async {
-            await _debugClearAllCaches();
-            setState(() {}); // Force rebuild
-          },
-          tooltip: 'Clear All Caches',
-        ),
-      ],
-    ),
-  );
-}
+      drawer: AppDrawer(
+        key: AppDrawer.globalKey,
+        currentPage: 'home',
+      ),
+      body: _showInitialView ? _buildInitialView() : _buildScanningView(),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          FloatingActionButton(
+            heroTag: 'debug1',
+            mini: true,
+            backgroundColor: Colors.orange,
+            child: const Icon(Icons.bug_report, color: Colors.white),
+            onPressed: _debugCheckAllCaches,
+            tooltip: 'Check Caches',
+          ),
+          const SizedBox(height: 8),
+          FloatingActionButton(
+            heroTag: 'debug2',
+            mini: true,
+            backgroundColor: Colors.red,
+            child: const Icon(Icons.delete_sweep, color: Colors.white),
+            onPressed: () async {
+              await _debugClearAllCaches();
+              setState(() {});
+            },
+            tooltip: 'Clear All Caches',
+          ),
+        ],
+      ),
+    );
+  }
 }
