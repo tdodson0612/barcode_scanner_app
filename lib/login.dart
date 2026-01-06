@@ -159,26 +159,38 @@ class _LoginPageState extends State<LoginPage> {
         await _saveCredentials();
       }
 
-      // AuthService now handles multiple retries internally for iOS
       final response = await AuthService.signIn(
         email: trimmedEmail,
         password: _password,
       );
 
-      if (response.user != null && response.session != null) {
-        AppConfig.debugPrint('✅ Login successful: ${response.user?.email}');
-        
-        if (mounted) {
-          ErrorHandlingService.showSuccess(context, 'Welcome back!');
-          await Future.delayed(const Duration(milliseconds: 500));
-          
-          if (mounted) {
-            Navigator.pushReplacementNamed(context, '/home');
-          }
-        }
-      } else {
-        throw Exception('Login failed. Please try again.');
+      // ✅ CRITICAL: Verify we actually got authenticated
+      if (response.user == null || response.session == null) {
+        throw Exception('Login failed - no user session created');
       }
+
+      AppConfig.debugPrint('✅ Login successful: ${response.user?.email}');
+      
+      // ✅ Wait for auth state to settle
+      await Future.delayed(const Duration(milliseconds: 800));
+      
+      if (!mounted) return;
+
+      // ✅ Show success message
+      ErrorHandlingService.showSuccess(context, 'Welcome back!');
+      
+      // ✅ Short delay before navigation
+      await Future.delayed(const Duration(milliseconds: 300));
+      
+      if (!mounted) return;
+
+      // ✅ CRITICAL: Use pushNamedAndRemoveUntil to prevent back navigation
+      Navigator.pushNamedAndRemoveUntil(
+        context, 
+        '/home',
+        (route) => false, // Remove all previous routes
+      );
+
     } catch (e) {
       AppConfig.debugPrint('❌ Login error: $e');
       rethrow;
@@ -395,15 +407,17 @@ class _LoginPageState extends State<LoginPage> {
 
       if (!mounted) return;
 
+      // ✅ CRITICAL: Only log, don't navigate from here
+      // Navigation is handled by _handleLogin() and _handleSignUp()
       switch (event) {
         case AuthChangeEvent.signedIn:
-          AppConfig.debugPrint('🔐 User signed in: ${session?.user.email}');
+          AppConfig.debugPrint('🔐 Auth state: User signed in: ${session?.user.email}');
           break;
         case AuthChangeEvent.signedOut:
-          AppConfig.debugPrint('🔓 User signed out');
+          AppConfig.debugPrint('🔓 Auth state: User signed out');
           break;
         case AuthChangeEvent.passwordRecovery:
-          AppConfig.debugPrint('🔑 Password recovery initiated');
+          AppConfig.debugPrint('🔑 Auth state: Password recovery initiated');
           break;
         default:
           break;

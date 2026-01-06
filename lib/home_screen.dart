@@ -26,6 +26,9 @@ import 'package:liver_wise/config/app_config.dart';
 import 'package:liver_wise/widgets/menu_icon_with_badge.dart';
 import 'package:liver_wise/services/database_service_core.dart';
 import 'package:liver_wise/services/favorite_recipes_service.dart';
+import 'widgets/auto_barcode_scanner.dart';
+
+
 
 class Recipe {
   final String title;
@@ -1062,9 +1065,14 @@ class _HomePageState extends State<HomePage>
   }
 
   // ✅ FIXED: Improved camera handling with better timeouts
+  // Replace your entire _executeTakePhoto() method with this fixed version
+
+// Replace your entire _executeTakePhoto() method with this fixed version
+
   Future<void> _executeTakePhoto() async {
     if (_isDisposed) return;
 
+    // Clean up old image file
     if (_imageFile != null) {
       try {
         if (await _imageFile!.exists()) {
@@ -1077,6 +1085,7 @@ class _HomePageState extends State<HomePage>
     }
 
     try {
+      // Reset state before taking photo
       if (mounted) {
         setState(() {
           _showInitialView = false;
@@ -1088,6 +1097,7 @@ class _HomePageState extends State<HomePage>
           _scannedRecipes = [];
           _keywordTokens = [];
           _selectedKeywords = {};
+          _currentNutrition = null;
         });
       }
 
@@ -1135,6 +1145,7 @@ class _HomePageState extends State<HomePage>
         rethrow;
       }
 
+      // User cancelled camera
       if (pickedFile == null) {
         if (mounted && !_isDisposed) {
           _resetToHome();
@@ -1174,18 +1185,31 @@ class _HomePageState extends State<HomePage>
           }
         }
 
+        // ✅ CRITICAL FIX: Set image file and ensure we're in scanning view
         if (mounted && !_isDisposed) {
-          setState(() => _imageFile = file);
+          setState(() {
+            _imageFile = file;
+            _showInitialView = false; // Ensure we show the scanning view
+          });
           
           AppConfig.debugPrint('✅ Image captured: ${(fileSize / 1024).toStringAsFixed(1)}KB');
           
-          if (mounted) {
-            await Future.delayed(Duration(milliseconds: 300));
-            _submitPhoto();
+          // ✅ CRITICAL: Wait for UI to fully update before submitting
+          if (mounted && !_isDisposed) {
+            await Future.delayed(Duration(milliseconds: 500));
+            
+            // ✅ Double-check we still have the file and we're still mounted
+            if (mounted && !_isDisposed && _imageFile != null) {
+              AppConfig.debugPrint('📤 Starting photo submission...');
+              await _submitPhoto();
+            } else {
+              AppConfig.debugPrint('⚠️ Photo submission cancelled - state changed');
+            }
           }
         }
         
       } catch (e) {
+        // Clean up file on error
         try {
           if (await file.exists()) {
             await file.delete();
@@ -1212,7 +1236,37 @@ class _HomePageState extends State<HomePage>
                 Expanded(child: Text('Camera Error')),
               ],
             ),
-            content: Text(errorMessage),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(errorMessage),
+                SizedBox(height: 16),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Tip: Make sure no other apps are using the camera',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.blue.shade900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
             actions: [
               TextButton(
                 onPressed: () {
@@ -1690,6 +1744,8 @@ class _HomePageState extends State<HomePage>
     }
   }
 
+  // Replace _saveRecipeDraft() in home_screen.dart with this enhanced version
+
   Future<void> _saveRecipeDraft() async {
     if (_recipeSuggestions.isEmpty || _currentNutrition == null) {
       ErrorHandlingService.showSimpleError(
@@ -1699,22 +1755,27 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
+    // Step 1: Select which recipe to save
     final selectedRecipe = await showDialog<Recipe>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Save Recipe as Draft'),
+        title: const Text('Select Recipe to Save'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Select a recipe to save:',
+              'Choose a recipe:',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
             ..._getCurrentPageRecipes().map((recipe) {
               return ListTile(
                 title: Text(recipe.title),
+                subtitle: Text(
+                  '${recipe.ingredients.length} ingredients',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.pop(context, recipe),
               );
@@ -1732,8 +1793,92 @@ class _HomePageState extends State<HomePage>
 
     if (selectedRecipe == null) return;
 
+    // Step 2: Check for existing drafts
     try {
-      final ingredientsJson = selectedRecipe.ingredients
+      final draftsList = await LocalDraftService.getDraftsList();
+      
+      if (draftsList.isEmpty) {
+        // No drafts exist - save as new
+        await _saveDraftAsNew(selectedRecipe);
+        return;
+      }
+
+      // Step 3: Ask user: New or Update existing?
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.save_outlined, color: Colors.blue),
+              SizedBox(width: 12),
+              Expanded(child: Text('Save Recipe Draft')),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'You have ${draftsList.length} existing draft${draftsList.length == 1 ? '' : 's'}.',
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+              ),
+              SizedBox(height: 16),
+              Text(
+                'Would you like to:',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.pop(context, 'update'),
+              icon: Icon(Icons.update),
+              label: Text('Update Existing'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.orange,
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(context, 'new'),
+              icon: Icon(Icons.add),
+              label: Text('Save as New'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (choice == null) return;
+
+      if (choice == 'new') {
+        await _saveDraftAsNew(selectedRecipe);
+      } else if (choice == 'update') {
+        await _updateExistingDraft(selectedRecipe, draftsList);
+      }
+
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to save recipe draft',
+        );
+      }
+    }
+  }
+
+  // Helper: Save as new draft
+  Future<void> _saveDraftAsNew(Recipe recipe) async {
+    try {
+      final ingredientsJson = recipe.ingredients
           .map((ing) => {
                 'quantity': '',
                 'measurement': '',
@@ -1742,42 +1887,19 @@ class _HomePageState extends State<HomePage>
           .toList();
 
       await LocalDraftService.saveDraft(
-        name: selectedRecipe.title,
+        name: recipe.title,
         ingredients: jsonEncode(ingredientsJson),
-        directions: selectedRecipe.instructions,
+        directions: recipe.instructions,
       );
 
       if (mounted) {
         ErrorHandlingService.showSuccess(
           context,
-          '✅ Recipe "${selectedRecipe.title}" saved as draft!',
+          '✅ Recipe "${recipe.title}" saved as new draft!',
         );
 
-        final shouldEdit = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Draft Saved'),
-            content: Text(
-              'Recipe "${selectedRecipe.title}" has been saved.\n\n'
-              'Would you like to edit it now?'
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Later'),
-              ),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(context, true),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('Edit Now'),
-              ),
-            ],
-          ),
-        );
-
+        final shouldEdit = await _askToEditDraft(recipe.title);
+        
         if (shouldEdit == true && mounted) {
           Navigator.pushNamed(context, '/submit-recipe');
         }
@@ -1788,9 +1910,194 @@ class _HomePageState extends State<HomePage>
           context: context,
           error: e,
           category: ErrorHandlingService.databaseError,
-          customMessage: 'Failed to save recipe draft',
+          customMessage: 'Failed to save new draft',
         );
       }
+    }
+  }
+
+  // Helper: Update existing draft
+  Future<void> _updateExistingDraft(Recipe recipe, List<Map<String, dynamic>> draftsList) async {
+    // Let user select which draft to update
+    final selectedDraft = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Draft to Update'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Choose which draft to replace:',
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+            ),
+            SizedBox(height: 12),
+            Container(
+              constraints: BoxConstraints(maxHeight: 300),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: draftsList.map((draft) {
+                    return ListTile(
+                      title: Text(
+                        draft['name'] ?? 'Untitled Draft',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      subtitle: Text(
+                        'Last modified: ${_formatDate(draft['updated_at'])}',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      trailing: Icon(Icons.chevron_right),
+                      onTap: () => Navigator.pop(context, draft),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (selectedDraft == null) return;
+
+    // Confirm overwrite
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange),
+            SizedBox(width: 12),
+            Expanded(child: Text('Confirm Update')),
+          ],
+        ),
+        content: Text(
+          'This will replace "${selectedDraft['name']}" with "${recipe.title}".\n\n'
+          'The original draft will be overwritten. Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Update Draft'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final ingredientsJson = recipe.ingredients
+          .map((ing) => {
+                'quantity': '',
+                'measurement': '',
+                'name': ing,
+              })
+          .toList();
+
+      // Update the existing draft using the ID (which is the name)
+      await LocalDraftService.updateDraft(
+        id: selectedDraft['id'],
+        name: recipe.title,
+        ingredients: jsonEncode(ingredientsJson),
+        directions: recipe.instructions,
+      );
+
+      if (mounted) {
+        ErrorHandlingService.showSuccess(
+          context,
+          '✅ Draft updated: "${recipe.title}"',
+        );
+
+        final shouldEdit = await _askToEditDraft(recipe.title);
+        
+        if (shouldEdit == true && mounted) {
+          Navigator.pushNamed(context, '/submit-recipe');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to update draft',
+        );
+      }
+    }
+  }
+
+  // Helper: Ask if user wants to edit now
+  Future<bool?> _askToEditDraft(String recipeName) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Draft Saved'),
+        content: Text(
+          'Recipe "$recipeName" has been saved.\n\n'
+          'Would you like to edit it now?'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Later'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Edit Now'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Helper: Format date for display
+  String _formatDate(dynamic timestamp) {
+    try {
+      if (timestamp == null) return 'Unknown';
+      
+      DateTime date;
+      if (timestamp is String) {
+        date = DateTime.parse(timestamp);
+      } else if (timestamp is DateTime) {
+        date = timestamp;
+      } else {
+        return 'Unknown';
+      }
+      
+      final now = DateTime.now();
+      final diff = now.difference(date);
+      
+      if (diff.inDays == 0) {
+        if (diff.inHours == 0) {
+          return '${diff.inMinutes} min ago';
+        }
+        return '${diff.inHours} hr ago';
+      } else if (diff.inDays < 7) {
+        return '${diff.inDays} day${diff.inDays == 1 ? '' : 's'} ago';
+      } else {
+        return '${date.month}/${date.day}/${date.year}';
+      }
+    } catch (e) {
+      return 'Unknown';
     }
   }
 
@@ -2022,6 +2329,7 @@ class _HomePageState extends State<HomePage>
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // Welcome Header
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -2055,6 +2363,7 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 30),
 
+            // Main Action Buttons Container
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -2070,6 +2379,7 @@ class _HomePageState extends State<HomePage>
               ),
               child: Column(
                 children: [
+                  // Scan Counter Badge (Free Users Only)
                   if (!_isPremium)
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -2114,6 +2424,110 @@ class _HomePageState extends State<HomePage>
 
                   const SizedBox(height: 16),
 
+                  // ✅ NEW: Auto-Detect Barcode Button (Premium Feature)
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton.icon(
+                      onPressed: _isScanning ? null : _autoScanBarcode,
+                      icon: _isScanning
+                          ? const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2.5,
+                              ),
+                            )
+                          : const Icon(Icons.qr_code_scanner, size: 28),
+                      label: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            _isScanning ? 'Scanning...' : 'Auto-Detect Barcode',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Text(
+                              'AUTO',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.purple.shade600,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 2,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Text(
+                    'Camera auto-captures when barcode is detected',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                      fontStyle: FontStyle.italic,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Divider
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Divider(
+                          color: Colors.grey.shade300,
+                          thickness: 1,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text(
+                          'OR',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Divider(
+                          color: Colors.grey.shade300,
+                          thickness: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Manual Camera Button
                   SizedBox(
                     width: double.infinity,
                     height: 56,
@@ -2130,7 +2544,7 @@ class _HomePageState extends State<HomePage>
                             )
                           : const Icon(Icons.camera_alt, size: 28),
                       label: Text(
-                        _isScanning ? 'Scanning...' : 'Scan Food Product',
+                        _isScanning ? 'Processing...' : 'Manual Photo Scan',
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
@@ -2147,12 +2561,12 @@ class _HomePageState extends State<HomePage>
                     ),
                   ),
 
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
 
                   Text(
                     'Take a photo of the product barcode',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: 12,
                       color: Colors.grey.shade600,
                     ),
                     textAlign: TextAlign.center,
@@ -2160,6 +2574,7 @@ class _HomePageState extends State<HomePage>
 
                   const SizedBox(height: 24),
 
+                  // Manual Barcode Entry Button
                   SizedBox(
                     width: double.infinity,
                     height: 56,
@@ -2168,7 +2583,7 @@ class _HomePageState extends State<HomePage>
                         context,
                         '/manual-barcode-entry',
                       ),
-                      icon: const Icon(Icons.edit),
+                      icon: const Icon(Icons.edit_outlined, size: 24),
                       label: const Text(
                         "Manual Barcode Entry",
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -2186,13 +2601,14 @@ class _HomePageState extends State<HomePage>
 
                   const SizedBox(height: 12),
 
+                  // Search Food by Name Button
                   SizedBox(
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton.icon(
                       onPressed: () =>
                           Navigator.pushNamed(context, '/nutrition-search'),
-                      icon: const Icon(Icons.search),
+                      icon: const Icon(Icons.search, size: 24),
                       label: const Text(
                         "Search Food by Name",
                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -2213,6 +2629,7 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 30),
 
+            // Recipe Suggestions Section
             if (_scannedRecipes.isNotEmpty)
               PremiumGate(
                 feature: PremiumFeature.viewRecipes,
@@ -2792,4 +3209,83 @@ class _HomePageState extends State<HomePage>
       ),
     );
   }
+  Future<void> _autoScanBarcode() async {
+    try {
+      if (!_premiumController.canAccessFeature(PremiumFeature.scan)) {
+        Navigator.pushNamed(context, '/purchase');
+        return;
+      }
+
+      final isPremiumNow = _premiumController.isPremium;
+      
+      if (!isPremiumNow && _isAdReady) {
+        _showInterstitialAd(() => _executeAutoScan());
+      } else {
+        _executeAutoScan();
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.scanError,
+          customMessage: 'Unable to start auto-scan',
+        );
+      }
+    }
+  }
+
+  Future<void> _executeAutoScan() async {
+    if (_isDisposed) return;
+
+    try {
+      final success = await _premiumController.useScan();
+      if (!success) {
+        Navigator.pushNamed(context, '/purchase');
+        return;
+      }
+
+      if (!mounted) return;
+
+      // Navigate to auto-scanner
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AutoBarcodeScanner(
+            onBarcodeDetected: (imagePath, barcode) async {
+              Navigator.pop(context); // Close scanner
+              
+              // Set image and process
+              final file = File(imagePath);
+              if (await file.exists()) {
+                setState(() {
+                  _imageFile = file;
+                  _showInitialView = false;
+                });
+                
+                await Future.delayed(Duration(milliseconds: 500));
+                if (mounted && !_isDisposed) {
+                  await _submitPhoto();
+                }
+              }
+            },
+            onCancel: () {
+              Navigator.pop(context);
+              _resetToHome();
+            },
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.scanError,
+          customMessage: 'Error during auto-scan',
+        );
+      }
+    }
+  }
+
 }
