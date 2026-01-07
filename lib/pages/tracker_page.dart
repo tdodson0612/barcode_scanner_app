@@ -1,0 +1,1050 @@
+// lib/pages/tracker_page.dart
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../services/tracker_service.dart';
+import '../services/profile_service.dart';
+import '../services/auth_service.dart';
+import '../services/error_handling_service.dart';
+import '../models/tracker_entry.dart';
+import '../liverhealthbar.dart';
+import '../config/app_config.dart';
+import '../widgets/premium_gate.dart';
+import '../controllers/premium_gate_controller.dart';
+
+class TrackerPage extends StatefulWidget {
+  const TrackerPage({super.key});
+
+  @override
+  State<TrackerPage> createState() => _TrackerPageState();
+}
+
+class _TrackerPageState extends State<TrackerPage> {
+  // Premium controller
+  late final PremiumGateController _premiumController;
+  bool _isPremium = false;
+  
+  // Current date being viewed
+  DateTime _selectedDate = DateTime.now();
+  
+  // Current entry data
+  TrackerEntry? _currentEntry;
+  String? _diseaseType;
+  double? _userHeight;
+  bool _weightVisible = false;
+  bool _weightLossVisible = false;
+  int _currentStreak = 0;
+  
+  // Loading states
+  bool _isLoading = true;
+  bool _isSaving = false;
+  
+  // Form controllers
+  final TextEditingController _exerciseController = TextEditingController();
+  final TextEditingController _waterController = TextEditingController();
+  final TextEditingController _weightController = TextEditingController();
+  final TextEditingController _heightController = TextEditingController();
+  
+  // Meal tracking
+  List<Map<String, dynamic>> _meals = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _initializePremiumController();
+    _checkDisclaimerAndLoad();
+  }
+
+  @override
+  void dispose() {
+    _premiumController.removeListener(_updatePremiumState);
+    _exerciseController.dispose();
+    _waterController.dispose();
+    _weightController.dispose();
+    _heightController.dispose();
+    super.dispose();
+  }
+
+  void _initializePremiumController() {
+    _premiumController = PremiumGateController();
+    _premiumController.addListener(_updatePremiumState);
+    _updatePremiumState();
+  }
+
+  void _updatePremiumState() {
+    if (mounted) {
+      setState(() {
+        _isPremium = _premiumController.isPremium;
+      });
+    }
+  }
+
+  // ========================================
+  // DISCLAIMER HANDLING
+  // ========================================
+
+  Future<void> _checkDisclaimerAndLoad() async {
+    final accepted = await TrackerService.hasAcceptedDisclaimer();
+    
+    if (!accepted && mounted) {
+      await _showDisclaimer();
+    }
+    
+    if (mounted) {
+      await _loadData();
+    }
+  }
+
+  Future<void> _showDisclaimer() async {
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.medical_information, color: Colors.orange.shade700),
+            const SizedBox(width: 8),
+            const Text('Important Disclaimer'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'This health tracker is for educational and informational purposes only.',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '• This is NOT a substitute for professional medical advice\n'
+                '• Always consult your physician before making health decisions\n'
+                '• Scores are estimates based on general nutrition guidelines\n'
+                '• Your doctor\'s recommendations take priority\n'
+                '• All data is stored locally on your device',
+                style: TextStyle(height: 1.5),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber, color: Colors.orange.shade700, size: 20),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'If you experience medical symptoms, seek immediate professional care.',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context); // Exit tracker page
+            },
+            child: const Text('Decline'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await TrackerService.acceptDisclaimer();
+              if (mounted) {
+                Navigator.pop(context);
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('I Understand'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ========================================
+  // DATA LOADING
+  // ========================================
+
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+    
+    try {
+      final userId = AuthService.currentUserId;
+      if (userId == null) {
+        throw Exception('User not logged in');
+      }
+      
+      // Load user settings
+      final diseaseType = await ProfileService.getDiseaseType(userId);
+      final height = await ProfileService.getHeight(userId);
+      final weightVisible = await ProfileService.getWeightVisibility(userId);
+      final weightLossVisible = await ProfileService.getWeightLossVisibility(userId);
+      final streak = await TrackerService.getWeightStreak(userId);
+      
+      // Auto-fill missing weights to maintain streak
+      await TrackerService.autoFillMissingWeights(userId);
+      
+      // Load entry for selected date
+      final dateString = _selectedDate.toString().split(' ')[0];
+      final entry = await TrackerService.getEntryForDate(userId, dateString);
+      
+      if (mounted) {
+        setState(() {
+          _diseaseType = diseaseType ?? 'Other (default scoring)';
+          _userHeight = height;
+          _weightVisible = weightVisible;
+          _weightLossVisible = weightLossVisible;
+          _currentStreak = streak;
+          _currentEntry = entry;
+          
+          // Populate form fields
+          _meals = entry?.meals ?? [];
+          _exerciseController.text = entry?.exercise ?? '';
+          _waterController.text = entry?.waterIntake ?? '';
+          _weightController.text = entry?.weight?.toStringAsFixed(1) ?? '';
+          _heightController.text = height?.toStringAsFixed(0) ?? '';
+          
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      AppConfig.debugPrint('Error loading tracker data: $e');
+      
+      if (mounted) {
+        setState(() => _isLoading = false);
+        
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to load tracker data',
+          onRetry: _loadData,
+        );
+      }
+    }
+  }
+
+  // ========================================
+  // DATA SAVING
+  // ========================================
+
+  Future<void> _saveEntry() async {
+    final userId = AuthService.currentUserId;
+    if (userId == null) return;
+    
+    setState(() => _isSaving = true);
+    
+    try {
+      // Calculate daily score
+      final score = TrackerService.calculateDailyScore(
+        meals: _meals,
+        diseaseType: _diseaseType,
+        exercise: _exerciseController.text.trim().isEmpty 
+            ? null 
+            : _exerciseController.text.trim(),
+        waterIntake: _waterController.text.trim().isEmpty 
+            ? null 
+            : _waterController.text.trim(),
+      );
+      
+      // Parse weight
+      double? weight;
+      if (_weightController.text.trim().isNotEmpty) {
+        weight = double.tryParse(_weightController.text.trim());
+      }
+      
+      // Create entry
+      final entry = TrackerEntry(
+        date: _selectedDate.toString().split(' ')[0],
+        meals: _meals,
+        exercise: _exerciseController.text.trim().isEmpty 
+            ? null 
+            : _exerciseController.text.trim(),
+        waterIntake: _waterController.text.trim().isEmpty 
+            ? null 
+            : _waterController.text.trim(),
+        weight: weight,
+        dailyScore: score,
+      );
+      
+      // Save to local storage
+      await TrackerService.saveEntry(userId, entry);
+      
+      // Auto-fill any missing weights after saving
+      await TrackerService.autoFillMissingWeights(userId);
+      
+      // Save height if changed
+      if (_heightController.text.trim().isNotEmpty) {
+        final newHeight = double.tryParse(_heightController.text.trim());
+        if (newHeight != null && newHeight != _userHeight) {
+          await ProfileService.updateHeight(userId, newHeight);
+        }
+      }
+      
+      // Check if user just reached day 7
+      final newStreak = await TrackerService.getWeightStreak(userId);
+      final hasReachedDay7 = await TrackerService.hasReachedDay7Streak(userId);
+      final hasShownPopup = await TrackerService.hasShownDay7Popup(userId);
+      
+      if (hasReachedDay7 && !hasShownPopup) {
+        // Mark popup as shown (will show on home screen next time)
+        await TrackerService.markDay7PopupShown(userId);
+        AppConfig.debugPrint('🎉 User reached day 7! Popup will show on home screen.');
+      }
+      
+      if (mounted) {
+        setState(() {
+          _currentEntry = entry;
+          _currentStreak = newStreak;
+          _isSaving = false;
+        });
+        
+        ErrorHandlingService.showSuccess(context, 'Entry saved successfully!');
+      }
+    } catch (e) {
+      AppConfig.debugPrint('Error saving entry: $e');
+      
+      if (mounted) {
+        setState(() => _isSaving = false);
+        
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to save entry',
+          onRetry: _saveEntry,
+        );
+      }
+    }
+  }
+
+  // ========================================
+  // DATE NAVIGATION
+  // ========================================
+
+  void _changeDate(int days) {
+    setState(() {
+      _selectedDate = _selectedDate.add(Duration(days: days));
+    });
+    _loadData();
+  }
+
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final yesterday = now.subtract(const Duration(days: 1));
+    
+    if (date.year == now.year && 
+        date.month == now.month && 
+        date.day == now.day) {
+      return 'Today';
+    } else if (date.year == yesterday.year && 
+               date.month == yesterday.month && 
+               date.day == yesterday.day) {
+      return 'Yesterday';
+    } else {
+      final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return '${months[date.month - 1]} ${date.day}, ${date.year}';
+    }
+  }
+
+  // ========================================
+  // MEAL MANAGEMENT
+  // ========================================
+
+  Future<void> _addMeal() async {
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) => _MealDialog(),
+    );
+    
+    if (result != null && mounted) {
+      setState(() {
+        _meals.add(result);
+      });
+    }
+  }
+
+  void _removeMeal(int index) {
+    setState(() {
+      _meals.removeAt(index);
+    });
+  }
+
+  // ========================================
+  // WEIGHT VISIBILITY TOGGLES
+  // ========================================
+
+  Future<void> _toggleWeightVisibility() async {
+    final userId = AuthService.currentUserId;
+    if (userId == null) return;
+    
+    try {
+      final newValue = !_weightVisible;
+      await ProfileService.updateWeightVisibility(userId, newValue);
+      
+      if (mounted) {
+        setState(() {
+          _weightVisible = newValue;
+        });
+        
+        ErrorHandlingService.showSuccess(
+          context,
+          newValue 
+              ? 'Weight stats will appear on your profile'
+              : 'Weight stats hidden from profile',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to update privacy setting',
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleWeightLossVisibility() async {
+    final userId = AuthService.currentUserId;
+    if (userId == null) return;
+    
+    try {
+      final newValue = !_weightLossVisible;
+      await ProfileService.updateWeightLossVisibility(userId, newValue);
+      
+      if (mounted) {
+        setState(() {
+          _weightLossVisible = newValue;
+        });
+        
+        ErrorHandlingService.showSuccess(
+          context,
+          newValue 
+              ? 'Weight loss stats will appear on your profile'
+              : 'Weight loss stats hidden from profile',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to update privacy setting',
+        );
+      }
+    }
+  }
+
+  // ========================================
+  // UI BUILD
+  // ========================================
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Health Tracker'),
+        backgroundColor: Colors.green,
+        foregroundColor: Colors.white,
+      ),
+      body: PremiumGate(
+        feature: PremiumFeature.healthTracker,
+        featureName: 'Health Tracker',
+        featureDescription: 'Track your meals, exercise, water intake, and weight with disease-aware scoring.',
+        child: _buildTrackerContent(),
+      ),
+    );
+  }
+
+  Widget _buildTrackerContent() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildDateSelector(),
+          const SizedBox(height: 20),
+          _buildHeightWeightSection(),
+          const SizedBox(height: 20),
+          _buildMealsSection(),
+          const SizedBox(height: 20),
+          _buildExerciseSection(),
+          const SizedBox(height: 20),
+          _buildWaterSection(),
+          const SizedBox(height: 20),
+          _buildScoreSection(),
+          const SizedBox(height: 20),
+          _buildSaveButton(),
+          const SizedBox(height: 100),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDateSelector() {
+    final canGoForward = _selectedDate.isBefore(
+      DateTime.now().subtract(const Duration(days: -1)),
+    );
+    
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            IconButton(
+              onPressed: () => _changeDate(-1),
+              icon: const Icon(Icons.chevron_left),
+            ),
+            Text(
+              _formatDate(_selectedDate),
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            IconButton(
+              onPressed: canGoForward ? () => _changeDate(1) : null,
+              icon: const Icon(Icons.chevron_right),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeightWeightSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.monitor_weight, color: Colors.blue, size: 24),
+                const SizedBox(width: 8),
+                const Text(
+                  'Height & Weight',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
+            // Height input
+            TextField(
+              controller: _heightController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))],
+              decoration: InputDecoration(
+                labelText: 'Height (cm)',
+                hintText: 'e.g., 170',
+                border: const OutlineInputBorder(),
+                suffixText: 'cm',
+                prefixIcon: const Icon(Icons.height),
+              ),
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Weight input
+            TextField(
+              controller: _weightController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))],
+              decoration: InputDecoration(
+                labelText: 'Weight (kg)',
+                hintText: 'e.g., 70.5',
+                border: const OutlineInputBorder(),
+                suffixText: 'kg',
+                prefixIcon: const Icon(Icons.monitor_weight),
+              ),
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Weight streak indicator
+            if (_currentStreak > 0) ...[
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade200),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.local_fire_department, color: Colors.orange.shade700, size: 16),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$_currentStreak day${_currentStreak == 1 ? '' : 's'} streak!',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green.shade900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            
+            // Privacy toggle for weight average
+            Row(
+              children: [
+                Icon(
+                  _weightVisible ? Icons.visibility : Icons.visibility_off,
+                  size: 20,
+                  color: Colors.grey.shade600,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _weightVisible 
+                        ? 'Weight average visible on profile'
+                        : 'Weight average hidden from profile',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ),
+                Switch(
+                  value: _weightVisible,
+                  onChanged: (_) => _toggleWeightVisibility(),
+                  activeColor: Colors.green,
+                ),
+              ],
+            ),
+            
+            // Privacy toggle for weight loss (only show if 14+ days)
+            if (_currentStreak >= 14) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(
+                    _weightLossVisible ? Icons.visibility : Icons.visibility_off,
+                    size: 20,
+                    color: Colors.grey.shade600,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _weightLossVisible 
+                          ? 'Weight loss visible on profile'
+                          : 'Weight loss hidden from profile',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ),
+                  Switch(
+                    value: _weightLossVisible,
+                    onChanged: (_) => _toggleWeightLossVisibility(),
+                    activeColor: Colors.green,
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMealsSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.restaurant, color: Colors.orange, size: 24),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Meals (${_meals.length})',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  onPressed: _addMeal,
+                  icon: const Icon(Icons.add_circle, color: Colors.green),
+                  tooltip: 'Add Meal',
+                ),
+              ],
+            ),
+            
+            if (_meals.isEmpty) ...[
+              const SizedBox(height: 12),
+              Center(
+                child: Text(
+                  'No meals added yet. Tap + to add a meal.',
+                  style: TextStyle(color: Colors.grey.shade600),
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 12),
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _meals.length,
+                itemBuilder: (context, index) {
+                  final meal = _meals[index];
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      title: Text(meal['name'] ?? 'Meal ${index + 1}'),
+                      subtitle: Text(
+                        '${meal['calories']?.toStringAsFixed(0) ?? '0'} cal • '
+                        '${meal['fat']?.toStringAsFixed(1) ?? '0'}g fat • '
+                        '${meal['sodium']?.toStringAsFixed(0) ?? '0'}mg sodium',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => _removeMeal(index),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExerciseSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.fitness_center, color: Colors.purple, size: 24),
+                const SizedBox(width: 8),
+                const Text(
+                  'Exercise',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _exerciseController,
+              decoration: const InputDecoration(
+                labelText: 'Exercise Duration',
+                hintText: 'e.g., 30 minutes, 1 hour',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.directions_run),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWaterSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.water_drop, color: Colors.cyan, size: 24),
+                const SizedBox(width: 8),
+                const Text(
+                  'Water Intake',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _waterController,
+              decoration: const InputDecoration(
+                labelText: 'Water Amount',
+                hintText: 'e.g., 8 cups, 64 oz',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.local_drink),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScoreSection() {
+    final score = _currentEntry?.dailyScore ?? 0;
+    
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.favorite, color: Colors.red, size: 24),
+                const SizedBox(width: 8),
+                const Text(
+                  'Today\'s Health Score',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (_meals.isEmpty) ...[
+              Text(
+                'Add meals to see your health score',
+                style: TextStyle(color: Colors.grey.shade600),
+              ),
+            ] else ...[
+              LiverHealthBar(healthScore: score),
+              const SizedBox(height: 8),
+              Text(
+                'Based on ${_meals.length} meal${_meals.length == 1 ? '' : 's'}${_exerciseController.text.isNotEmpty ? ', exercise' : ''}${_waterController.text.isNotEmpty ? ', and water intake' : ''}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSaveButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton.icon(
+        onPressed: _isSaving ? null : _saveEntry,
+        icon: _isSaving
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation(Colors.white),
+                ),
+              )
+            : const Icon(Icons.save),
+        label: Text(
+          _isSaving ? 'Saving...' : 'Save Entry',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.green,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ========================================
+// MEAL DIALOG
+// ========================================
+
+class _MealDialog extends StatefulWidget {
+  @override
+  State<_MealDialog> createState() => _MealDialogState();
+}
+
+class _MealDialogState extends State<_MealDialog> {
+  final _nameController = TextEditingController();
+  final _caloriesController = TextEditingController();
+  final _fatController = TextEditingController();
+  final _sodiumController = TextEditingController();
+  final _sugarController = TextEditingController();
+  final _proteinController = TextEditingController();
+  final _fiberController = TextEditingController();
+  final _saturatedFatController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _caloriesController.dispose();
+    _fatController.dispose();
+    _sodiumController.dispose();
+    _sugarController.dispose();
+    _proteinController.dispose();
+    _fiberController.dispose();
+    _saturatedFatController.dispose();
+    super.dispose();
+  }
+
+  void _saveMeal() {
+    if (_nameController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a meal name')),
+      );
+      return;
+    }
+
+    final meal = {
+      'name': _nameController.text.trim(),
+      'calories': double.tryParse(_caloriesController.text) ?? 0.0,
+      'fat': double.tryParse(_fatController.text) ?? 0.0,
+      'sodium': double.tryParse(_sodiumController.text) ?? 0.0,
+      'sugar': double.tryParse(_sugarController.text) ?? 0.0,
+      'protein': double.tryParse(_proteinController.text),
+      'fiber': double.tryParse(_fiberController.text),
+      'saturatedFat': double.tryParse(_saturatedFatController.text),
+    };
+
+    Navigator.pop(context, meal);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add Meal'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _nameController,
+              decoration: const InputDecoration(
+                labelText: 'Meal Name *',
+                hintText: 'e.g., Grilled Chicken Salad',
+              ),
+              textCapitalization: TextCapitalization.words,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _caloriesController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))],
+              decoration: const InputDecoration(
+                labelText: 'Calories *',
+                suffixText: 'cal',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _fatController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))],
+              decoration: const InputDecoration(
+                labelText: 'Fat *',
+                suffixText: 'g',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _sodiumController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))],
+              decoration: const InputDecoration(
+                labelText: 'Sodium *',
+                suffixText: 'mg',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _sugarController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))],
+              decoration: const InputDecoration(
+                labelText: 'Sugar *',
+                suffixText: 'g',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _proteinController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))],
+              decoration: const InputDecoration(
+                labelText: 'Protein (optional)',
+                suffixText: 'g',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _fiberController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))],
+              decoration: const InputDecoration(
+                labelText: 'Fiber (optional)',
+                suffixText: 'g',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _saturatedFatController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))],
+              decoration: const InputDecoration(
+                labelText: 'Saturated Fat (optional)',
+                suffixText: 'g',
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _saveMeal,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.green,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Add'),
+        ),
+      ],
+    );
+  }
+}

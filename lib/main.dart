@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'config/app_config.dart';
 import 'pages/badge_debug_page.dart';
+import 'pages/tracker_page.dart';
 
 // 🔥 Firebase imports
 import 'package:firebase_core/firebase_core.dart';
@@ -448,6 +449,7 @@ class _MyAppState extends State<MyApp> {
         '/nutrition-search': (context) => const NutritionSearchScreen(),
         '/saved-ingredients': (context) => const SavedIngredientsScreen(),
         '/badge-debug': (context) => BadgeDebugPage(),
+        '/tracker': (context) => const TrackerPage(),
         '/reset-password': (context) {
           final session = ModalRoute.of(context)?.settings.arguments as Session?;
           return ResetPasswordPage(session: session);

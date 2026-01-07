@@ -238,6 +238,7 @@ class PremiumGateController extends ChangeNotifier {
       case PremiumFeature.submitRecipes:
       case PremiumFeature.viewRecipes:
       case PremiumFeature.favoriteRecipes:
+      case PremiumFeature.healthTracker:
         return false;
     }
   }
@@ -338,4 +339,5 @@ enum PremiumFeature {
   socialMessaging,
   friendRequests,
   searchUsers,
+  healthTracker,
 }

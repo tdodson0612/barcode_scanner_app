@@ -27,8 +27,10 @@ import 'package:liver_wise/widgets/menu_icon_with_badge.dart';
 import 'package:liver_wise/services/database_service_core.dart';
 import 'package:liver_wise/services/favorite_recipes_service.dart';
 import 'widgets/auto_barcode_scanner.dart';
-
-
+import 'widgets/day7_congrats_popup.dart';
+import 'services/tracker_service.dart';
+import 'services/auth_service.dart';
+import 'config/app_config.dart';
 
 class Recipe {
   final String title;
@@ -311,6 +313,7 @@ class _HomePageState extends State<HomePage>
     super.initState();
     _initializePremiumController();
     _initializeAsync();
+    _checkDay7Achievement();
   }
 
   bool _didPrecache = false;
@@ -321,6 +324,32 @@ class _HomePageState extends State<HomePage>
     if (!_didPrecache) {
       _didPrecache = true;
       _precacheImages();
+    }
+  }
+
+  /// Check if user has reached 7-day streak and show popup
+  Future<void> _checkDay7Achievement() async {
+    try {
+      final userId = AuthService.currentUserId;
+      if (userId == null) return;
+      
+      final hasReachedDay7 = await TrackerService.hasReachedDay7Streak(userId);
+      final hasShownPopup = await TrackerService.hasShownDay7Popup(userId);
+      
+      if (hasReachedDay7 && !hasShownPopup && mounted) {
+        // Wait a brief moment for UI to settle
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        if (mounted) {
+          // Show congratulations popup
+          await showDay7CongratsPopup(context);
+          // Mark as shown so it doesn't appear again
+          await TrackerService.markDay7PopupShown(userId);
+        }
+      }
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error checking day 7 achievement: $e');
+      // Fail silently - don't disrupt user experience
     }
   }
 

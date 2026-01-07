@@ -127,4 +127,180 @@ class ProfileService {
     if (userId == null) return null;
     return getBackgroundPicture(userId);
   }
+
+  // ==================================================
+  // 🆕 DISEASE TYPE MANAGEMENT
+  // ==================================================
+
+  /// Get user's liver disease type
+  static Future<String?> getDiseaseType(String userId) async {
+    try {
+      final profile = await getUserProfile(userId);
+      return profile?['liver_disease_type'] as String?;
+    } catch (e) {
+      AppConfig.debugPrint('Error getting disease type: $e');
+      return null;
+    }
+  }
+
+  /// Update user's liver disease type
+  static Future<void> updateDiseaseType(String userId, String diseaseType) async {
+    try {
+      await DatabaseServiceCore.workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'liver_disease_type': diseaseType,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
+
+      // Clear cache to force fresh data
+      await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
+      await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
+      
+      AppConfig.debugPrint('✅ Disease type updated to: $diseaseType');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error updating disease type: $e');
+      throw Exception('Failed to update disease type: $e');
+    }
+  }
+
+  /// Get current user's disease type
+  static Future<String?> getCurrentDiseaseType() async {
+    final userId = DatabaseServiceCore.currentUserId;
+    if (userId == null) return null;
+    return getDiseaseType(userId);
+  }
+
+  // ==================================================
+  // HEIGHT & WEIGHT MANAGEMENT
+  // ==================================================
+  
+  /// Get user's height in cm
+  static Future<double?> getHeight(String userId) async {
+    try {
+      final profile = await getUserProfile(userId);
+      final height = profile?['height_cm'];
+      return height != null ? (height as num).toDouble() : null;
+    } catch (e) {
+      AppConfig.debugPrint('Error getting height: $e');
+      return null;
+    }
+  }
+  
+  /// Update user's height in cm
+  static Future<void> updateHeight(String userId, double heightCm) async {
+    try {
+      await DatabaseServiceCore.workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'height_cm': heightCm,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
+      
+      // Clear cache to force fresh data
+      await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
+      await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
+      
+      AppConfig.debugPrint('✅ Height updated to: ${heightCm}cm');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error updating height: $e');
+      throw Exception('Failed to update height: $e');
+    }
+  }
+  
+  /// Get current user's height
+  static Future<double?> getCurrentHeight() async {
+    final userId = DatabaseServiceCore.currentUserId;
+    if (userId == null) return null;
+    return getHeight(userId);
+  }
+  
+  /// Get weight visibility setting
+  static Future<bool> getWeightVisibility(String userId) async {
+    try {
+      final profile = await getUserProfile(userId);
+      return profile?['weight_visible'] as bool? ?? false;
+    } catch (e) {
+      AppConfig.debugPrint('Error getting weight visibility: $e');
+      return false;
+    }
+  }
+  
+  /// Update weight visibility setting
+  static Future<void> updateWeightVisibility(String userId, bool visible) async {
+    try {
+      await DatabaseServiceCore.workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'weight_visible': visible,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
+      
+      // Clear cache to force fresh data
+      await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
+      await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
+      
+      AppConfig.debugPrint('✅ Weight visibility updated to: $visible');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error updating weight visibility: $e');
+      throw Exception('Failed to update weight visibility: $e');
+    }
+  }
+  
+  /// Get current user's weight visibility
+  static Future<bool> getCurrentWeightVisibility() async {
+    final userId = DatabaseServiceCore.currentUserId;
+    if (userId == null) return false;
+    return getWeightVisibility(userId);
+  }
+  /// Get weight loss visibility setting
+  static Future<bool> getWeightLossVisibility(String userId) async {
+    try {
+      final profile = await getUserProfile(userId);
+      return profile?['weight_loss_visible'] as bool? ?? false;
+    } catch (e) {
+      AppConfig.debugPrint('Error getting weight loss visibility: $e');
+      return false;
+    }
+  }
+  
+  /// Update weight loss visibility setting
+  static Future<void> updateWeightLossVisibility(String userId, bool visible) async {
+    try {
+      await DatabaseServiceCore.workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'weight_loss_visible': visible,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
+      
+      // Clear cache to force fresh data
+      await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
+      await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
+      
+      AppConfig.debugPrint('✅ Weight loss visibility updated to: $visible');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error updating weight loss visibility: $e');
+      throw Exception('Failed to update weight loss visibility: $e');
+    }
+  }
+  
+  /// Get current user's weight loss visibility
+  static Future<bool> getCurrentWeightLossVisibility() async {
+    final userId = DatabaseServiceCore.currentUserId;
+    if (userId == null) return false;
+    return getWeightLossVisibility(userId);
+  }
 }
