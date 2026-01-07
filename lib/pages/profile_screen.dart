@@ -1,4 +1,5 @@
 // lib/pages/profile_screen.dart
+// lib/pages/profile_screen.dart
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -13,8 +14,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'dart:convert';
 import '../services/favorite_recipes_service.dart';
 import '../widgets/cookbook_section.dart';
-
-
+import '../widgets/disease_type_selector.dart';
+import '../services/tracker_service.dart';
+import '../models/disease_nutrition_profile.dart';
+import '../liverhealthbar.dart';
 
 // 🔥 NEW — listens to refresh_profile events
 import 'package:liver_wise/services/profile_events.dart';
@@ -69,6 +72,15 @@ class _ProfileScreenState extends State<ProfileScreen>
   List<SubmittedRecipe> _submittedRecipes = [];
   bool _isLoadingRecipes = false;
 
+  // Disease tracking
+  String? _currentDiseaseType;
+
+  // Health scores
+  int? _todayScore;
+  int? _weeklyScore;
+  bool _isLoadingTodayScore = false;
+  bool _isLoadingWeeklyScore = false;
+
   // 🔥 NEW: Favorite recipes state
   int _favoriteRecipesCount = 0;
   bool _isLoadingFavoritesCount = false;
@@ -90,10 +102,8 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool get wantKeepAlive => true;
 
   @override
-  // FIND AND REPLACE the entire initState() method (around line 95)
-// Replace from @override to the closing brace }
 
-  @override
+    @override
   void initState() {
     super.initState();
 
@@ -102,12 +112,21 @@ class _ProfileScreenState extends State<ProfileScreen>
     _loadFriends();
     _loadPictures();
     _loadSubmittedRecipes();
-    _loadFavoriteRecipesCount(); // 🔥 ADD THIS LINE
+    _loadFavoriteRecipesCount();
+    
+    // 🆕 ADD THESE THREE LINES:
+    _loadDiseaseType();
+    _loadTodayScore();
+    _loadWeeklyScore();
 
     // 🔥 Listen for background push-triggered profile refreshes
     _profileUpdateSub = profileUpdateStreamController.stream.listen((_) async {
       print("🔄 ProfileScreen: received refresh_profile event");
       await _loadProfile();
+      
+      // 🆕 ADD: Also refresh health scores when profile updates
+      await _loadTodayScore();
+      await _loadWeeklyScore();
     });
   }
 
@@ -954,6 +973,104 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+  /// Load user's disease type from database
+  Future<void> _loadDiseaseType() async {
+    if (!mounted) return;
+    
+    try {
+      final userId = AuthService.currentUserId;
+      if (userId == null) return;
+      
+      final diseaseType = await ProfileService.getDiseaseType(userId);
+      
+      if (mounted) {
+        setState(() {
+          _currentDiseaseType = diseaseType ?? 'Other (default scoring)';
+        });
+      }
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Error loading disease type: $e');
+      if (mounted) {
+        setState(() {
+          _currentDiseaseType = 'Other (default scoring)';
+        });
+      }
+    }
+  }
+  
+  /// Load today's health score from tracker
+  Future<void> _loadTodayScore() async {
+    if (!mounted) return;
+    
+    setState(() => _isLoadingTodayScore = true);
+    
+    try {
+      final userId = AuthService.currentUserId;
+      if (userId == null) {
+        if (mounted) {
+          setState(() {
+            _todayScore = null;
+            _isLoadingTodayScore = false;
+          });
+        }
+        return;
+      }
+      
+      final score = await TrackerService.getTodayScore(userId);
+      
+      if (mounted) {
+        setState(() {
+          _todayScore = score;
+          _isLoadingTodayScore = false;
+        });
+      }
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Error loading today score: $e');
+      if (mounted) {
+        setState(() {
+          _todayScore = null;
+          _isLoadingTodayScore = false;
+        });
+      }
+    }
+  }
+  
+  /// Load weekly average health score from tracker
+  Future<void> _loadWeeklyScore() async {
+    if (!mounted) return;
+    
+    setState(() => _isLoadingWeeklyScore = true);
+    
+    try {
+      final userId = AuthService.currentUserId;
+      if (userId == null) {
+        if (mounted) {
+          setState(() {
+            _weeklyScore = null;
+            _isLoadingWeeklyScore = false;
+          });
+        }
+        return;
+      }
+      
+      final score = await TrackerService.getWeeklyScore(userId);
+      
+      if (mounted) {
+        setState(() {
+          _weeklyScore = score;
+          _isLoadingWeeklyScore = false;
+        });
+      }
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Error loading weekly score: $e');
+      if (mounted) {
+        setState(() {
+          _weeklyScore = null;
+          _isLoadingWeeklyScore = false;
+        });
+      }
+    }
+  }
 
   Future<void> _toggleFriendsVisibility(bool isVisible) async {
     try {
@@ -2124,8 +2241,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                 _loadPictures(forceRefresh: true),
                 _loadFriends(forceRefresh: true),
                 _loadProfile(),
-                _loadFavoriteRecipesCount(), 
-
+                _loadFavoriteRecipesCount(),
+                _loadDiseaseType(),
+                _loadTodayScore(),
+                _loadWeeklyScore(),
               ]);
             },
             child: SingleChildScrollView(
@@ -2527,124 +2646,374 @@ class _ProfileScreenState extends State<ProfileScreen>
                     child: _buildSubmittedRecipesSection(),
                   ),
                   const SizedBox(height: 20),
-                  // lib/pages/profile_screen.dart
-// REPLACE the entire block you provided with this:
-
-PremiumGate(
-  feature: PremiumFeature.favoriteRecipes,
-  featureName: 'Favorite Recipes',
-  featureDescription: 'Save and organize your favorite recipes.',
-  showSoftPreview: true,
-  child: _sectionContainer(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Favorite Recipes',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 10),
-        if (_isLoadingFavoritesCount) ...[
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(12),
-              child: CircularProgressIndicator(),
-            ),
-          ),
-        ] else ...[
-          Text(
-            _favoriteRecipesCount == 0
-                ? 'No favorite recipes yet. Start scanning to discover new recipes!'
-                : '$_favoriteRecipesCount favorite ${_favoriteRecipesCount == 1 ? 'recipe' : 'recipes'} saved',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade600,
-            ),
-          ),
-          if (_favoriteRecipesCount > 0) ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () async {
-                  try {
-                    await Navigator.pushNamed(context, '/favorite-recipes');
-                    // Reload count when returning from favorites page
-                    if (mounted) {
-                      await _loadFavoriteRecipesCount();
-                    }
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Favorites page unavailable'),
+                  PremiumGate(
+                    feature: PremiumFeature.favoriteRecipes,
+                    featureName: 'Favorite Recipes',
+                    featureDescription: 'Save and organize your favorite recipes.',
+                    showSoftPreview: true,
+                    child: _sectionContainer(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Favorite Recipes',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          if (_isLoadingFavoritesCount) ...[
+                            const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(12),
+                                child: CircularProgressIndicator(),
+                              ),
+                            ),
+                          ] else ...[
+                            Text(
+                              _favoriteRecipesCount == 0
+                                  ? 'No favorite recipes yet. Start scanning to discover new recipes!'
+                                  : '$_favoriteRecipesCount favorite ${_favoriteRecipesCount == 1 ? 'recipe' : 'recipes'} saved',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                            if (_favoriteRecipesCount > 0) ...[
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () async {
+                                    try {
+                                      await Navigator.pushNamed(context, '/favorite-recipes');
+                                      if (mounted) {
+                                        await _loadFavoriteRecipesCount();
+                                      }
+                                    } catch (e) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Favorites page unavailable'),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  icon: const Icon(Icons.favorite),
+                                  label: const Text('View Favorite Recipes'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ],
                       ),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.favorite),
-                label: const Text('View Favorite Recipes'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ],
-    ),
-  ),
-),
-const SizedBox(height: 20),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
 
-// 🔥 NEW: COOKBOOK SECTION - ADD THIS
-_sectionContainer(
-  child: const CookbookSection(),
-),
-const SizedBox(height: 20),
+                  // ========================================
+                  // 🆕 NEW DISEASE TYPE SELECTION SECTION
+                  // ========================================
+                  _sectionContainer(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.medical_services, color: Colors.green, size: 24),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Liver Disease Type',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        
+                        DiseaseTypeSelector(
+                          currentValue: _currentDiseaseType ?? 'Other (default scoring)',
+                          onChanged: (String newType) async {
+                            try {
+                              final userId = AuthService.currentUserId;
+                              if (userId == null) return;
+                              
+                              setState(() => _isLoading = true);
+                              
+                              // Update in database
+                              await ProfileService.updateDiseaseType(userId, newType);
+                              
+                              // Update local state
+                              if (mounted) {
+                                setState(() {
+                                  _currentDiseaseType = newType;
+                                  _isLoading = false;
+                                });
+                                
+                                // Reload health scores with new disease type
+                                await _loadTodayScore();
+                                await _loadWeeklyScore();
+                                
+                                ErrorHandlingService.showSuccess(
+                                  context,
+                                  'Disease type updated. Scores recalculated.',
+                                );
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                setState(() => _isLoading = false);
+                                
+                                await ErrorHandlingService.handleError(
+                                  context: context,
+                                  error: e,
+                                  category: ErrorHandlingService.databaseError,
+                                  customMessage: 'Failed to update disease type',
+                                  onRetry: () async {
+                                    final userId = AuthService.currentUserId;
+                                    if (userId == null) return;
+                                    await ProfileService.updateDiseaseType(userId, newType);
+                                    if (mounted) {
+                                      setState(() => _currentDiseaseType = newType);
+                                      await _loadTodayScore();
+                                      await _loadWeeklyScore();
+                                    }
+                                  },
+                                );
+                              }
+                            }
+                          },
+                          showGuidance: true,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
 
-// DANGER ZONE CONTINUES BELOW
-_sectionContainer(
-  child: Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        'Danger Zone',
-        style: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-          color: Colors.red.shade700,
-        ),
-      ),
-      const SizedBox(height: 8),
-      const Text(
-        'Permanently delete your account and all associated data. This action cannot be undone.',
-        style: TextStyle(
-          fontSize: 12,
-          color: Colors.grey,
-        ),
-      ),
-      const SizedBox(height: 12),
-      SizedBox(
-        width: double.infinity,
-        child: OutlinedButton.icon(
-          onPressed: _isLoading ? null : _confirmDeleteAccount,
-          icon: const Icon(Icons.delete_forever),
-          label: const Text('Delete My Account'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: Colors.red,
-            side: const BorderSide(color: Colors.red),
-          ),
-        ),
-      ),
-    ],
-  ),
-),
-const SizedBox(height: 100),
+                  // ========================================
+                  // 🆕 NEW HEALTH SCORES SECTION
+                  // ========================================
+                  _sectionContainer(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.favorite, color: Colors.red, size: 24),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Your Health Scores',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        
+                        // Today's Score
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.blue.shade200),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.today, color: Colors.blue.shade700, size: 20),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Today\'s Health Score',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.blue.shade900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              
+                              if (_isLoadingTodayScore) ...[
+                                const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                ),
+                              ] else if (_todayScore == null) ...[
+                                Text(
+                                  'No data for today. Start tracking your meals!',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                ElevatedButton.icon(
+                                  onPressed: () {
+                                    Navigator.pushNamed(context, '/tracker');
+                                  },
+                                  icon: const Icon(Icons.add, size: 16),
+                                  label: const Text('Start Tracking'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.blue,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 8,
+                                    ),
+                                  ),
+                                ),
+                              ] else ...[
+                                LiverHealthBar(healthScore: _todayScore!),
+                              ],
+                            ],
+                          ),
+                        ),
+                        
+                        const SizedBox(height: 16),
+                        
+                        // Weekly Score
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.green.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.green.shade200),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.calendar_today, color: Colors.green.shade700, size: 20),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Weekly Average Score',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.green.shade900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              
+                              if (_isLoadingWeeklyScore) ...[
+                                const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                ),
+                              ] else if (_weeklyScore == null) ...[
+                                Text(
+                                  'Track for 7 days to see your weekly average.',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                              ] else ...[
+                                LiverHealthBar(healthScore: _weeklyScore!),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Based on your last 7 days of tracking',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey.shade600,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        
+                        const SizedBox(height: 16),
+                        
+                        // Call to action button
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.pushNamed(context, '/tracker');
+                            },
+                            icon: const Icon(Icons.track_changes),
+                            label: const Text('Go to Tracker'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ========================================
+                  // COOKBOOK SECTION
+                  // ========================================
+                  _sectionContainer(
+                    child: const CookbookSection(),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ========================================
+                  // DANGER ZONE
+                  // ========================================
+                  _sectionContainer(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Danger Zone',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Permanently delete your account and all associated data. This action cannot be undone.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _isLoading ? null : _confirmDeleteAccount,
+                            icon: const Icon(Icons.delete_forever),
+                            label: const Text('Delete My Account'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                              side: const BorderSide(color: Colors.red),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 100),
                 ],
               ),
             ),

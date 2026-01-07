@@ -64,4 +64,20 @@ class ProfileDataAccess {
     await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
     await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
   }
+  static Future<void> updateDiseaseType(String userId, String diseaseType) async {
+    await DatabaseServiceCore.workerQuery(
+      action: 'update',
+      table: 'user_profiles',
+      filters: {'id': userId},
+      data: {
+        'liver_disease_type': diseaseType,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+    );
+  }
+
+  static Future<String?> getDiseaseType(String userId) async {
+    final profile = await getUserProfile(userId);
+    return profile?['liver_disease_type'] as String?;
+  }
 }

@@ -17,6 +17,11 @@ import '../widgets/cookbook_section.dart';
 import 'chat_page.dart';
 import 'recipe_detail_page.dart';
 
+import '../widgets/disease_type_selector.dart';
+import '../services/tracker_service.dart';
+import '../models/disease_nutrition_profile.dart';
+import '../liverhealthbar.dart';
+
 class UserProfilePage extends StatefulWidget {
   final String userId;
 
@@ -35,6 +40,12 @@ class _UserProfilePageState extends State<UserProfilePage> {
   bool _friendsListVisible = true;
   int _favoriteRecipesCount = 0;
   
+  String? _currentDiseaseType;
+  int? _todayScore;
+  int? _weeklyScore;
+  bool _isLoadingTodayScore = false;
+  bool _isLoadingWeeklyScore = false;
+
   bool isLoading = true;
   bool isActionLoading = false;
   bool _isLoadingPictures = false;
@@ -54,13 +65,15 @@ class _UserProfilePageState extends State<UserProfilePage> {
   static const Duration _recipesCacheDuration = Duration(minutes: 5);
   static const Duration _friendsCacheDuration = Duration(minutes: 2);
 
+
+
   @override
   void initState() {
     super.initState();
     _loadAllData();
   }
 
-  Future<void> _loadAllData({bool forceRefresh = false}) async {
+    Future<void> _loadAllData({bool forceRefresh = false}) async {
     await _loadUserProfile(forceRefresh: forceRefresh);
     
     // Load additional data in parallel
@@ -69,8 +82,12 @@ class _UserProfilePageState extends State<UserProfilePage> {
       _loadSubmittedRecipes(forceRefresh: forceRefresh),
       _loadFriends(forceRefresh: forceRefresh),
       _loadFavoriteRecipesCount(),
+      _loadDiseaseType(),         // 🆕 NEW
+      _loadTodayScore(),          // 🆕 NEW
+      _loadWeeklyScore(),         // 🆕 NEW
     ]);
   }
+
 
   // ========== CACHE HELPERS ==========
   
@@ -474,6 +491,82 @@ class _UserProfilePageState extends State<UserProfilePage> {
       }
     }
   }
+
+    /// Load user's disease type from database
+  Future<void> _loadDiseaseType() async {
+    if (!mounted) return;
+    
+    try {
+      final diseaseType = await ProfileService.getDiseaseType(widget.userId);
+      
+      if (mounted) {
+        setState(() {
+          _currentDiseaseType = diseaseType ?? 'Other (default scoring)';
+        });
+      }
+    } catch (e) {
+      print('⚠️ Error loading disease type: $e');
+      if (mounted) {
+        setState(() {
+          _currentDiseaseType = 'Other (default scoring)';
+        });
+      }
+    }
+  }
+  
+  /// Load today's health score from tracker
+  Future<void> _loadTodayScore() async {
+    if (!mounted) return;
+    
+    setState(() => _isLoadingTodayScore = true);
+    
+    try {
+      final score = await TrackerService.getTodayScore(widget.userId);
+      
+      if (mounted) {
+        setState(() {
+          _todayScore = score;
+          _isLoadingTodayScore = false;
+        });
+      }
+    } catch (e) {
+      print('⚠️ Error loading today score: $e');
+      if (mounted) {
+        setState(() {
+          _todayScore = null;
+          _isLoadingTodayScore = false;
+        });
+      }
+    }
+  }
+  
+  /// Load weekly average health score from tracker
+  Future<void> _loadWeeklyScore() async {
+    if (!mounted) return;
+    
+    setState(() => _isLoadingWeeklyScore = true);
+    
+    try {
+      final score = await TrackerService.getWeeklyScore(widget.userId);
+      
+      if (mounted) {
+        setState(() {
+          _weeklyScore = score;
+          _isLoadingWeeklyScore = false;
+        });
+      }
+    } catch (e) {
+      print('⚠️ Error loading weekly score: $e');
+      if (mounted) {
+        setState(() {
+          _weeklyScore = null;
+          _isLoadingWeeklyScore = false;
+        });
+      }
+    }
+  }
+
+
 
   Future<void> _invalidateFriendshipCache() async {
     try {
@@ -1702,6 +1795,184 @@ class _UserProfilePageState extends State<UserProfilePage> {
     );
   }
 
+    Widget _buildDiseaseTypeSection() {
+    return _sectionContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.medical_services, color: Colors.green, size: 24),
+              const SizedBox(width: 8),
+              const Text(
+                'Liver Disease Type',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _currentDiseaseType ?? 'Other (default scoring)',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHealthScoresSection() {
+    return _sectionContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.favorite, color: Colors.red, size: 24),
+              const SizedBox(width: 8),
+              const Text(
+                'Health Scores',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          
+          // Today's Score
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.blue.shade200),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.today, color: Colors.blue.shade700, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Today\'s Score',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.blue.shade900,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                
+                if (_isLoadingTodayScore) ...[
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                ] else if (_todayScore == null) ...[
+                  Text(
+                    'No data for today',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ] else ...[
+                  LiverHealthBar(healthScore: _todayScore!),
+                ],
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Weekly Score
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.green.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.green.shade200),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.calendar_today, color: Colors.green.shade700, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Weekly Average',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.green.shade900,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                
+                if (_isLoadingWeeklyScore) ...[
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                ] else if (_weeklyScore == null) ...[
+                  Text(
+                    'No weekly data available',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ] else ...[
+                  LiverHealthBar(healthScore: _weeklyScore!),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Last 7 days average',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCookbookSection() {
     return _sectionContainer(
       child: const CookbookSection(),
@@ -1891,6 +2162,16 @@ class _UserProfilePageState extends State<UserProfilePage> {
                             
                             const SizedBox(height: 20),
                             
+                            // Disease type section
+                            _buildDiseaseTypeSection(),
+                            
+                            const SizedBox(height: 20),
+                            
+                            // Health scores section
+                            _buildHealthScoresSection(),
+                            
+                            const SizedBox(height: 20),                          
+
                             // Cookbook section
                             _buildCookbookSection(),
                             

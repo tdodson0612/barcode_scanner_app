@@ -1,6 +1,7 @@
 // lib/liverhealthbar.dart
 
 import 'package:flutter/material.dart';
+import 'models/disease_nutrition_profile.dart';
 
 String getFaceEmoji(int score) {
   if (score <= 25) return '😠';
@@ -20,23 +21,42 @@ class LiverHealthBar extends StatelessWidget {
     required double sodium,
     required double sugar,
     required double calories,
+    String? diseaseType,
+    double? protein,
+    double? fiber,
+    double? saturatedFat,
   }) {
-    const fatMax = 20.0;
-    const sodiumMax = 500.0;
-    const sugarMax = 20.0;
-    const calMax = 400.0;
+    if (diseaseType == null || diseaseType == 'Other (default scoring)') {
+      // Use existing default calculation
+      const fatMax = 20.0;
+      const sodiumMax = 500.0;
+      const sugarMax = 20.0;
+      const calMax = 400.0;
 
-    final fatScore = 1 - (fat / fatMax).clamp(0, 1);
-    final sodiumScore = 1 - (sodium / sodiumMax).clamp(0, 1);
-    final sugarScore = 1 - (sugar / sugarMax).clamp(0, 1);
-    final calScore = 1 - (calories / calMax).clamp(0, 1);
+      final fatScore = 1 - (fat / fatMax).clamp(0, 1);
+      final sodiumScore = 1 - (sodium / sodiumMax).clamp(0, 1);
+      final sugarScore = 1 - (sugar / sugarMax).clamp(0, 1);
+      final calScore = 1 - (calories / calMax).clamp(0, 1);
 
-    final finalScore = (fatScore * 0.3) +
-        (sodiumScore * 0.25) +
-        (sugarScore * 0.25) +
-        (calScore * 0.2);
+      final finalScore = (fatScore * 0.3) +
+          (sodiumScore * 0.25) +
+          (sugarScore * 0.25) +
+          (calScore * 0.2);
 
-    return (finalScore * 100).round().clamp(0, 100);
+      return (finalScore * 100).round().clamp(0, 100);
+    } else {
+      // Use disease-specific calculation
+      return DiseaseNutritionProfile.calculateDiseaseScore(
+        diseaseType: diseaseType,
+        fat: fat,
+        sodium: sodium,
+        sugar: sugar,
+        calories: calories,
+        protein: protein,
+        fiber: fiber,
+        saturatedFat: saturatedFat,
+      );
+    }
   }
 
   @override

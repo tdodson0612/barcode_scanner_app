@@ -127,4 +127,50 @@ class ProfileService {
     if (userId == null) return null;
     return getBackgroundPicture(userId);
   }
+
+  // ==================================================
+  // 🆕 DISEASE TYPE MANAGEMENT
+  // ==================================================
+
+  /// Get user's liver disease type
+  static Future<String?> getDiseaseType(String userId) async {
+    try {
+      final profile = await getUserProfile(userId);
+      return profile?['liver_disease_type'] as String?;
+    } catch (e) {
+      AppConfig.debugPrint('Error getting disease type: $e');
+      return null;
+    }
+  }
+
+  /// Update user's liver disease type
+  static Future<void> updateDiseaseType(String userId, String diseaseType) async {
+    try {
+      await DatabaseServiceCore.workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'liver_disease_type': diseaseType,
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
+
+      // Clear cache to force fresh data
+      await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
+      await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
+      
+      AppConfig.debugPrint('✅ Disease type updated to: $diseaseType');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error updating disease type: $e');
+      throw Exception('Failed to update disease type: $e');
+    }
+  }
+
+  /// Get current user's disease type
+  static Future<String?> getCurrentDiseaseType() async {
+    final userId = DatabaseServiceCore.currentUserId;
+    if (userId == null) return null;
+    return getDiseaseType(userId);
+  }
 }
