@@ -51,6 +51,10 @@ void main() async {
   try {
     // Load environment variables FIRST
     await dotenv.load(fileName: ".env");
+    
+    // ✅ ADD THIS LINE:
+    AppConfig.validateConfig();
+    
 
     // 🔥 Platform-conditional Firebase initialization
     try {

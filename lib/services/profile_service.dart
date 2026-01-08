@@ -303,4 +303,88 @@ class ProfileService {
     if (userId == null) return false;
     return getWeightLossVisibility(userId);
   }
+  /// Update user's location for regional database priority
+  /// Automatically called when user performs searches
+  static Future<void> updateUserLocation(String userId, String country) async {
+    try {
+      // Validate country code (basic check)
+      if (country.trim().isEmpty || country.length > 3) {
+        throw Exception('Invalid country code');
+      }
+
+      await DatabaseServiceCore.workerQuery(
+        action: 'update',
+        table: 'user_profiles',
+        filters: {'id': userId},
+        data: {
+          'location_country': country.toUpperCase(),
+          'location_detected_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        },
+      );
+
+      // Clear profile cache to force refresh
+      await DatabaseServiceCore.clearCache('cache_user_profile_$userId');
+      await DatabaseServiceCore.clearCache('cache_profile_timestamp_$userId');
+
+      AppConfig.debugPrint('✅ User location updated to: $country');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error updating user location: $e');
+      // Don't throw - location is not critical
+    }
+  }
+
+  /// Get user's country for regional database priority
+  /// Returns 'US' if not set or error
+  static Future<String> getUserCountry(String userId) async {
+    try {
+      final profile = await getUserProfile(userId);
+      final country = profile?['location_country'] as String?;
+
+      return country ?? 'US';
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error getting user country: $e');
+      return 'US';
+    }
+  }
+
+  /// Get current user's country
+  static Future<String> getCurrentUserCountry() async {
+    final userId = DatabaseServiceCore.currentUserId;
+    if (userId == null) return 'US';
+    return getUserCountry(userId);
+  }
+
+  /// Detect user location from device (iOS 14 compatible)
+  /// This is a placeholder - actual implementation would use device location
+  static Future<String> detectUserLocation() async {
+    try {
+      // TODO: Implement actual location detection using device location
+      // For now, return 'US' as default
+      // In production, you might want to use:
+      // - Device locale: Localizations.localeOf(context).countryCode
+      // - IP geolocation API
+      // - User input during onboarding
+
+      AppConfig.debugPrint('ℹ️ Using default location: US');
+      return 'US';
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error detecting location: $e');
+      return 'US';
+    }
+  }
+
+  /// Update current user's location based on device detection
+  static Future<void> updateCurrentUserLocationFromDevice() async {
+    final userId = DatabaseServiceCore.currentUserId;
+    if (userId == null) return;
+
+    try {
+      final country = await detectUserLocation();
+      await updateUserLocation(userId, country);
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Failed to update location from device: $e');
+      // Silent fail - not critical
+    }
+  }
 }
