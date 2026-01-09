@@ -2,7 +2,7 @@
 // Search result model for multi-database ingredient search
 // iOS 14 Compatible | Production Ready
 
-import 'nutrition_data.dart';
+import 'nutrition_info.dart';
 
 class IngredientSearchResult {
   final String id;
@@ -10,7 +10,7 @@ class IngredientSearchResult {
   final String? brand;
   final String? barcode;
   final String source; // 'Open Food Facts', 'USDA', 'custom', etc.
-  final NutritionData? nutrition;
+  final NutritionInfo? nutrition;
   final String? servingSize;
   final double relevanceScore; // 0.0 to 1.0 for ranking
 
@@ -37,7 +37,7 @@ class IngredientSearchResult {
       barcode: json['barcode'] as String?,
       source: json['source'] as String? ?? 'unknown',
       nutrition: json['nutrition'] != null
-          ? NutritionData.fromJson(json['nutrition'])
+          ? NutritionInfo.fromJson(json['nutrition'])
           : null,
       servingSize: json['servingSize'] as String?,
       relevanceScore: (json['relevanceScore'] as num?)?.toDouble() ?? 0.5,
@@ -54,7 +54,7 @@ class IngredientSearchResult {
       barcode: customIngredient['barcode'] as String?,
       source: 'custom',
       nutrition: customIngredient['nutrition'] != null
-          ? NutritionData.fromJson(customIngredient['nutrition'])
+          ? NutritionInfo.fromJson(customIngredient['nutrition'])
           : null,
       servingSize: customIngredient['serving_size'] as String?,
       relevanceScore: 1.0, // Custom ingredients are always highly relevant
@@ -157,7 +157,7 @@ class IngredientSearchResult {
     String? brand,
     String? barcode,
     String? source,
-    NutritionData? nutrition,
+    NutritionInfo? nutrition,
     String? servingSize,
     double? relevanceScore,
   }) {

@@ -4,7 +4,7 @@
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../models/nutrition_data.dart';
+import '../models/nutrition_info.dart';
 import '../models/ingredient_search_result.dart';
 import '../config/app_config.dart';
 import 'database_service_core.dart';
@@ -151,7 +151,7 @@ class IngredientDatabaseService {
   }
 
   /// Fetch nutrition for specific ingredient by barcode
-  static Future<NutritionData?> getNutritionData(
+  static Future<NutritionInfo?> getNutritionData(
     String barcode, {
     String? databaseSource,
   }) async {
@@ -308,10 +308,10 @@ class IngredientDatabaseService {
         final brand = product['brands'] ?? '';
         final barcode = product['code']?.toString();
 
-        NutritionData? nutrition;
+        NutritionInfo? nutrition;
         if (includeNutrition && product['nutriments'] != null) {
           try {
-            nutrition = NutritionData.fromOpenFoodFacts({'product': product});
+            nutrition = NutritionInfo.fromJson({'product': product});
           } catch (e) {
             AppConfig.debugPrint('⚠️ Error parsing nutrition: $e');
           }
@@ -333,7 +333,7 @@ class IngredientDatabaseService {
     }
   }
 
-  static Future<NutritionData?> _fetchFromOpenFoodFacts(String barcode) async {
+  static Future<NutritionInfo?> _fetchFromOpenFoodFacts(String barcode) async {
     try {
       final url = Uri.parse(
         'https://world.openfoodfacts.org/api/v2/product/$barcode',
@@ -348,7 +348,7 @@ class IngredientDatabaseService {
       final data = json.decode(response.body);
       if (data['status'] != 1) return null;
 
-      return NutritionData.fromOpenFoodFacts(data);
+      return NutritionInfo.fromJson(data);
     } catch (e) {
       AppConfig.debugPrint('⚠️ Open Food Facts fetch error: $e');
       return null;
@@ -373,7 +373,7 @@ class IngredientDatabaseService {
     }
   }
 
-  static Future<NutritionData?> _fetchFromUSDA(String fdcId) async {
+  static Future<NutritionInfo?> _fetchFromUSDA(String fdcId) async {
     try {
       // Note: USDA requires API key in production
       AppConfig.debugPrint('⚠️ USDA fetch not yet implemented');

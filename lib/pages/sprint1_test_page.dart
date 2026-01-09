@@ -8,7 +8,7 @@ import '../services/custom_ingredients_service.dart';
 import '../services/profile_service.dart';
 import '../services/auth_service.dart';
 import '../models/ingredient_search_result.dart';
-import '../models/nutrition_data.dart';
+import '../models/nutrition_info.dart';
 import '../config/app_config.dart';
 
 class Sprint1TestPage extends StatefulWidget {
@@ -308,7 +308,7 @@ class _Sprint1TestPageState extends State<Sprint1TestPage>
     );
   }
 
-  Widget _buildNutritionGrid(NutritionData nutrition) {
+  Widget _buildNutritionGrid(NutritionInfo nutrition) {
     return GridView.count(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -359,7 +359,7 @@ class _Sprint1TestPageState extends State<Sprint1TestPage>
     );
   }
 
-  Widget _buildLiverScore(NutritionData nutrition) {
+  Widget _buildLiverScore(NutritionInfo nutrition) {
     final score = nutrition.calculateLiverScore();
     final color = score >= 70
         ? Colors.green
@@ -476,7 +476,8 @@ class _Sprint1TestPageState extends State<Sprint1TestPage>
     }
 
     try {
-      final nutrition = NutritionData(
+      final nutrition = NutritionInfo(
+        productName: _nameController.text.trim(),
         calories: double.tryParse(_caloriesController.text) ?? 0,
         fat: double.tryParse(_fatController.text) ?? 0,
         sodium: double.tryParse(_sodiumController.text) ?? 0,
@@ -813,7 +814,7 @@ class _Sprint1TestPageState extends State<Sprint1TestPage>
   }
 
   Widget _buildCustomIngredientCard(Map<String, dynamic> ingredient) {
-    final nutrition = NutritionData.fromJson(ingredient['nutrition']);
+    final nutrition = NutritionInfo.fromDatabaseJson(ingredient['nutrition']);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),

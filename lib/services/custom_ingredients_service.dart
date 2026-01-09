@@ -2,7 +2,7 @@
 // User-created custom ingredients with free/premium limits
 // iOS 14 Compatible | Production Ready
 
-import '../models/nutrition_data.dart';
+import '../models/nutrition_info.dart';
 import '../models/ingredient_search_result.dart';
 import '../config/app_config.dart';
 import 'database_service_core.dart';
@@ -20,7 +20,7 @@ class CustomIngredientsService {
   /// FREE: 3 max, PREMIUM: unlimited
   static Future<String> addCustomIngredient({
     required String name,
-    required NutritionData nutrition,
+    required NutritionInfo nutrition,
     String? barcode,
     String? brand,
     String? servingSize,
@@ -101,7 +101,7 @@ class CustomIngredientsService {
   static Future<void> updateCustomIngredient({
     required String ingredientId,
     String? name,
-    NutritionData? nutrition,
+    NutritionInfo? nutrition,
     String? barcode,
     String? brand,
     String? servingSize,
