@@ -11,6 +11,9 @@ import 'package:liver_wise/services/recipe_nutrition_service.dart';
 import 'package:liver_wise/services/saved_ingredients_service.dart';
 import 'package:liver_wise/models/nutrition_info.dart';
 import 'dart:convert';
+import '../services/draft_recipes_service.dart';
+import '../models/draft_recipe.dart';
+
 
 class IngredientRow {
   String quantity;
@@ -299,8 +302,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     }
   }
 
-  // SUBMIT RECIPE TO DATABASE
-  // SUBMIT RECIPE TO DATABASE
   Future<void> _submitRecipe() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -315,11 +316,11 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       return;
     }
 
-    // 🔥 NEW: Confirm before submitting
-    final shouldSubmit = await showDialog<bool>(
+    // 🔥 NEW: Show submission options dialog
+    final submissionType = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Submit Recipe?'),
+        title: const Text('Submit Recipe'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -328,43 +329,59 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
             const SizedBox(height: 8),
             Text('Ingredients: ${validIngredients.length}'),
             const SizedBox(height: 16),
+            
             const Text(
-              'This will share your recipe with the community.',
-              style: TextStyle(fontSize: 14, fontStyle: FontStyle.italic),
+              'Choose submission type:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            
+            // Option 1: Save as Draft (Sprint 2)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.save, color: Colors.blue),
+              title: const Text('Save as Draft'),
+              subtitle: const Text('Keep private, edit anytime'),
+              onTap: () => Navigator.pop(context, 'draft'),
+            ),
+            
+            const Divider(),
+            
+            // Option 2: Submit for Community Review (Sprint 3)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.send, color: Colors.green),
+              title: const Text('Submit for Community'),
+              subtitle: const Text('Goes through compliance review'),
+              onTap: () => Navigator.pop(context, 'community'),
             ),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Submit'),
           ),
         ],
       ),
     );
 
-    if (shouldSubmit != true) return;
+    if (submissionType == null) return;
 
     setState(() => isSubmitting = true);
 
     try {
       DatabaseServiceCore.ensureUserAuthenticated();
 
-      await SubmittedRecipesService.submitRecipe(
-        _nameController.text.trim(),
-        _serializeIngredients(),
-        _directionsController.text.trim(),
-      );
+      if (submissionType == 'draft') {
+        // 🔥 SPRINT 2: Save as Draft Recipe
+        await _saveDraftRecipe();
+      } else if (submissionType == 'community') {
+        // 🔥 SPRINT 3: Submit for Community Review
+        await _submitForCommunityReview();
+      }
 
-      // delete draft if it came from one
+      // Delete local draft if it came from one
       if (_loadedDraftName != null) {
         await LocalDraftService.deleteDraft(_loadedDraftName!);
         await _loadDrafts();
@@ -378,16 +395,25 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
               children: [
                 const Icon(Icons.check_circle, color: Colors.white),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Recipe submitted to community successfully!',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                    submissionType == 'draft'
+                        ? 'Recipe saved to your cookbook!'
+                        : 'Recipe submitted for review!',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
             ),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 3),
+            action: submissionType == 'community' ? SnackBarAction(
+              label: 'View Status',
+              textColor: Colors.white,
+              onPressed: () {
+                Navigator.pushNamed(context, '/submission-status');
+              },
+            ) : null,
           ),
         );
 
@@ -420,6 +446,65 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     }
   }
 
+  // 🔥 NEW: Save as Draft Recipe (Sprint 2)
+  Future<void> _saveDraftRecipe() async {
+    try {
+      // Create RecipeIngredients from IngredientRows
+      final recipeIngredients = _ingredients
+          .where((i) => i.isValid)
+          .map((ing) => RecipeIngredient(
+                productName: ing.name,
+                quantity: double.tryParse(ing.quantity) ?? 1.0,
+                unit: ing.measurement,
+                // Note: No nutrition data in basic form - would need ingredient lookup
+              ))
+          .toList();
+
+      final draftRecipe = DraftRecipe(
+        userId: AuthService.currentUserId!,
+        title: _nameController.text.trim(),
+        description: null,
+        ingredients: recipeIngredients,
+        instructions: _directionsController.text.trim(),
+        servings: 1,
+      );
+
+      await DraftRecipesService.createDraftRecipe(draftRecipe);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // 🔥 NEW: Submit for Community Review (Sprint 3)
+  Future<void> _submitForCommunityReview() async {
+    try {
+      // First create as draft recipe
+      final recipeIngredients = _ingredients
+          .where((i) => i.isValid)
+          .map((ing) => RecipeIngredient(
+                productName: ing.name,
+                quantity: double.tryParse(ing.quantity) ?? 1.0,
+                unit: ing.measurement,
+              ))
+          .toList();
+
+      final draftRecipe = DraftRecipe(
+        userId: AuthService.currentUserId!,
+        title: _nameController.text.trim(),
+        description: null,
+        ingredients: recipeIngredients,
+        instructions: _directionsController.text.trim(),
+        servings: 1,
+      );
+
+      final draftRecipeId = await DraftRecipesService.createDraftRecipe(draftRecipe);
+
+      // Then submit for review
+      await SubmittedRecipesService.submitRecipeForReview(draftRecipeId);
+    } catch (e) {
+      rethrow;
+    }
+  }
 // 🔥 NEW: Update existing draft
   Future<void> _updateDraft() async {
     if (!_formKey.currentState!.validate()) return;

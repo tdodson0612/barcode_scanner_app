@@ -2727,7 +2727,83 @@ class _ProfileScreenState extends State<ProfileScreen>
                     child: _buildSubmittedRecipesSection(),
                   ),
                   const SizedBox(height: 20),
-                
+                  // Recipe Submission Tracking Section
+_sectionContainer(
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Row(
+        children: [
+          const Icon(Icons.send, color: Colors.indigo, size: 24),
+          const SizedBox(width: 8),
+          const Text(
+            'Recipe Submission Status',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      
+      Text(
+        'Track your recipe submissions and see their review status.',
+        style: TextStyle(
+          fontSize: 14,
+          color: Colors.grey.shade600,
+        ),
+      ),
+      
+      const SizedBox(height: 16),
+      
+      SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: () {
+            Navigator.pushNamed(context, '/submission-status');
+          },
+          icon: const Icon(Icons.track_changes),
+          label: const Text('View Submission Status'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.indigo,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+          ),
+        ),
+      ),
+      
+      const SizedBox(height: 8),
+      
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.blue.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.blue.shade200),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.info_outline, size: 16, color: Colors.blue.shade700),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _isPremium
+                    ? 'Premium: Unlimited submissions per month'
+                    : 'Free: 2 submissions per month',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.blue.shade900,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  ),
+),
+const SizedBox(height: 20),
 
 PremiumGate(
   feature: PremiumFeature.favoriteRecipes,

@@ -1,6 +1,6 @@
 // lib/services/draft_recipes_service.dart
 // Database-backed draft recipe management with premium limits
-// iOS 14 Compatible | Production Ready
+// iOS 14 Compatible | Production Ready | FIXED
 
 import '../models/draft_recipe.dart';
 import '../models/nutrition_info.dart';
@@ -26,9 +26,12 @@ class DraftRecipesService {
       // Check if user can save more recipes
       final canSave = await canSaveRecipe(userId);
       if (!canSave) {
+        final isPremium = await ProfileService.isPremiumUser();
         throw Exception(
-          'Recipe limit reached. Free users can save up to 5 recipes. '
-          'Upgrade to Premium for unlimited recipes.',
+          isPremium
+              ? 'Failed to save recipe. Please try again.'
+              : 'Recipe limit reached. Free users can save up to 5 recipes. '
+                'Upgrade to Premium for unlimited recipes.',
         );
       }
 
@@ -59,7 +62,7 @@ class DraftRecipesService {
       return recipeId;
     } catch (e) {
       AppConfig.debugPrint('❌ Error creating draft recipe: $e');
-      throw Exception('Failed to create recipe: $e');
+      rethrow;
     }
   }
 
@@ -167,7 +170,7 @@ class DraftRecipesService {
   /// Check if user can save more recipes (5 for free, unlimited for premium)
   static Future<bool> canSaveRecipe(String userId) async {
     try {
-      // Check if user is premium
+      // ✅ FIX: isPremiumUser() takes no parameters
       final isPremium = await ProfileService.isPremiumUser();
       if (isPremium) {
         return true; // Premium users have unlimited recipes
@@ -206,6 +209,7 @@ class DraftRecipesService {
   /// Get remaining recipe slots for free users
   static Future<int> getRemainingSlots(String userId) async {
     try {
+      // ✅ FIX: isPremiumUser() takes no parameters
       final isPremium = await ProfileService.isPremiumUser();
       if (isPremium) {
         return -1; // -1 = unlimited
@@ -281,7 +285,7 @@ class DraftRecipesService {
       );
     } catch (e) {
       AppConfig.debugPrint('❌ Error adding ingredient from barcode: $e');
-      throw Exception('Failed to add ingredient: $e');
+      rethrow;
     }
   }
 
@@ -317,7 +321,7 @@ class DraftRecipesService {
       );
     } catch (e) {
       AppConfig.debugPrint('❌ Error adding ingredient from search: $e');
-      throw Exception('Failed to add ingredient: $e');
+      rethrow;
     }
   }
 
@@ -417,7 +421,7 @@ class DraftRecipesService {
       return await createDraftRecipe(duplicate);
     } catch (e) {
       AppConfig.debugPrint('❌ Error duplicating recipe: $e');
-      throw Exception('Failed to duplicate recipe: $e');
+      rethrow;
     }
   }
 
@@ -431,7 +435,7 @@ class DraftRecipesService {
 
       return recipe.toJson().toString();
     } catch (e) {
-      throw Exception('Failed to export recipe: $e');
+      rethrow;
     }
   }
 }

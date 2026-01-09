@@ -33,6 +33,9 @@ import 'pages/reset_password_page.dart';
 import 'package:liver_wise/pages/manual_barcode_entry_screen.dart';
 import 'package:liver_wise/pages/nutrition_search_screen.dart';
 import 'package:liver_wise/pages/saved_ingredients_screen.dart';
+import './services/submitted_recipes_service.dart';
+import './pages/submission_status_page.dart';
+import './pages/my_cookbook_page.dart';
 
 
 /// 🔥 Background FCM handler (required for messages when app is terminated)
@@ -453,7 +456,9 @@ class _MyAppState extends State<MyApp> {
         '/nutrition-search': (context) => const NutritionSearchScreen(),
         '/saved-ingredients': (context) => const SavedIngredientsScreen(),
         '/badge-debug': (context) => BadgeDebugPage(),
+        '/submission-status': (context) => const SubmissionStatusPage(),
         '/tracker': (context) => const TrackerPage(),
+        '/my-cookbook': (context) => const MyCookbookPage(),
         '/reset-password': (context) {
           final session = ModalRoute.of(context)?.settings.arguments as Session?;
           return ResetPasswordPage(session: session);

@@ -404,6 +404,14 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
               ),
               
               ListTile(
+                leading: const Icon(Icons.book),
+                title: const Text('My Cookbook'),
+                onTap: () {
+                  Navigator.pushNamed(context, '/my-cookbook');
+                },
+              ),
+
+              ListTile(
                 leading: Icon(Icons.shopping_cart),
                 title: Text('My Grocery List'),
                 onTap: () {
