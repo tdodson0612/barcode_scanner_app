@@ -1,4 +1,4 @@
-// lib/pages/favorite_recipes_page.dart - UPDATED: Improved recipe detail dialog
+// lib/pages/favorite_recipes_page.dart - FIXED: Shows title, description, ingredients, directions + SHARE BUTTON
 // UPDATED: Uses Cloudflare Worker for database queries
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,6 +9,7 @@ import '../widgets/app_drawer.dart';
 import '../services/error_handling_service.dart';
 import '../services/auth_service.dart';
 import '../services/favorite_recipes_service.dart';
+import '../services/feed_posts_service.dart';
 import '../config/app_config.dart';
 
 class FavoriteRecipesPage extends StatefulWidget {
@@ -345,7 +346,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
             'recipe_id': recipeId,
             'username': currentUsername,
             'title': recipe.recipeName,
-            'description': '',
+            'description': recipe.description ?? '',
             'ingredients': recipe.ingredients,
             'directions': recipe.directions,
           },
@@ -376,14 +377,79 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
-  // ========== IMPROVED RECIPE DETAILS DIALOG ==========
+  // ========== 🔥 NEW: SHARE RECIPE TO FEED ==========
+
+  Future<void> _shareRecipeToFeed(FavoriteRecipe recipe) async {
+    try {
+      await FeedPostsService.shareRecipeToFeed(
+        recipeName: recipe.recipeName,
+        description: recipe.description,
+        ingredients: recipe.ingredients,
+        directions: recipe.directions,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text('Recipe shared to your feed!'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+            action: SnackBarAction(
+              label: 'View Feed',
+              textColor: Colors.white,
+              onPressed: () {
+                Navigator.pushNamed(context, '/home');
+              },
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to share recipe',
+        );
+      }
+    }
+  }
+
+  // ========== FIXED RECIPE DETAILS DIALOG - NOW SHOWS TITLE, DESCRIPTION, INGREDIENTS, DIRECTIONS + SHARE ==========
 
   void _showRecipeDetails(FavoriteRecipe recipe) {
     // Parse ingredients into a list
-    List<String> ingredientsList = recipe.ingredients
-        .split('\n')
-        .where((line) => line.trim().isNotEmpty)
-        .toList();
+    List<String> ingredientsList = [];
+    try {
+      // Try JSON format first (structured ingredients)
+      final parsed = jsonDecode(recipe.ingredients);
+      if (parsed is List) {
+        ingredientsList = parsed.map((item) {
+          if (item is Map) {
+            final qty = item['quantity'] ?? '';
+            final unit = item['measurement'] ?? item['unit'] ?? '';
+            final name = item['name'] ?? item['product_name'] ?? '';
+            return '$qty $unit $name'.trim();
+          }
+          return item.toString();
+        }).where((line) => line.trim().isNotEmpty).toList();
+      }
+    } catch (e) {
+      // Fall back to plain text (one per line)
+      ingredientsList = recipe.ingredients
+          .split('\n')
+          .where((line) => line.trim().isNotEmpty)
+          .toList();
+    }
     
     // Parse directions into bullet points
     List<String> directionsList = recipe.directions
@@ -444,6 +510,85 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Recipe Title Section
+                      Container(
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.green.shade200,
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.restaurant_menu, 
+                              size: 24, 
+                              color: Colors.green.shade700
+                            ),
+                            SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                recipe.recipeName,
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green.shade900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: 16),
+                      
+                      // Description section (if exists)
+                      if (recipe.description != null && recipe.description!.trim().isNotEmpty) ...[
+                        Container(
+                          padding: EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.blue.shade200,
+                              width: 1,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.info_outline, 
+                                    size: 20, 
+                                    color: Colors.blue.shade700
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'About This Recipe',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.blue.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                recipe.description!,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        SizedBox(height: 16),
+                      ],
+                      
                       // Ingredients section
                       if (ingredientsList.isNotEmpty) ...[
                         Row(
@@ -588,7 +733,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                 ),
               ),
               
-              // Bottom action button
+              // 🔥 UPDATED: Bottom action buttons with SHARE
               Container(
                 padding: EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -598,26 +743,56 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                     bottomRight: Radius.circular(16),
                   ),
                 ),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                child: Row(
+                  children: [
+                    // Share button
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _shareRecipeToFeed(recipe);
+                        },
+                        icon: Icon(Icons.share, size: 20),
+                        label: Text(
+                          'Share to Feed',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
                       ),
                     ),
-                    child: Text(
-                      'Close',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                    SizedBox(width: 12),
+                    // Close button
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.grey.shade600,
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: Text(
+                          'Close',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ],
@@ -739,6 +914,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                                     ],
                                   ),
                                 ),
+                                // 🔥 UPDATED: Added Share to Feed option
                                 PopupMenuButton<String>(
                                   icon: Icon(Icons.more_vert, color: Colors.grey.shade600),
                                   shape: RoundedRectangleBorder(
@@ -756,6 +932,16 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                                       ),
                                     ),
                                     PopupMenuItem(
+                                      value: 'share',
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.share, size: 20, color: Colors.green),
+                                          SizedBox(width: 12),
+                                          Text('Share to Feed'),
+                                        ],
+                                      ),
+                                    ),
+                                    PopupMenuItem(
                                       value: 'remove',
                                       child: Row(
                                         children: [
@@ -769,6 +955,8 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                                   onSelected: (value) {
                                     if (value == 'view') {
                                       _showRecipeDetails(recipe);
+                                    } else if (value == 'share') {
+                                      _shareRecipeToFeed(recipe);
                                     } else if (value == 'remove') {
                                       _removeFavoriteRecipe(recipe);
                                     }

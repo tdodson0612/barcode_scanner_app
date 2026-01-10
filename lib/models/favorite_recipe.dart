@@ -1,11 +1,11 @@
 // lib/models/favorite_recipe.dart
-// FIXED: Added recipe_id field and proper field mapping
-
+// FIXED: Added description field
 class FavoriteRecipe {
   final int? id; // Primary key in favorite_recipes table
   final String userId;
-  final int? recipeId; // ⭐ NEW: Foreign key to recipe_master table
+  final int? recipeId; // Foreign key to recipe_master table
   final String recipeName;
+  final String? description;  // 🔥 NEW: Recipe description
   final String ingredients;
   final String directions;
   final DateTime createdAt;
@@ -14,8 +14,9 @@ class FavoriteRecipe {
   FavoriteRecipe({
     this.id,
     required this.userId,
-    this.recipeId, // ⭐ NEW: Optional recipe_id
+    this.recipeId,
     required this.recipeName,
+    this.description,  // 🔥 NEW
     required this.ingredients,
     required this.directions,
     required this.createdAt,
@@ -27,9 +28,10 @@ class FavoriteRecipe {
     return FavoriteRecipe(
       id: json['id'],
       userId: json['user_id'] ?? '',
-      recipeId: json['recipe_id'], // ⭐ NEW: Parse recipe_id
-      // ⭐ FIXED: Handle both 'recipe_name' and 'title' for backwards compatibility
+      recipeId: json['recipe_id'],
+      // Handle both 'recipe_name' and 'title' for backwards compatibility
       recipeName: json['recipe_name'] ?? json['title'] ?? '',
+      description: json['description'] as String?,  // 🔥 NEW
       ingredients: json['ingredients'] ?? '',
       directions: json['directions'] ?? '',
       createdAt: json['created_at'] != null
@@ -45,8 +47,9 @@ class FavoriteRecipe {
   Map<String, dynamic> toJson() {
     return {
       'user_id': userId,
-      if (recipeId != null) 'recipe_id': recipeId, // ⭐ NEW: Include recipe_id
+      if (recipeId != null) 'recipe_id': recipeId,
       'recipe_name': recipeName,
+      'description': description,  // 🔥 NEW
       'ingredients': ingredients,
       'directions': directions,
       'created_at': createdAt.toIso8601String(),
@@ -59,8 +62,9 @@ class FavoriteRecipe {
     return {
       'id': id,
       'user_id': userId,
-      'recipe_id': recipeId, // ⭐ NEW: Cache recipe_id
+      'recipe_id': recipeId,
       'recipe_name': recipeName,
+      'description': description,  // 🔥 NEW
       'ingredients': ingredients,
       'directions': directions,
       'created_at': createdAt.toIso8601String(),
@@ -74,8 +78,9 @@ class FavoriteRecipe {
     return FavoriteRecipe(
       id: json['id'],
       userId: json['user_id'] ?? '',
-      recipeId: json['recipe_id'], // ⭐ NEW: Parse from cache
+      recipeId: json['recipe_id'],
       recipeName: json['recipe_name'] ?? '',
+      description: json['description'] as String?,  // 🔥 NEW
       ingredients: json['ingredients'] ?? '',
       directions: json['directions'] ?? '',
       createdAt: DateTime.parse(json['created_at']),
@@ -89,8 +94,9 @@ class FavoriteRecipe {
   FavoriteRecipe copyWith({
     int? id,
     String? userId,
-    int? recipeId, // ⭐ NEW: Include in copyWith
+    int? recipeId,
     String? recipeName,
+    String? description,  // 🔥 NEW
     String? ingredients,
     String? directions,
     DateTime? createdAt,
@@ -99,8 +105,9 @@ class FavoriteRecipe {
     return FavoriteRecipe(
       id: id ?? this.id,
       userId: userId ?? this.userId,
-      recipeId: recipeId ?? this.recipeId, // ⭐ NEW
+      recipeId: recipeId ?? this.recipeId,
       recipeName: recipeName ?? this.recipeName,
+      description: description ?? this.description,  // 🔥 NEW
       ingredients: ingredients ?? this.ingredients,
       directions: directions ?? this.directions,
       createdAt: createdAt ?? this.createdAt,

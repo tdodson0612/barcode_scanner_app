@@ -73,6 +73,8 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     'to taste',
   ];
 
+  final TextEditingController _descriptionController = TextEditingController();
+
   bool isSubmitting = false;
   bool isLoading = true;
   bool _isSaved = false;
@@ -134,6 +136,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
   @override
   void dispose() {
     _nameController.dispose();
+    _descriptionController.dispose();
     _directionsController.dispose();
     super.dispose();
   }
@@ -187,11 +190,13 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
     try {
       final name = _nameController.text.trim();
+      final description = _descriptionController.text.trim();
       final ing = _serializeIngredients();
       final dir = _directionsController.text.trim();
 
       await LocalDraftService.saveDraft(
         name: name,
+        description: description.isNotEmpty ? description : null,
         ingredients: ing,
         directions: dir,
       );
@@ -463,7 +468,9 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       final draftRecipe = DraftRecipe(
         userId: AuthService.currentUserId!,
         title: _nameController.text.trim(),
-        description: null,
+        description: _descriptionController.text.trim().isNotEmpty 
+          ? _descriptionController.text.trim() 
+          : null,
         ingredients: recipeIngredients,
         instructions: _directionsController.text.trim(),
         servings: 1,
@@ -491,7 +498,9 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       final draftRecipe = DraftRecipe(
         userId: AuthService.currentUserId!,
         title: _nameController.text.trim(),
-        description: null,
+        description: _descriptionController.text.trim().isNotEmpty 
+            ? _descriptionController.text.trim() 
+            : null,
         ingredients: recipeIngredients,
         instructions: _directionsController.text.trim(),
         servings: 1,
@@ -531,6 +540,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
     try {
       final name = _nameController.text.trim();
+      final description = _descriptionController.text.trim();
       final ing = _serializeIngredients();
       final dir = _directionsController.text.trim();
 
@@ -541,6 +551,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
       await LocalDraftService.saveDraft(
         name: name,
+        description: description.isNotEmpty ? description : null,
         ingredients: ing,
         directions: dir,
       );
@@ -1312,6 +1323,65 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
             ),
 
             const SizedBox(height: 20),
+
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.description, color: Colors.green, size: 20),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Description (Optional)',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _descriptionController,
+                    maxLines: 3,
+                    decoration: InputDecoration(
+                      hintText: 'Tell us about this recipe... When did you develop it? What makes it special?',
+                      hintStyle: TextStyle(color: Colors.grey.shade600),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: Colors.grey.shade300),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Colors.green, width: 2),
+                      ),
+                      contentPadding: const EdgeInsets.all(12),
+                      filled: true,
+                      fillColor: Colors.grey.shade50,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Share the story behind this recipe or any special notes',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
 
             // 🔥 NEW: Structured Ingredients Section
             Container(

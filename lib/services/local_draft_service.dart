@@ -24,6 +24,7 @@ class LocalDraftService {
   /// ✅ Automatically capitalizes recipe names
   static Future<void> saveDraft({
     required String name,
+    String? description,
     required String ingredients,
     required String directions,
   }) async {

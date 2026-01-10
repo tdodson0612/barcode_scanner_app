@@ -1,8 +1,9 @@
-// lib/pages/recipe_detail_page.dart - OPTIMIZED: Cache comments, likes, and favorite status
+// lib/pages/recipe_detail_page.dart - OPTIMIZED: Cache comments, likes, favorite status + SHARE BUTTON
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/comments_service.dart';
 import 'package:liver_wise/services/grocery_service.dart';
 import 'package:liver_wise/services/submitted_recipes_service.dart';
+import 'package:liver_wise/services/feed_posts_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../services/database_service_core.dart';
@@ -13,6 +14,7 @@ import '../models/favorite_recipe.dart';
 
 class RecipeDetailPage extends StatefulWidget {
   final String recipeName;
+  final String? description;
   final String ingredients;
   final String directions;
   final int recipeId;
@@ -20,6 +22,7 @@ class RecipeDetailPage extends StatefulWidget {
   const RecipeDetailPage({
     super.key,
     required this.recipeName,
+    this.description,
     required this.ingredients,
     required this.directions,
     required this.recipeId,
@@ -253,6 +256,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
         final favoriteRecipe = FavoriteRecipe(
           userId: currentUserId,
           recipeName: widget.recipeName,
+          description: widget.description,
           ingredients: widget.ingredients,
           directions: widget.directions,
           createdAt: DateTime.now(),
@@ -320,6 +324,50 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
         ErrorHandlingService.showSimpleError(
           context,
           'Error adding to grocery list',
+        );
+      }
+    }
+  }
+
+  // 🔥 NEW: Share recipe to feed
+  Future<void> _shareRecipeToFeed() async {
+    try {
+      await FeedPostsService.shareRecipeToFeed(
+        recipeName: widget.recipeName,
+        description: widget.description,
+        ingredients: widget.ingredients,
+        directions: widget.directions,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text('Recipe shared to your feed!'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+            action: SnackBarAction(
+              label: 'View Feed',
+              textColor: Colors.white,
+              onPressed: () {
+                Navigator.pushNamed(context, '/home');
+              },
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'Failed to share recipe',
         );
       }
     }
@@ -775,6 +823,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // 🔥 UPDATED: Action buttons with Share
                       Container(
                         padding: EdgeInsets.all(16),
                         decoration: BoxDecoration(
@@ -816,11 +865,73 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
                                 ),
                               ],
                             ),
+                            SizedBox(height: 12),
+                            // 🔥 NEW: Share to Feed button
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: _shareRecipeToFeed,
+                                icon: Icon(Icons.share),
+                                label: Text('Share to Feed'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blue,
+                                  foregroundColor: Colors.white,
+                                  padding: EdgeInsets.symmetric(vertical: 12),
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
                       
                       SizedBox(height: 24),
+
+                      // 🔥 Description section (if exists)
+                      if (widget.description != null && widget.description!.trim().isNotEmpty) ...[
+                        Container(
+                          padding: EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.blue.shade200,
+                              width: 1,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.info_outline, 
+                                    size: 20, 
+                                    color: Colors.blue.shade700
+                                  ),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'About This Recipe',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.blue.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                widget.description!,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  height: 1.5,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        SizedBox(height: 24),
+                      ],
                       
                       Text(
                         'Ingredients',
