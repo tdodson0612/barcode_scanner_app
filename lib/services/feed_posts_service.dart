@@ -4,6 +4,42 @@ import 'auth_service.dart';
 import '../config/app_config.dart';
 
 class FeedPostsService {
+  /// Create a text post
+  static Future<void> createTextPost({
+    required String content,
+  }) async {
+    try {
+      final userId = AuthService.currentUserId;
+      final username = await AuthService.fetchCurrentUsername();
+      
+      if (userId == null || username == null) {
+        throw Exception('User not authenticated');
+      }
+
+      if (content.trim().isEmpty) {
+        throw Exception('Post content cannot be empty');
+      }
+
+      // Insert into feed_posts table
+      await DatabaseServiceCore.workerQuery(
+        action: 'insert',
+        table: 'feed_posts',
+        data: {
+          'user_id': userId,
+          'username': username,
+          'content': content.trim(),
+          'post_type': 'text',
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
+
+      AppConfig.debugPrint('✅ Text post created');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error creating text post: $e');
+      throw Exception('Failed to create post: $e');
+    }
+  }
+
   /// Share a recipe to the feed
   static Future<void> shareRecipeToFeed({
     required String recipeName,
@@ -121,6 +157,101 @@ class FeedPostsService {
     } catch (e) {
       AppConfig.debugPrint('❌ Error deleting post: $e');
       throw Exception('Failed to delete post: $e');
+    }
+  }
+
+  /// Like a post
+  static Future<void> likePost(String postId) async {
+    try {
+      final userId = AuthService.currentUserId;
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+
+      await DatabaseServiceCore.workerQuery(
+        action: 'insert',
+        table: 'feed_post_likes',
+        data: {
+          'post_id': postId,
+          'user_id': userId,
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
+
+      AppConfig.debugPrint('✅ Post liked: $postId');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error liking post: $e');
+      throw Exception('Failed to like post: $e');
+    }
+  }
+
+  /// Unlike a post
+  static Future<void> unlikePost(String postId) async {
+    try {
+      final userId = AuthService.currentUserId;
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+
+      await DatabaseServiceCore.workerQuery(
+        action: 'delete',
+        table: 'feed_post_likes',
+        filters: {
+          'post_id': postId,
+          'user_id': userId,
+        },
+      );
+
+      AppConfig.debugPrint('✅ Post unliked: $postId');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error unliking post: $e');
+      throw Exception('Failed to unlike post: $e');
+    }
+  }
+
+  /// Check if user has liked a post
+  static Future<bool> hasUserLikedPost(String postId) async {
+    try {
+      final userId = AuthService.currentUserId;
+      if (userId == null) {
+        return false;
+      }
+
+      final result = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'feed_post_likes',
+        filters: {
+          'post_id': postId,
+          'user_id': userId,
+        },
+        limit: 1,
+      );
+
+      return result != null && (result as List).isNotEmpty;
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error checking like status: $e');
+      return false;
+    }
+  }
+
+  /// Get like count for a post
+  static Future<int> getPostLikeCount(String postId) async {
+    try {
+      final result = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'feed_post_likes',
+        filters: {'post_id': postId},
+        columns: ['COUNT(*) as count'],
+      );
+
+      if (result == null || (result as List).isEmpty) {
+        return 0;
+      }
+
+      return result[0]['count'] as int? ?? 0;
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error getting like count: $e');
+      return 0;
     }
   }
 }

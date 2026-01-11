@@ -1,4 +1,4 @@
-// lib/home_screen.dart - FULLY FIXED VERSION
+// lib/home_screen.dart - FULLY FIXED VERSION WITH POST COMPOSER
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
@@ -32,7 +32,6 @@ import 'services/tracker_service.dart';
 import 'services/auth_service.dart';
 import 'config/app_config.dart';
 import 'package:liver_wise/services/feed_posts_service.dart';
-
 
 class Recipe {
   final String title;
@@ -344,19 +343,15 @@ class _HomePageState extends State<HomePage>
       final hasShownPopup = await TrackerService.hasShownDay7Popup(userId);
       
       if (hasReachedDay7 && !hasShownPopup && mounted) {
-        // Wait a brief moment for UI to settle
         await Future.delayed(const Duration(milliseconds: 500));
         
         if (mounted) {
-          // Show congratulations popup
           await showDay7CongratsPopup(context);
-          // Mark as shown so it doesn't appear again
           await TrackerService.markDay7PopupShown(userId);
         }
       }
     } catch (e) {
       AppConfig.debugPrint('❌ Error checking day 7 achievement: $e');
-      // Fail silently - don't disrupt user experience
     }
   }
 
@@ -412,7 +407,6 @@ class _HomePageState extends State<HomePage>
           _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
         });
         
-        // ⭐ If user became premium, dispose all ads
         if (!wasPremium && isPremiumNow) {
           if (AppConfig.enableDebugPrints) {
             print("🎉 User became PREMIUM - disposing all ads");
@@ -427,7 +421,6 @@ class _HomePageState extends State<HomePage>
           _isRewardedAdReady = false;
         }
         
-        // ⭐ If user lost premium, reload ads
         if (wasPremium && !isPremiumNow) {
           if (AppConfig.enableDebugPrints) {
             print("⬇️ User lost PREMIUM - loading ads");
@@ -446,14 +439,12 @@ class _HomePageState extends State<HomePage>
       
       if (!mounted || _isDisposed) return;
       
-      // ⭐ CRITICAL: Load premium status FIRST, before ads
       await _premiumController.refresh();
       
       if (AppConfig.enableDebugPrints) {
         print("🔐 Premium status after refresh: $_isPremium");
       }
       
-      // ⭐ Now load ads ONLY if user is free
       if (!_isPremium) {
         if (AppConfig.enableDebugPrints) {
           print("📺 Loading ads for FREE user");
@@ -495,7 +486,6 @@ class _HomePageState extends State<HomePage>
       request: const AdRequest(),
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
-          // ⭐ CRITICAL: Check premium status again after ad loads
           final isPremiumNow = _premiumController.isPremium;
           
           if (!_isDisposed && !isPremiumNow) {
@@ -507,7 +497,6 @@ class _HomePageState extends State<HomePage>
               print("✅ Interstitial ad loaded (FREE user)");
             }
           } else {
-            // User became premium while ad was loading - dispose it
             ad.dispose();
             if (AppConfig.enableDebugPrints) {
               print("🚫 Disposed ad - user is PREMIUM (became premium during load)");
@@ -537,7 +526,6 @@ class _HomePageState extends State<HomePage>
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
         onAdLoaded: (ad) {
-          // ⭐ CRITICAL: Check premium status again after ad loads
           final isPremiumNow = _premiumController.isPremium;
           
           if (!_isDisposed && !isPremiumNow) {
@@ -548,7 +536,6 @@ class _HomePageState extends State<HomePage>
               print("✅ Rewarded ad loaded (FREE user)");
             }
           } else {
-            // User became premium while ad was loading - dispose it
             ad.dispose();
             if (AppConfig.enableDebugPrints) {
               print("🚫 Disposed rewarded ad - user is PREMIUM (became premium during load)");
@@ -565,9 +552,7 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  // ✅ FIXED: Never show ads to premium users (with double-check)
   void _showInterstitialAd(VoidCallback onAdClosed) {
-    // ⭐ CRITICAL: Double-check premium status at show time
     final isPremiumNow = _premiumController.isPremium;
     
     if (_isDisposed || isPremiumNow || !_isAdReady || _interstitialAd == null) {
@@ -591,7 +576,6 @@ class _HomePageState extends State<HomePage>
     _interstitialAd!.fullScreenContentCallback = FullScreenContentCallback(
       onAdDismissedFullScreenContent: (ad) {
         ad.dispose();
-        // Only reload if still free user
         if (!_premiumController.isPremium) {
           _loadInterstitialAd();
         }
@@ -970,14 +954,12 @@ class _HomePageState extends State<HomePage>
         return;
       }
 
-      // ⭐ CRITICAL: Check premium status from controller directly
       final isPremiumNow = _premiumController.isPremium;
       
       if (AppConfig.enableDebugPrints) {
         print("🔍 Scan requested - Premium: $isPremiumNow, Ad Ready: $_isAdReady");
       }
 
-      // Only show ad to FREE users with loaded ads
       if (!isPremiumNow && _isAdReady) {
         if (AppConfig.enableDebugPrints) {
           print("📺 Showing ad before scan (FREE user)");
@@ -1064,14 +1046,12 @@ class _HomePageState extends State<HomePage>
         return;
       }
 
-      // ⭐ CRITICAL: Check premium status from controller directly
       final isPremiumNow = _premiumController.isPremium;
       
       if (AppConfig.enableDebugPrints) {
         print("📸 Photo requested - Premium: $isPremiumNow, Ad Ready: $_isAdReady");
       }
 
-      // Only show ad to FREE users with loaded ads
       if (!isPremiumNow && _isAdReady) {
         if (AppConfig.enableDebugPrints) {
           print("📺 Showing ad before photo (FREE user)");
@@ -1100,15 +1080,9 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // ✅ FIXED: Improved camera handling with better timeouts
-  // Replace your entire _executeTakePhoto() method with this fixed version
-
-// Replace your entire _executeTakePhoto() method with this fixed version
-
   Future<void> _executeTakePhoto() async {
     if (_isDisposed) return;
 
-    // Clean up old image file
     if (_imageFile != null) {
       try {
         if (await _imageFile!.exists()) {
@@ -1121,7 +1095,6 @@ class _HomePageState extends State<HomePage>
     }
 
     try {
-      // Reset state before taking photo
       if (mounted) {
         setState(() {
           _showInitialView = false;
@@ -1181,7 +1154,6 @@ class _HomePageState extends State<HomePage>
         rethrow;
       }
 
-      // User cancelled camera
       if (pickedFile == null) {
         if (mounted && !_isDisposed) {
           _resetToHome();
@@ -1221,20 +1193,17 @@ class _HomePageState extends State<HomePage>
           }
         }
 
-        // ✅ CRITICAL FIX: Set image file and ensure we're in scanning view
         if (mounted && !_isDisposed) {
           setState(() {
             _imageFile = file;
-            _showInitialView = false; // Ensure we show the scanning view
+            _showInitialView = false;
           });
           
           AppConfig.debugPrint('✅ Image captured: ${(fileSize / 1024).toStringAsFixed(1)}KB');
           
-          // ✅ CRITICAL: Wait for UI to fully update before submitting
           if (mounted && !_isDisposed) {
             await Future.delayed(Duration(milliseconds: 500));
             
-            // ✅ Double-check we still have the file and we're still mounted
             if (mounted && !_isDisposed && _imageFile != null) {
               AppConfig.debugPrint('📤 Starting photo submission...');
               await _submitPhoto();
@@ -1245,7 +1214,6 @@ class _HomePageState extends State<HomePage>
         }
         
       } catch (e) {
-        // Clean up file on error
         try {
           if (await file.exists()) {
             await file.delete();
@@ -1330,7 +1298,6 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // ✅ NEW: Improved timeout dialog
   Future<void> _showCameraTimeoutDialog(String message) async {
     return showDialog(
       context: context,
@@ -1630,12 +1597,10 @@ class _HomePageState extends State<HomePage>
           "Sodium: ${nutrition.sodium.toStringAsFixed(1)} mg/100g";
   }
 
-  // NEW: Load feed posts
   Future<void> _loadFeed() async {
     setState(() => _isLoadingFeed = true);
 
     try {
-      // Use the service instead of direct query
       final posts = await FeedPostsService.getFeedPosts(limit: 20);
       
       if (mounted) {
@@ -1651,6 +1616,247 @@ class _HomePageState extends State<HomePage>
       print('Error loading feed: $e');
     }
   }
+
+  // 🔥 NEW: Show post creation dialog
+  void _showPostDialog() {
+    final TextEditingController postController = TextEditingController();
+    bool isPosting = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.edit, color: Colors.green),
+              SizedBox(width: 8),
+              Text('Create Post'),
+            ],
+          ),
+          content: Container(
+            width: double.maxFinite,
+            child: TextField(
+              controller: postController,
+              maxLines: 8,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: "What's on your mind?",
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.green, width: 2),
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isPosting ? null : () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: isPosting
+                  ? null
+                  : () async {
+                      if (postController.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Please write something first'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+
+                      setState(() => isPosting = true);
+
+                      try {
+                        await FeedPostsService.createTextPost(
+                          content: postController.text.trim(),
+                        );
+
+                        Navigator.pop(context);
+                        
+                        _loadFeed();
+
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Post created!'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      } catch (e) {
+                        setState(() => isPosting = false);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Failed to create post'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+              child: isPosting
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Text('Post'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 🔥 NEW: Show share recipe dialog
+  void _showShareRecipeDialog() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Share a recipe from your Favorites or Cookbook!'),
+        backgroundColor: Colors.blue,
+        action: SnackBarAction(
+          label: 'Go to Favorites',
+          textColor: Colors.white,
+          onPressed: () {
+            Navigator.pushNamed(context, '/favorite-recipes');
+          },
+        ),
+      ),
+    );
+  }
+
+  // 🔥 NEW: Post Composer Widget
+  Widget _buildPostComposer() {
+    return Container(
+      margin: EdgeInsets.all(12),
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            offset: Offset(0, 2),
+            blurRadius: 4,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: Colors.green.shade100,
+                child: Icon(Icons.person, color: Colors.green.shade700),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => _showPostDialog(),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Text(
+                      "What's on your mind?",
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          
+          SizedBox(height: 12),
+          Divider(height: 1),
+          SizedBox(height: 8),
+          
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildComposerAction(
+                icon: Icons.edit,
+                label: 'Text Post',
+                color: Colors.blue,
+                onTap: () => _showPostDialog(),
+              ),
+              Container(width: 1, height: 24, color: Colors.grey.shade300),
+              _buildComposerAction(
+                icon: Icons.restaurant,
+                label: 'Share Recipe',
+                color: Colors.green,
+                onTap: () => _showShareRecipeDialog(),
+              ),
+              Container(width: 1, height: 24, color: Colors.grey.shade300),
+              _buildComposerAction(
+                icon: Icons.image,
+                label: 'Photo',
+                color: Colors.orange,
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Photo uploads coming soon!'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildComposerAction({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 20),
+              SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.grey.shade700,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _searchUsers(String query) async {
     if (query.trim().isEmpty) {
       if (mounted) {
@@ -1801,8 +2007,6 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // Replace _saveRecipeDraft() in home_screen.dart with this enhanced version
-
   Future<void> _saveRecipeDraft() async {
     if (_recipeSuggestions.isEmpty || _currentNutrition == null) {
       ErrorHandlingService.showSimpleError(
@@ -1812,7 +2016,6 @@ class _HomePageState extends State<HomePage>
       return;
     }
 
-    // Step 1: Select which recipe to save
     final selectedRecipe = await showDialog<Recipe>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1850,17 +2053,14 @@ class _HomePageState extends State<HomePage>
 
     if (selectedRecipe == null) return;
 
-    // Step 2: Check for existing drafts
     try {
       final draftsList = await LocalDraftService.getDraftsList();
       
       if (draftsList.isEmpty) {
-        // No drafts exist - save as new
         await _saveDraftAsNew(selectedRecipe);
         return;
       }
 
-      // Step 3: Ask user: New or Update existing?
       final choice = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
@@ -1932,7 +2132,6 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // Helper: Save as new draft
   Future<void> _saveDraftAsNew(Recipe recipe) async {
     try {
       final ingredientsJson = recipe.ingredients
@@ -1973,9 +2172,7 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // Helper: Update existing draft
   Future<void> _updateExistingDraft(Recipe recipe, List<Map<String, dynamic>> draftsList) async {
-    // Let user select which draft to update
     final selectedDraft = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2023,7 +2220,6 @@ class _HomePageState extends State<HomePage>
 
     if (selectedDraft == null) return;
 
-    // Confirm overwrite
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2066,7 +2262,6 @@ class _HomePageState extends State<HomePage>
               })
           .toList();
 
-      // Update the existing draft using the ID (which is the name)
       await LocalDraftService.updateDraft(
         id: selectedDraft['id'],
         name: recipe.title,
@@ -2098,7 +2293,6 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  // Helper: Ask if user wants to edit now
   Future<bool?> _askToEditDraft(String recipeName) async {
     return showDialog<bool>(
       context: context,
@@ -2126,7 +2320,6 @@ class _HomePageState extends State<HomePage>
     );
   }
 
-  // Helper: Format date for display
   String _formatDate(dynamic timestamp) {
     try {
       if (timestamp == null) return 'Unknown';
@@ -2298,6 +2491,7 @@ class _HomePageState extends State<HomePage>
       ],
     );
   }
+
   Widget _buildNutritionRecipeCard(Recipe recipe) {
     final isFavorite = _isRecipeFavorited(recipe.title);
 
@@ -2427,7 +2621,6 @@ class _HomePageState extends State<HomePage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header with user info
           Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
@@ -2464,23 +2657,14 @@ class _HomePageState extends State<HomePage>
             ),
           ),
           
-          // Recipe content
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  post['recipe_name'] ?? 'Untitled Recipe',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                if (post['description'] != null && post['description'].toString().isNotEmpty)
+                if (post['content'] != null && post['content'].toString().isNotEmpty)
                   Text(
-                    post['description'],
+                    post['content'],
                     style: TextStyle(
                       fontSize: 14,
                       color: Colors.grey.shade700,
@@ -2494,7 +2678,6 @@ class _HomePageState extends State<HomePage>
           
           const SizedBox(height: 12),
           
-          // Action buttons
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
@@ -2502,25 +2685,19 @@ class _HomePageState extends State<HomePage>
                 _buildFeedActionButton(
                   icon: Icons.favorite_border,
                   label: 'Like',
-                  onPressed: () {
-                    // TODO: Implement like functionality
-                  },
+                  onPressed: () {},
                 ),
                 const SizedBox(width: 16),
                 _buildFeedActionButton(
                   icon: Icons.comment_outlined,
                   label: 'Comment',
-                  onPressed: () {
-                    // TODO: Implement comment functionality
-                  },
+                  onPressed: () {},
                 ),
                 const SizedBox(width: 16),
                 _buildFeedActionButton(
                   icon: Icons.bookmark_border,
                   label: 'Save',
-                  onPressed: () {
-                    // TODO: Implement save to cookbook
-                  },
+                  onPressed: () {},
                 ),
               ],
             ),
@@ -2588,7 +2765,6 @@ class _HomePageState extends State<HomePage>
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // 🔥 NEW: Search Users Bar (moved from AppBar)
             Container(
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
@@ -2624,7 +2800,6 @@ class _HomePageState extends State<HomePage>
               ),
             ),
 
-            // 🔥 UPDATED: Welcome Header
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -2658,7 +2833,6 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 20),
 
-            // 🔥 NEW: Four Buttons Side by Side
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -2674,7 +2848,6 @@ class _HomePageState extends State<HomePage>
               ),
               child: Column(
                 children: [
-                  // Scan Counter Badge (Free Users Only)
                   if (!_isPremium)
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -2718,7 +2891,6 @@ class _HomePageState extends State<HomePage>
                       ),
                     ),
 
-                  // 🔥 NEW: 4 Buttons in a Row
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
@@ -2754,7 +2926,7 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 30),
 
-            // 🔥 NEW: Feed Section
+            // 🔥 UPDATED: Feed Section with Post Composer
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -2777,6 +2949,10 @@ class _HomePageState extends State<HomePage>
                       ),
                     ],
                   ),
+                  const SizedBox(height: 16),
+                  
+                  // 🔥 NEW: Post Composer
+                  _buildPostComposer(),
                   const SizedBox(height: 16),
                   
                   if (_isLoadingFeed)
@@ -2821,9 +2997,7 @@ class _HomePageState extends State<HomePage>
                   if (_feedPosts.length > 3)
                     Center(
                       child: TextButton(
-                        onPressed: () {
-                          // TODO: Navigate to full feed page
-                        },
+                        onPressed: () {},
                         child: const Text('See More'),
                       ),
                     ),
@@ -2833,7 +3007,6 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 30),
 
-            // Recipe Suggestions Section
             if (_scannedRecipes.isNotEmpty)
               PremiumGate(
                 feature: PremiumFeature.viewRecipes,
@@ -3342,6 +3515,83 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  Future<void> _autoScanBarcode() async {
+    try {
+      if (!_premiumController.canAccessFeature(PremiumFeature.scan)) {
+        Navigator.pushNamed(context, '/purchase');
+        return;
+      }
+
+      final isPremiumNow = _premiumController.isPremium;
+      
+      if (!isPremiumNow && _isAdReady) {
+        _showInterstitialAd(() => _executeAutoScan());
+      } else {
+        _executeAutoScan();
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.scanError,
+          customMessage: 'Unable to start auto-scan',
+        );
+      }
+    }
+  }
+
+  Future<void> _executeAutoScan() async {
+    if (_isDisposed) return;
+
+    try {
+      final success = await _premiumController.useScan();
+      if (!success) {
+        Navigator.pushNamed(context, '/purchase');
+        return;
+      }
+
+      if (!mounted) return;
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => AutoBarcodeScanner(
+            onBarcodeDetected: (imagePath, barcode) async {
+              Navigator.pop(context);
+              
+              final file = File(imagePath);
+              if (await file.exists()) {
+                setState(() {
+                  _imageFile = file;
+                  _showInitialView = false;
+                });
+                
+                await Future.delayed(Duration(milliseconds: 500));
+                if (mounted && !_isDisposed) {
+                  await _submitPhoto();
+                }
+              }
+            },
+            onCancel: () {
+              Navigator.pop(context);
+              _resetToHome();
+            },
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.scanError,
+          customMessage: 'Error during auto-scan',
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -3391,83 +3641,4 @@ class _HomePageState extends State<HomePage>
       ),
     );
   }
-  Future<void> _autoScanBarcode() async {
-    try {
-      if (!_premiumController.canAccessFeature(PremiumFeature.scan)) {
-        Navigator.pushNamed(context, '/purchase');
-        return;
-      }
-
-      final isPremiumNow = _premiumController.isPremium;
-      
-      if (!isPremiumNow && _isAdReady) {
-        _showInterstitialAd(() => _executeAutoScan());
-      } else {
-        _executeAutoScan();
-      }
-    } catch (e) {
-      if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.scanError,
-          customMessage: 'Unable to start auto-scan',
-        );
-      }
-    }
-  }
-
-  Future<void> _executeAutoScan() async {
-    if (_isDisposed) return;
-
-    try {
-      final success = await _premiumController.useScan();
-      if (!success) {
-        Navigator.pushNamed(context, '/purchase');
-        return;
-      }
-
-      if (!mounted) return;
-
-      // Navigate to auto-scanner
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => AutoBarcodeScanner(
-            onBarcodeDetected: (imagePath, barcode) async {
-              Navigator.pop(context); // Close scanner
-              
-              // Set image and process
-              final file = File(imagePath);
-              if (await file.exists()) {
-                setState(() {
-                  _imageFile = file;
-                  _showInitialView = false;
-                });
-                
-                await Future.delayed(Duration(milliseconds: 500));
-                if (mounted && !_isDisposed) {
-                  await _submitPhoto();
-                }
-              }
-            },
-            onCancel: () {
-              Navigator.pop(context);
-              _resetToHome();
-            },
-          ),
-        ),
-      );
-    } catch (e) {
-      if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.scanError,
-          customMessage: 'Error during auto-scan',
-        );
-      }
-    }
-  }
-
 }
