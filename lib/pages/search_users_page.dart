@@ -37,10 +37,10 @@ class _SearchUsersPageState extends State<SearchUsersPage>
   bool _hasSearched = false;
   String? _errorMessage;
 
-  // App owner account IDs
-  static const List<String> _ownerAccountIds = [
-    '1c23a38d-e90a-42a6-975a-5cf83d733e2e', // Terry D.
-    '4309b3f1-6d02-4327-8483-4643777431d1', // Admin Britt
+  // 🔥 UPDATED: App owner emails instead of IDs
+  static const List<String> _ownerEmails = [
+    'terryd0612@gmail.com',           // Terry D.
+    'bbrc2021bbc1298.442@icloud.com', // Admit Britt (Co-owner)
   ];
 
   // simple fade animation for main content
@@ -168,7 +168,7 @@ class _SearchUsersPageState extends State<SearchUsersPage>
     }
   }
 
-  // -------------------- SUGGESTED FRIENDS --------------------
+  // -------------------- 🔥 UPDATED: SUGGESTED FRIENDS --------------------
 
   Future<void> _loadSuggestedFriends() async {
     setState(() {
@@ -176,30 +176,60 @@ class _SearchUsersPageState extends State<SearchUsersPage>
     });
 
     try {
-      _logger.d('👥 Loading suggested friends (app owners)...');
+      _logger.d('👥 Loading suggested friends (app owners by email)...');
 
-      final suggested = await UserSearchService.getSuggestedFriends(_ownerAccountIds);
+      // Get users by email
+      final suggested = await UserSearchService.getSuggestedFriendsByEmail(_ownerEmails);
       
-      // Load friendship statuses for suggested friends
+      if (suggested.isEmpty) {
+        _logger.w('⚠️ No owner accounts found with emails: $_ownerEmails');
+        if (!mounted) return;
+        setState(() {
+          _suggestedFriends = [];
+          _isLoadingSuggested = false;
+        });
+        return;
+      }
+
+      _logger.d('✅ Found ${suggested.length} owner accounts');
+
+      // 🔥 NEW: Filter out users who are already friends
       final statusMap = <String, Map<String, dynamic>>{};
+      final filteredSuggested = <Map<String, dynamic>>[];
+      
       for (final user in suggested) {
         final userId = user['id'];
+        
+        // Check friendship status
         var status = await _getCachedFriendshipStatus(userId);
         if (status == null) {
           status = await FriendsService.checkFriendshipStatus(userId);
           await _cacheFriendshipStatus(userId, status);
         }
-        statusMap[userId] = status;
+        
+        // Only add to suggested if NOT already friends
+        if (status['status'] != 'accepted') {
+          filteredSuggested.add(user);
+          statusMap[userId] = status;
+          _logger.d('  ✓ ${user['email']} - Status: ${status['status']}');
+        } else {
+          _logger.d('  ✗ ${user['email']} - Already friends, skipping');
+        }
       }
 
       if (!mounted) return;
       setState(() {
-        _suggestedFriends = suggested;
+        _suggestedFriends = filteredSuggested;
         _friendshipStatuses = statusMap;
         _isLoadingSuggested = false;
       });
 
-      _fadeController.forward(from: 0.0);
+      if (filteredSuggested.isNotEmpty) {
+        _fadeController.forward(from: 0.0);
+        _logger.i('👥 Showing ${filteredSuggested.length} suggested friends');
+      } else {
+        _logger.i('👥 All owners are already friends - no suggestions to show');
+      }
     } catch (e) {
       _logger.e('❌ Error loading suggested friends: $e');
       if (!mounted) return;
@@ -730,12 +760,14 @@ class _SearchUsersPageState extends State<SearchUsersPage>
             children: [
               Icon(Icons.star, color: Colors.green.shade700, size: 20),
               const SizedBox(width: 8),
-              Text(
-                'Suggested friends for getting started',
-                style: TextStyle(
-                  color: Colors.green.shade900,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
+              Expanded(
+                child: Text(
+                  'Suggested friends - Connect with the app creators!',
+                  style: TextStyle(
+                    color: Colors.green.shade900,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],

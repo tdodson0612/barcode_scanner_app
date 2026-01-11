@@ -11,7 +11,7 @@ class FeedPostsService {
     try {
       final userId = AuthService.currentUserId;
       final username = await AuthService.fetchCurrentUsername();
-      
+
       if (userId == null || username == null) {
         throw Exception('User not authenticated');
       }
@@ -50,7 +50,7 @@ class FeedPostsService {
     try {
       final userId = AuthService.currentUserId;
       final username = await AuthService.fetchCurrentUsername();
-      
+
       if (userId == null || username == null) {
         throw Exception('User not authenticated');
       }
@@ -92,22 +92,22 @@ class FeedPostsService {
     required String directions,
   }) {
     final buffer = StringBuffer();
-    
+
     buffer.writeln('🍽️ **$recipeName**');
     buffer.writeln();
-    
+
     if (description != null && description.trim().isNotEmpty) {
       buffer.writeln(description);
       buffer.writeln();
     }
-    
+
     buffer.writeln('📋 **Ingredients:**');
     buffer.writeln(ingredients);
     buffer.writeln();
-    
+
     buffer.writeln('👨‍🍳 **Directions:**');
     buffer.writeln(directions);
-    
+
     return buffer.toString();
   }
 
@@ -136,10 +136,144 @@ class FeedPostsService {
     }
   }
 
+  /// 🔥 NEW: Get feed posts only from friends (Facebook-style)
+  static Future<List<Map<String, dynamic>>> getFeedPostsFromFriends({
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    try {
+      final userId = AuthService.currentUserId;
+      
+      if (userId == null) {
+        AppConfig.debugPrint('⚠️ User not authenticated, returning empty feed');
+        return [];
+      }
+
+      // First, get list of friend IDs
+      final friendsResult = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'friends',
+        filters: {
+          'status': 'accepted',
+        },
+        columns: ['user_id', 'friend_id'],
+      );
+
+      if (friendsResult == null || (friendsResult as List).isEmpty) {
+        AppConfig.debugPrint('ℹ️ No friends found, showing only own posts');
+        
+        // Show only user's own posts if they have no friends
+        final ownPostsResult = await DatabaseServiceCore.workerQuery(
+          action: 'select',
+          table: 'feed_posts',
+          filters: {'user_id': userId},
+          orderBy: 'created_at',
+          ascending: false,
+          limit: limit,
+        );
+
+        if (ownPostsResult == null || (ownPostsResult as List).isEmpty) {
+          return [];
+        }
+
+        return List<Map<String, dynamic>>.from(ownPostsResult);
+      }
+
+      // Extract friend IDs (both directions of friendship)
+      final friendIds = <String>{userId}; // Include own posts
+      
+      for (final friendship in friendsResult) {
+        final user1 = friendship['user_id'] as String;
+        final user2 = friendship['friend_id'] as String;
+        
+        if (user1 == userId) {
+          friendIds.add(user2);
+        } else if (user2 == userId) {
+          friendIds.add(user1);
+        }
+      }
+
+      AppConfig.debugPrint('👥 Loading feed from ${friendIds.length} friends (including self)');
+
+      // Get posts from all friends
+      final postsResult = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'feed_posts',
+        orderBy: 'created_at',
+        ascending: false,
+        limit: limit,
+      );
+
+      if (postsResult == null || (postsResult as List).isEmpty) {
+        return [];
+      }
+
+      // Filter posts to only include friends
+      final friendPosts = (postsResult as List<Map<String, dynamic>>)
+          .where((post) => friendIds.contains(post['user_id']))
+          .toList();
+
+      AppConfig.debugPrint('✅ Loaded ${friendPosts.length} posts from friends');
+
+      return friendPosts;
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error loading friends feed: $e');
+      return [];
+    }
+  }
+
+  /// 🔥 NEW: Report a post for harassment/inappropriate content
+  static Future<void> reportPost({
+    required String postId,
+    required String reason,
+  }) async {
+    try {
+      final userId = AuthService.currentUserId;
+      
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // Check if user has already reported this post
+      final existingReport = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'post_reports',
+        filters: {
+          'post_id': postId,
+          'reporter_user_id': userId,
+        },
+        limit: 1,
+      );
+
+      if (existingReport != null && (existingReport as List).isNotEmpty) {
+        throw Exception('You have already reported this post');
+      }
+
+      // Insert report
+      await DatabaseServiceCore.workerQuery(
+        action: 'insert',
+        table: 'post_reports',
+        data: {
+          'post_id': postId,
+          'reporter_user_id': userId,
+          'reason': reason,
+          'status': 'pending',
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
+
+      AppConfig.debugPrint('✅ Post reported: $postId, Reason: $reason');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error reporting post: $e');
+      throw Exception('Failed to report post: $e');
+    }
+  }
+
   /// Delete a post (user can delete their own posts)
   static Future<void> deletePost(String postId) async {
     try {
       final userId = AuthService.currentUserId;
+      
       if (userId == null) {
         throw Exception('User not authenticated');
       }
@@ -164,6 +298,7 @@ class FeedPostsService {
   static Future<void> likePost(String postId) async {
     try {
       final userId = AuthService.currentUserId;
+      
       if (userId == null) {
         throw Exception('User not authenticated');
       }
@@ -189,6 +324,7 @@ class FeedPostsService {
   static Future<void> unlikePost(String postId) async {
     try {
       final userId = AuthService.currentUserId;
+      
       if (userId == null) {
         throw Exception('User not authenticated');
       }
@@ -213,6 +349,7 @@ class FeedPostsService {
   static Future<bool> hasUserLikedPost(String postId) async {
     try {
       final userId = AuthService.currentUserId;
+      
       if (userId == null) {
         return false;
       }

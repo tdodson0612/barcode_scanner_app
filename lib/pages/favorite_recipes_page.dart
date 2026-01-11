@@ -50,7 +50,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
   }
 
   // ========== CACHING HELPERS ==========
-
   Future<List<FavoriteRecipe>?> _getCachedFavorites() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -63,7 +62,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         
         if (timestamp != null) {
           final age = DateTime.now().millisecondsSinceEpoch - timestamp;
-          
           if (age < _cacheDuration.inMilliseconds) {
             // Cache is still valid
             final recipes = (data['recipes'] as List)
@@ -86,7 +84,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
       
       // Fall back to old format if new format doesn't exist or is stale
       final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
-      
       if (favoriteRecipesJson.isEmpty) return null;
       
       final recipes = favoriteRecipesJson
@@ -103,10 +100,8 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
       
       // Migrate to new format with timestamp
       await _cacheFavorites(recipes);
-      
       print('📦 Loaded from old cache format and migrated (${recipes.length} recipes)');
       return recipes;
-      
     } catch (e) {
       print('Error loading cached favorites: $e');
       return null;
@@ -122,6 +117,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         'recipes': recipes.map((recipe) => json.encode(recipe.toJson())).toList(),
         '_cached_at': DateTime.now().millisecondsSinceEpoch,
       };
+      
       await prefs.setString('favorite_recipes_cached', json.encode(cacheData));
       
       // Also maintain old format for backwards compatibility
@@ -157,11 +153,10 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
   }
 
   // ========== LOAD FROM DATABASE VIA CLOUDFLARE WORKER ==========
-
   Future<void> _loadFavoriteRecipes({bool forceRefresh = false}) async {
     try {
       setState(() => _isLoading = true);
-      
+
       final currentUserId = AuthService.currentUserId;
       if (currentUserId == null) {
         if (mounted) {
@@ -174,7 +169,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
       // Try cache first unless force refresh
       if (!forceRefresh) {
         final cachedRecipes = await _getCachedFavorites();
-        
         if (cachedRecipes != null) {
           if (mounted) {
             setState(() {
@@ -202,7 +196,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-      
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -216,14 +209,13 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
   }
 
   // ========== REMOVE FROM DATABASE VIA CLOUDFLARE WORKER ==========
-
   Future<void> _removeFavoriteRecipe(FavoriteRecipe recipe) async {
     try {
       final currentUserId = AuthService.currentUserId;
       if (currentUserId == null) return;
 
       String? favoriteId = recipe.id?.toString();
-      
+
       if (favoriteId == null) {
         // Fallback: Find the favorite record via Cloudflare Worker
         final searchResponse = await http.post(
@@ -249,18 +241,18 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
 
         favoriteId = favorites[0]['id'];
       }
-     
+
       // Store for undo
       final removedRecipe = recipe;
       final removedIndex = _favoriteRecipes.indexOf(recipe);
-     
+
       setState(() {
         _favoriteRecipes.remove(recipe);
       });
 
       // Invalidate cache
       await _invalidateFavoritesCache();
-      
+
       // Delete from database via Cloudflare Worker
       final deleteResponse = await http.post(
         Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
@@ -299,12 +291,11 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
   }
 
   // ========== UNDO REMOVE (RE-ADD TO DATABASE VIA CLOUDFLARE WORKER) ==========
-
   Future<void> _undoRemoveFavorite(FavoriteRecipe recipe, int index) async {
     try {
       final currentUserId = AuthService.currentUserId;
       final currentUsername = await AuthService.fetchCurrentUsername();
-     
+
       if (currentUserId == null || currentUsername == null) {
         if (mounted) {
           ErrorHandlingService.showSimpleError(context, 'Unable to restore: User not found');
@@ -360,7 +351,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         setState(() {
           _favoriteRecipes.insert(index, recipe);
         });
-       
+
         if (mounted) {
           ErrorHandlingService.showSuccess(context, 'Recipe restored to favorites');
         }
@@ -378,7 +369,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
   }
 
   // ========== 🔥 NEW: SHARE RECIPE TO FEED ==========
-
   Future<void> _shareRecipeToFeed(FavoriteRecipe recipe) async {
     try {
       await FeedPostsService.shareRecipeToFeed(
@@ -424,38 +414,82 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
-  // ========== FIXED RECIPE DETAILS DIALOG - NOW SHOWS TITLE, DESCRIPTION, INGREDIENTS, DIRECTIONS + SHARE ==========
-
+  // ========== 🔥 FIXED RECIPE DETAILS DIALOG ==========
   void _showRecipeDetails(FavoriteRecipe recipe) {
-    // Parse ingredients into a list
+    // Parse ingredients into a list with ROBUST error handling
     List<String> ingredientsList = [];
     try {
-      // Try JSON format first (structured ingredients)
-      final parsed = jsonDecode(recipe.ingredients);
-      if (parsed is List) {
-        ingredientsList = parsed.map((item) {
-          if (item is Map) {
-            final qty = item['quantity'] ?? '';
-            final unit = item['measurement'] ?? item['unit'] ?? '';
-            final name = item['name'] ?? item['product_name'] ?? '';
-            return '$qty $unit $name'.trim();
+      if (recipe.ingredients.trim().isEmpty) {
+        ingredientsList = ['No ingredients listed'];
+      } else {
+        // Try JSON format first (structured ingredients)
+        try {
+          final parsed = jsonDecode(recipe.ingredients);
+          if (parsed is List) {
+            ingredientsList = parsed.map((item) {
+              if (item is Map) {
+                final qty = item['quantity'] ?? '';
+                final unit = item['measurement'] ?? item['unit'] ?? '';
+                final name = item['name'] ?? item['product_name'] ?? '';
+                return '$qty $unit $name'.trim();
+              }
+              return item.toString();
+            }).where((line) => line.trim().isNotEmpty).toList();
           }
-          return item.toString();
-        }).where((line) => line.trim().isNotEmpty).toList();
+        } catch (e) {
+          // Fall back to plain text (one per line)
+          ingredientsList = recipe.ingredients
+              .split('\n')
+              .where((line) => line.trim().isNotEmpty)
+              .toList();
+          
+          // If still empty, try comma-separated
+          if (ingredientsList.isEmpty) {
+            ingredientsList = recipe.ingredients
+                .split(',')
+                .where((line) => line.trim().isNotEmpty)
+                .toList();
+          }
+        }
+        
+        // Final fallback - just show the raw text
+        if (ingredientsList.isEmpty && recipe.ingredients.trim().isNotEmpty) {
+          ingredientsList = [recipe.ingredients];
+        }
       }
     } catch (e) {
-      // Fall back to plain text (one per line)
-      ingredientsList = recipe.ingredients
-          .split('\n')
-          .where((line) => line.trim().isNotEmpty)
-          .toList();
+      print('❌ Error parsing ingredients: $e');
+      ingredientsList = [recipe.ingredients.isNotEmpty ? recipe.ingredients : 'No ingredients listed'];
     }
-    
-    // Parse directions into bullet points
-    List<String> directionsList = recipe.directions
-        .split('\n')
-        .where((line) => line.trim().isNotEmpty)
-        .toList();
+
+    // Parse directions into bullet points with ROBUST error handling
+    List<String> directionsList = [];
+    try {
+      if (recipe.directions.trim().isEmpty) {
+        directionsList = ['No directions provided'];
+      } else {
+        directionsList = recipe.directions
+            .split('\n')
+            .where((line) => line.trim().isNotEmpty)
+            .toList();
+        
+        // If no newlines found, treat as single direction
+        if (directionsList.isEmpty) {
+          directionsList = [recipe.directions];
+        }
+      }
+    } catch (e) {
+      print('❌ Error parsing directions: $e');
+      directionsList = [recipe.directions.isNotEmpty ? recipe.directions : 'No directions provided'];
+    }
+
+    print('🔍 Debug Recipe Details:');
+    print('  Recipe Name: ${recipe.recipeName}');
+    print('  Description: ${recipe.description}');
+    print('  Ingredients Count: ${ingredientsList.length}');
+    print('  Directions Count: ${directionsList.length}');
+    print('  First Ingredient: ${ingredientsList.isNotEmpty ? ingredientsList.first : "NONE"}');
+    print('  First Direction: ${directionsList.isNotEmpty ? directionsList.first : "NONE"}');
 
     showDialog(
       context: context,
@@ -502,7 +536,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                   ],
                 ),
               ),
-              
+
               // Scrollable content
               Expanded(
                 child: SingleChildScrollView(
@@ -510,7 +544,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Recipe Title Section
+                      // Recipe Title Section (ALWAYS SHOW)
                       Container(
                         padding: EdgeInsets.all(16),
                         decoration: BoxDecoration(
@@ -542,7 +576,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                         ),
                       ),
                       SizedBox(height: 16),
-                      
+
                       // Description section (if exists)
                       if (recipe.description != null && recipe.description!.trim().isNotEmpty) ...[
                         Container(
@@ -588,152 +622,148 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                         ),
                         SizedBox(height: 16),
                       ],
-                      
-                      // Ingredients section
-                      if (ingredientsList.isNotEmpty) ...[
-                        Row(
-                          children: [
-                            Icon(Icons.shopping_cart, 
-                              size: 24, 
-                              color: Colors.orange.shade700
-                            ),
-                            SizedBox(width: 8),
-                            Text(
-                              'Ingredients',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.orange.shade700,
-                              ),
-                            ),
-                          ],
-                        ),
-                        SizedBox(height: 12),
-                        Container(
-                          padding: EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.shade50,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.orange.shade200,
-                              width: 1,
+
+                      // 🔥 FIXED: Ingredients section (ALWAYS SHOW - removed conditional)
+                      Row(
+                        children: [
+                          Icon(Icons.shopping_cart, 
+                            size: 24, 
+                            color: Colors.orange.shade700
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'Ingredients',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange.shade700,
                             ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: ingredientsList.map((ingredient) {
-                              return Padding(
-                                padding: EdgeInsets.only(bottom: 8),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      '• ',
+                        ],
+                      ),
+                      SizedBox(height: 12),
+                      Container(
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.orange.shade200,
+                            width: 1,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: ingredientsList.map((ingredient) {
+                            return Padding(
+                              padding: EdgeInsets.only(bottom: 8),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '• ',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.orange.shade700,
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      ingredient.trim(),
                                       style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.orange.shade700,
+                                        fontSize: 15,
+                                        height: 1.4,
                                       ),
                                     ),
-                                    Expanded(
-                                      child: Text(
-                                        ingredient.trim(),
-                                        style: TextStyle(
-                                          fontSize: 15,
-                                          height: 1.4,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                        ),
-                        SizedBox(height: 24),
-                      ],
-                      
-                      // Directions section
-                      if (directionsList.isNotEmpty) ...[
-                        Row(
-                          children: [
-                            Icon(Icons.format_list_numbered, 
-                              size: 24, 
-                              color: Colors.blue.shade700
-                            ),
-                            SizedBox(width: 8),
-                            Text(
-                              'Instructions',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.blue.shade700,
+                                  ),
+                                ],
                               ),
-                            ),
-                          ],
+                            );
+                          }).toList(),
                         ),
-                        SizedBox(height: 12),
-                        Container(
-                          padding: EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.blue.shade200,
-                              width: 1,
+                      ),
+                      SizedBox(height: 24),
+
+                      // 🔥 FIXED: Directions section (ALWAYS SHOW - removed conditional)
+                      Row(
+                        children: [
+                          Icon(Icons.format_list_numbered, 
+                            size: 24, 
+                            color: Colors.blue.shade700
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'Instructions',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue.shade700,
                             ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: directionsList.asMap().entries.map((entry) {
-                              int idx = entry.key;
-                              String direction = entry.value;
-                              return Padding(
-                                padding: EdgeInsets.only(bottom: 12),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Container(
-                                      width: 28,
-                                      height: 28,
-                                      decoration: BoxDecoration(
-                                        color: Colors.blue.shade700,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: Center(
-                                        child: Text(
-                                          '${idx + 1}',
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                      ),
+                        ],
+                      ),
+                      SizedBox(height: 12),
+                      Container(
+                        padding: EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.blue.shade200,
+                            width: 1,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: directionsList.asMap().entries.map((entry) {
+                            int idx = entry.key;
+                            String direction = entry.value;
+                            return Padding(
+                              padding: EdgeInsets.only(bottom: 12),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    width: 28,
+                                    height: 28,
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.shade700,
+                                      shape: BoxShape.circle,
                                     ),
-                                    SizedBox(width: 12),
-                                    Expanded(
+                                    child: Center(
                                       child: Text(
-                                        direction.trim(),
+                                        '${idx + 1}',
                                         style: TextStyle(
-                                          fontSize: 15,
-                                          height: 1.5,
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
                                         ),
                                       ),
                                     ),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                          ),
+                                  ),
+                                  SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      direction.trim(),
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        height: 1.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }).toList(),
                         ),
-                      ],
+                      ),
                     ],
                   ),
                 ),
               ),
-              
-              // 🔥 UPDATED: Bottom action buttons with SHARE
+
+              // Bottom action buttons with SHARE
               Container(
                 padding: EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -914,7 +944,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                                     ],
                                   ),
                                 ),
-                                // 🔥 UPDATED: Added Share to Feed option
+                                // Menu options
                                 PopupMenuButton<String>(
                                   icon: Icon(Icons.more_vert, color: Colors.grey.shade600),
                                   shape: RoundedRectangleBorder(
@@ -1012,7 +1042,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
               ),
             ),
             SizedBox(height: 32),
-            
             // Start Scanning button
             ElevatedButton.icon(
               onPressed: () {
@@ -1034,9 +1063,7 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                 minimumSize: Size(double.infinity, 56),
               ),
             ),
-            
             SizedBox(height: 12),
-            
             // Manual Barcode Entry button
             ElevatedButton.icon(
               onPressed: () {

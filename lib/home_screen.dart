@@ -1601,7 +1601,8 @@ class _HomePageState extends State<HomePage>
     setState(() => _isLoadingFeed = true);
 
     try {
-      final posts = await FeedPostsService.getFeedPosts(limit: 20);
+      // 🔥 UPDATED: Load friends-only feed
+      final posts = await FeedPostsService.getFeedPostsFromFriends(limit: 20);
       
       if (mounted) {
         setState(() {
@@ -1614,6 +1615,102 @@ class _HomePageState extends State<HomePage>
         setState(() => _isLoadingFeed = false);
       }
       print('Error loading feed: $e');
+    }
+  }
+
+  // 🔥 NEW: Report harassment
+  Future<void> _reportPost(Map<String, dynamic> post) async {
+    final reasons = [
+      'Harassment or bullying',
+      'Spam',
+      'Hate speech',
+      'Violence or dangerous content',
+      'False information',
+      'Other',
+    ];
+
+    String? selectedReason;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.flag, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Report Post'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Why are you reporting this post?',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              SizedBox(height: 16),
+              ...reasons.map((reason) {
+                return RadioListTile<String>(
+                  title: Text(reason, style: TextStyle(fontSize: 14)),
+                  value: reason,
+                  groupValue: selectedReason,
+                  onChanged: (value) {
+                    setState(() => selectedReason = value);
+                  },
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                );
+              }).toList(),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: selectedReason == null
+                  ? null
+                  : () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: Text('Report'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true && selectedReason != null) {
+      try {
+        await FeedPostsService.reportPost(
+          postId: post['id'].toString(),
+          reason: selectedReason!,
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Report submitted. Thank you for helping keep our community safe.'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to submit report. Please try again.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -1788,35 +1885,45 @@ class _HomePageState extends State<HomePage>
           Divider(height: 1),
           SizedBox(height: 8),
           
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          // 🔥 UPDATED: Two rows of buttons
+          Column(
             children: [
-              _buildComposerAction(
-                icon: Icons.edit,
-                label: 'Text Post',
-                color: Colors.blue,
-                onTap: () => _showPostDialog(),
+              // Row 1: Post and Recipe
+              Row(
+                children: [
+                  _buildComposerAction(
+                    icon: Icons.edit,
+                    label: 'Post',
+                    color: Colors.blue,
+                    onTap: () => _showPostDialog(),
+                  ),
+                  SizedBox(width: 8),
+                  _buildComposerAction(
+                    icon: Icons.restaurant,
+                    label: 'Recipe',
+                    color: Colors.green,
+                    onTap: () => _showShareRecipeDialog(),
+                  ),
+                ],
               ),
-              Container(width: 1, height: 24, color: Colors.grey.shade300),
-              _buildComposerAction(
-                icon: Icons.restaurant,
-                label: 'Share Recipe',
-                color: Colors.green,
-                onTap: () => _showShareRecipeDialog(),
-              ),
-              Container(width: 1, height: 24, color: Colors.grey.shade300),
-              _buildComposerAction(
-                icon: Icons.image,
-                label: 'Photo',
-                color: Colors.orange,
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Photo uploads coming soon!'),
-                      backgroundColor: Colors.orange,
-                    ),
-                  );
-                },
+              SizedBox(height: 8),
+              // Row 2: Photo
+              Row(
+                children: [
+                  _buildComposerAction(
+                    icon: Icons.image,
+                    label: 'Photo',
+                    color: Colors.orange,
+                    onTap: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Photo uploads coming soon!'),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                    },
+                  ),
+                ],
               ),
             ],
           ),
@@ -2605,6 +2712,9 @@ class _HomePageState extends State<HomePage>
   }
 
   Widget _buildFeedPost(Map<String, dynamic> post) {
+    final currentUserId = AuthService.currentUserId;
+    final isOwnPost = post['user_id'] == currentUserId;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -2652,7 +2762,30 @@ class _HomePageState extends State<HomePage>
                     ],
                   ),
                 ),
-                Icon(Icons.more_horiz, color: Colors.grey.shade600),
+                // 🔥 NEW: Report button (only show on other people's posts)
+                if (!isOwnPost)
+                  PopupMenuButton<String>(
+                    icon: Icon(Icons.more_horiz, color: Colors.grey.shade600),
+                    onSelected: (value) {
+                      if (value == 'report') {
+                        _reportPost(post);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      PopupMenuItem(
+                        value: 'report',
+                        child: Row(
+                          children: [
+                            Icon(Icons.flag, color: Colors.red, size: 20),
+                            SizedBox(width: 8),
+                            Text('Report Post'),
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  Icon(Icons.more_horiz, color: Colors.grey.shade600),
               ],
             ),
           ),
@@ -2669,8 +2802,6 @@ class _HomePageState extends State<HomePage>
                       fontSize: 14,
                       color: Colors.grey.shade700,
                     ),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
                   ),
               ],
             ),
