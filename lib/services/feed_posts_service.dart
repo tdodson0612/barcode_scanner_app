@@ -1,4 +1,4 @@
-// lib/services/feed_posts_service.dart - WITH VISIBILITY CONTROLS
+// lib/services/feed_posts_service.dart - WITH ENHANCED DEBUG LOGGING
 import 'database_service_core.dart';
 import 'auth_service.dart';
 import '../config/app_config.dart';
@@ -116,12 +116,14 @@ class FeedPostsService {
     try {
       final userId = AuthService.currentUserId;
       
+      AppConfig.debugPrint('🔍 getFeedPosts called - userId: $userId');
+      
       if (userId == null) {
         AppConfig.debugPrint('⚠️ User not authenticated, showing only public posts');
         return await _getPublicPostsOnly(limit: limit);
       }
 
-      AppConfig.debugPrint('📱 Loading feed for user: $userId');
+      AppConfig.debugPrint('📱 Loading feed for authenticated user: $userId');
 
       // Get friend IDs
       final friendsResult = await DatabaseServiceCore.workerQuery(
@@ -134,9 +136,13 @@ class FeedPostsService {
       final friendIds = <String>{userId}; // Include self
       
       if (friendsResult != null && (friendsResult as List).isNotEmpty) {
+        AppConfig.debugPrint('👥 Found ${(friendsResult as List).length} friendships');
+        
         for (final friendship in friendsResult) {
           final user1 = friendship['user_id']?.toString();
           final user2 = friendship['friend_id']?.toString();
+          
+          AppConfig.debugPrint('  Friendship: $user1 <-> $user2');
           
           if (user1 == userId && user2 != null) {
             friendIds.add(user2);
@@ -144,11 +150,15 @@ class FeedPostsService {
             friendIds.add(user1);
           }
         }
+      } else {
+        AppConfig.debugPrint('👥 No friends found');
       }
 
-      AppConfig.debugPrint('👥 Friend IDs (including self): ${friendIds.length}');
+      AppConfig.debugPrint('👥 Final friend IDs (including self): ${friendIds.length} - $friendIds');
 
       // Get all posts
+      AppConfig.debugPrint('📡 Querying feed_posts table...');
+      
       final postsResult = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'feed_posts',
@@ -157,12 +167,30 @@ class FeedPostsService {
         limit: 200,
       );
 
-      if (postsResult == null || (postsResult as List).isEmpty) {
-        AppConfig.debugPrint('ℹ️ No posts found in database');
+      if (postsResult == null) {
+        AppConfig.debugPrint('❌ postsResult is NULL');
+        return [];
+      }
+      
+      if ((postsResult as List).isEmpty) {
+        AppConfig.debugPrint('❌ postsResult is EMPTY (no posts in database)');
         return [];
       }
 
       final allPosts = List<Map<String, dynamic>>.from(postsResult);
+      
+      AppConfig.debugPrint('📊 Total posts in database: ${allPosts.length}');
+      
+      // Debug: Show all posts
+      for (var i = 0; i < allPosts.length && i < 5; i++) {
+        final post = allPosts[i];
+        AppConfig.debugPrint('  Post $i:');
+        AppConfig.debugPrint('    - ID: ${post['id']}');
+        AppConfig.debugPrint('    - User ID: ${post['user_id']}');
+        AppConfig.debugPrint('    - Username: ${post['username']}');
+        AppConfig.debugPrint('    - Visibility: ${post['visibility']}');
+        AppConfig.debugPrint('    - Content: ${post['content']?.toString().substring(0, 30)}...');
+      }
       
       // Filter posts based on visibility rules:
       // 1. All PUBLIC posts (from anyone)
@@ -171,26 +199,35 @@ class FeedPostsService {
         final visibility = post['visibility']?.toString() ?? 'public';
         final postUserId = post['user_id']?.toString();
         
+        AppConfig.debugPrint('🔍 Checking post ${post['id']}: visibility=$visibility, postUserId=$postUserId');
+        
         // Show all public posts
         if (visibility == 'public') {
+          AppConfig.debugPrint('  ✅ PUBLIC post - showing');
           return true;
         }
         
         // Show friends-only posts only from friends
         if (visibility == 'friends' && postUserId != null) {
-          return friendIds.contains(postUserId);
+          final isFriend = friendIds.contains(postUserId);
+          AppConfig.debugPrint('  ${isFriend ? "✅" : "❌"} FRIENDS-ONLY post - ${isFriend ? "showing" : "hiding"}');
+          return isFriend;
         }
         
+        AppConfig.debugPrint('  ❌ Unknown visibility - hiding');
         return false;
       }).toList();
 
+      AppConfig.debugPrint('✅ Visible posts after filtering: ${visiblePosts.length}');
+
       final limitedPosts = visiblePosts.take(limit).toList();
 
-      AppConfig.debugPrint('✅ Loaded ${limitedPosts.length} visible posts (${visiblePosts.length} total after filtering)');
+      AppConfig.debugPrint('✅ Returning ${limitedPosts.length} posts (limit: $limit)');
 
       return limitedPosts;
-    } catch (e) {
+    } catch (e, stackTrace) {
       AppConfig.debugPrint('❌ Error loading feed: $e');
+      AppConfig.debugPrint('Stack trace: $stackTrace');
       return [];
     }
   }
@@ -200,6 +237,8 @@ class FeedPostsService {
     int limit = 20,
   }) async {
     try {
+      AppConfig.debugPrint('🌍 Loading PUBLIC posts only...');
+      
       final result = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'feed_posts',
@@ -210,9 +249,11 @@ class FeedPostsService {
       );
 
       if (result == null || (result as List).isEmpty) {
+        AppConfig.debugPrint('❌ No public posts found');
         return [];
       }
 
+      AppConfig.debugPrint('✅ Found ${(result as List).length} public posts');
       return List<Map<String, dynamic>>.from(result);
     } catch (e) {
       AppConfig.debugPrint('❌ Error loading public posts: $e');

@@ -1602,19 +1602,34 @@ class _HomePageState extends State<HomePage>
     setState(() => _isLoadingFeed = true);
 
     try {
+      AppConfig.debugPrint('🔄 Starting feed load...');
+      
       // 🔥 NEW: Use the visibility-aware feed method
       final posts = await FeedPostsService.getFeedPosts(limit: 20);
+      
+      AppConfig.debugPrint('📊 Feed loaded: ${posts.length} posts');
+      
+      if (posts.isNotEmpty) {
+        AppConfig.debugPrint('📝 First post preview:');
+        AppConfig.debugPrint('  - ID: ${posts[0]['id']}');
+        AppConfig.debugPrint('  - User: ${posts[0]['username']}');
+        AppConfig.debugPrint('  - Visibility: ${posts[0]['visibility']}');
+        AppConfig.debugPrint('  - Content preview: ${posts[0]['content']?.toString().substring(0, 50)}...');
+      }
       
       if (mounted) {
         setState(() {
           _feedPosts = posts;
           _isLoadingFeed = false;
         });
+        
+        AppConfig.debugPrint('✅ Feed state updated with ${_feedPosts.length} posts');
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isLoadingFeed = false);
       }
+      AppConfig.debugPrint('❌ Error loading feed: $e');
       print('Error loading feed: $e');
     }
   }
