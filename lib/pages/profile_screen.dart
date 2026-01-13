@@ -16,7 +16,6 @@ import '../widgets/cookbook_section.dart';
 
 import '../widgets/disease_type_selector.dart';
 import '../services/tracker_service.dart';
-import '../models/disease_nutrition_profile.dart';
 import '../liverhealthbar.dart';
 
 // 🔥 NEW — listens to refresh_profile events

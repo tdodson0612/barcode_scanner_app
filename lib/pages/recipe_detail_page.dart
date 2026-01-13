@@ -2,11 +2,9 @@
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/comments_service.dart';
 import 'package:liver_wise/services/grocery_service.dart';
-import 'package:liver_wise/services/submitted_recipes_service.dart';
 import 'package:liver_wise/services/feed_posts_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import '../services/database_service_core.dart';
 import '../services/error_handling_service.dart';
 import '../services/auth_service.dart';
 import '../pages/user_profile_page.dart';

@@ -273,8 +273,8 @@ class _UserProfilePageState extends State<UserProfilePage> {
         FriendsService.checkFriendshipStatus(widget.userId),
       ]);
       
-      final profile = results[0] as Map<String, dynamic>?;
-      final friendship = results[1] as Map<String, dynamic>?;
+      final profile = results[0];
+      final friendship = results[1];
       
       if (profile != null) await _cacheProfile(prefs, profile);
       if (friendship != null) await _cacheFriendship(prefs, friendship);

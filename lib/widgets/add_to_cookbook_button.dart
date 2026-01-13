@@ -12,14 +12,14 @@ class AddToCookbookButton extends StatefulWidget {
   final VoidCallback? onSuccess;
 
   const AddToCookbookButton({
-    Key? key,
+    super.key,
     required this.recipeName,
     required this.ingredients,
     required this.directions,
     this.recipeId,
     this.compact = false,
     this.onSuccess,
-  }) : super(key: key);
+  });
 
   @override
   State<AddToCookbookButton> createState() => _AddToCookbookButtonState();

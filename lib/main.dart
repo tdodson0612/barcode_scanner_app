@@ -26,14 +26,12 @@ import 'pages/messages_page.dart';
 import 'pages/search_users_page.dart';
 import 'pages/profile_screen.dart';
 import 'pages/favorite_recipes_page.dart';
-import 'models/favorite_recipe.dart';
 import 'contact_screen.dart';
 import 'home_screen.dart';
 import 'pages/reset_password_page.dart';
 import 'package:liver_wise/pages/manual_barcode_entry_screen.dart';
 import 'package:liver_wise/pages/nutrition_search_screen.dart';
 import 'package:liver_wise/pages/saved_ingredients_screen.dart';
-import './services/submitted_recipes_service.dart';
 import './pages/submission_status_page.dart';
 import './pages/my_cookbook_page.dart';
 
@@ -368,7 +366,7 @@ class _MyAppState extends State<MyApp> {
             },
           );
 
-      if (mounted && response.session != null) {
+      if (mounted) {
         Navigator.pushNamed(context, '/reset-password', arguments: response.session);
       } else {
         if (AppConfig.enableDebugPrints) {

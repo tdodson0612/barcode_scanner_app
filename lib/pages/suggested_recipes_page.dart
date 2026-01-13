@@ -4,7 +4,6 @@ import 'package:liver_wise/services/favorite_recipes_service.dart';
 import 'package:liver_wise/services/grocery_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import '../services/database_service_core.dart';
 import '../widgets/premium_gate.dart';
 import '../controllers/premium_gate_controller.dart';
 import 'package:http/http.dart' as http;
@@ -70,7 +69,7 @@ class _SuggestedRecipesPageState extends State<SuggestedRecipesPage> {
   final ScrollController _scrollController = ScrollController();
 
   // Cache for favorite status
-  Map<String, bool> _favoriteStatusCache = {};
+  final Map<String, bool> _favoriteStatusCache = {};
   
   // Cache durations
   static const Duration _recipeCacheDuration = Duration(hours: 1);

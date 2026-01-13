@@ -1,9 +1,7 @@
 // lib/services/grocery_service.dart
 // Handles grocery list CRUD, parsing, formatting, and adding ingredients from recipes.
 
-import 'dart:convert';
 
-import '../config/app_config.dart';
 import '../models/grocery_item.dart';
 
 import 'auth_service.dart';              // currentUserId + auth check

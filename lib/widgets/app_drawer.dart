@@ -7,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../controllers/premium_gate_controller.dart';
 import '../services/auth_service.dart';
 import '../services/database_service_core.dart';
-import '../widgets/menu_icon_with_badge.dart';
 
 class AppDrawer extends StatefulWidget {
   final String currentPage;

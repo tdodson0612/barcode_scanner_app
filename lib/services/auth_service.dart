@@ -1,6 +1,5 @@
 // lib/services/auth_service.dart - COMPLETE FIXED VERSION
 
-import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/app_config.dart';
 
@@ -333,7 +332,7 @@ class AuthService {
       }
     } catch (e) {
       AppConfig.debugPrint('❌ Ensure profile failed: $e');
-      throw e;
+      rethrow;
     }
   }
 

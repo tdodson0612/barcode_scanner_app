@@ -1,5 +1,4 @@
 // xp_reward_service.dart
-import 'database_service_core.dart';
 import 'xp_service.dart';
 
 class XpRewardService {

@@ -11,11 +11,11 @@ class SubmissionStatusBadge extends StatelessWidget {
   final bool compact;
 
   const SubmissionStatusBadge({
-    Key? key,
+    super.key,
     required this.status,
     this.showIcon = true,
     this.compact = false,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

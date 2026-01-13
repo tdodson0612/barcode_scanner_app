@@ -7,7 +7,6 @@ import 'package:logger/logger.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import '../services/database_service_core.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/menu_icon_with_badge.dart';
 import 'chat_page.dart';

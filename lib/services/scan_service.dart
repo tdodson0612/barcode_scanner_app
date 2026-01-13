@@ -3,7 +3,6 @@
 
 import '../config/app_config.dart';
 
-import 'auth_service.dart';
 import 'profile_service.dart';           // For getUserProfile + isPremium
 import 'achievements_service.dart';     // For awardBadge
 import 'database_service_core.dart';    // Worker queries + cache

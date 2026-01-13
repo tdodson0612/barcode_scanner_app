@@ -317,7 +317,7 @@ class _Sprint1TestPageState extends State<Sprint1TestPage>
       mainAxisSpacing: 8,
       crossAxisSpacing: 8,
       children: [
-        _nutritionItem('Calories', '${nutrition.calories.toStringAsFixed(0)}'),
+        _nutritionItem('Calories', nutrition.calories.toStringAsFixed(0)),
         _nutritionItem('Fat', '${nutrition.fat.toStringAsFixed(1)}g'),
         _nutritionItem('Sodium', '${nutrition.sodium.toStringAsFixed(0)}mg'),
         _nutritionItem('Sugar', '${nutrition.sugar.toStringAsFixed(1)}g'),

@@ -26,7 +26,7 @@ class RatingsService {
         return {'average': 0.0, 'count': 0};
       }
 
-      final ratings = (response as List)
+      final ratings = (response)
           .map((r) => r['rating'] as int)
           .toList();
 

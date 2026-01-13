@@ -6,7 +6,6 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../models/submitted_recipe.dart';
-import '../services/database_service_core.dart';
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
 import '../widgets/rating_dialog.dart';
@@ -54,8 +53,8 @@ class _RecipeCardState extends State<RecipeCard> {
   }
 
   /// Get cache key for recipe ratings
-  String _getRatingCacheKey() => '${_ratingCachePrefix}${widget.recipe.id}';
-  String _getUserRatingCacheKey() => '${_userRatingCachePrefix}${widget.recipe.id}';
+  String _getRatingCacheKey() => '$_ratingCachePrefix${widget.recipe.id}';
+  String _getUserRatingCacheKey() => '$_userRatingCachePrefix${widget.recipe.id}';
 
   /// Load rating from cache first, then database if stale
   Future<void> _loadRating() async {
@@ -168,8 +167,8 @@ class _RecipeCardState extends State<RecipeCard> {
   /// Invalidate cache for a specific recipe (call after rating)
   static Future<void> invalidateRecipeCache(int recipeId) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('${_ratingCachePrefix}$recipeId');
-    await prefs.remove('${_userRatingCachePrefix}$recipeId');
+    await prefs.remove('$_ratingCachePrefix$recipeId');
+    await prefs.remove('$_userRatingCachePrefix$recipeId');
   }
 
   /// Clear all recipe rating caches (for debugging or logout)

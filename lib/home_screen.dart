@@ -18,19 +18,15 @@ import 'package:liver_wise/controllers/premium_gate_controller.dart';
 import 'package:liver_wise/liverhealthbar.dart';
 import 'package:liver_wise/services/auth_service.dart';
 import 'package:liver_wise/services/error_handling_service.dart';
-import 'package:liver_wise/services/food_classifier_service.dart';
 import 'package:liver_wise/models/favorite_recipe.dart';
 import 'package:liver_wise/pages/search_users_page.dart';
 import 'package:liver_wise/widgets/app_drawer.dart';
 import 'package:liver_wise/config/app_config.dart';
 import 'package:liver_wise/widgets/menu_icon_with_badge.dart';
-import 'package:liver_wise/services/database_service_core.dart';
 import 'package:liver_wise/services/favorite_recipes_service.dart';
 import 'widgets/auto_barcode_scanner.dart';
 import 'widgets/day7_congrats_popup.dart';
 import 'services/tracker_service.dart';
-import 'services/auth_service.dart';
-import 'config/app_config.dart';
 import 'package:liver_wise/services/feed_posts_service.dart';
 
 class Recipe {
@@ -874,9 +870,9 @@ class _HomePageState extends State<HomePage>
           try {
             final decoded = jsonDecode(value);
             final preview = decoded.toString();
-            print('  Value (parsed): ${preview.length > 200 ? preview.substring(0, 200) + '...' : preview}');
+            print('  Value (parsed): ${preview.length > 200 ? '${preview.substring(0, 200)}...' : preview}');
           } catch (_) {
-            final preview = value.length > 100 ? value.substring(0, 100) + '...' : value;
+            final preview = value.length > 100 ? '${value.substring(0, 100)}...' : value;
             print('  Value: $preview');
           }
         } else {
@@ -1128,7 +1124,7 @@ class _HomePageState extends State<HomePage>
             throw TimeoutException('Camera timed out after 90 seconds');
           },
         );
-      } on TimeoutException catch (e) {
+      } on TimeoutException {
         throw TimeoutException(
           'Camera operation timed out.\n\n'
           'Tips:\n'
@@ -1665,7 +1661,7 @@ class _HomePageState extends State<HomePage>
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                 );
-              }).toList(),
+              }),
             ],
           ),
           actions: [
@@ -1734,7 +1730,7 @@ class _HomePageState extends State<HomePage>
               Text('Create Post'),
             ],
           ),
-          content: Container(
+          content: SizedBox(
             width: double.maxFinite,
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -2278,7 +2274,7 @@ class _HomePageState extends State<HomePage>
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.pop(context, recipe),
               );
-            }).toList(),
+            }),
           ],
         ),
         actions: [

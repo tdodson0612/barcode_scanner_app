@@ -308,9 +308,7 @@ class MessagingService {
           
           if (isRelevant) {
             // Get last message
-            if (lastMessage == null) {
-              lastMessage = msg;
-            }
+            lastMessage ??= msg;
             
             // ✅ FIXED: Check for boolean false instead of integer 0
             // Also handle case where database might return integer 0

@@ -28,7 +28,7 @@ class DiseaseTypeSelector extends StatelessWidget {
             border: Border.all(color: Colors.grey.shade300),
           ),
           child: DropdownButtonFormField<String>(
-            value: currentValue.isEmpty 
+            initialValue: currentValue.isEmpty 
                 ? DiseaseNutritionProfile.OTHER 
                 : currentValue,
             decoration: const InputDecoration(

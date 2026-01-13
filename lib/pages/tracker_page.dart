@@ -475,7 +475,7 @@ class _TrackerPageState extends State<TrackerPage> {
                   SizedBox(width: 8),
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      value: heightUnit,
+                      initialValue: heightUnit,
                       decoration: InputDecoration(
                         border: OutlineInputBorder(),
                       ),
@@ -669,7 +669,7 @@ class _TrackerPageState extends State<TrackerPage> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    value: _weightUnit,
+                    initialValue: _weightUnit,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                     ),
@@ -738,7 +738,7 @@ class _TrackerPageState extends State<TrackerPage> {
                 Switch(
                   value: _weightVisible,
                   onChanged: (_) => _toggleWeightVisibility(),
-                  activeColor: Colors.green,
+                  activeThumbColor: Colors.green,
                 ),
               ],
             ),
@@ -767,7 +767,7 @@ class _TrackerPageState extends State<TrackerPage> {
                   Switch(
                     value: _weightLossVisible,
                     onChanged: (_) => _toggleWeightLossVisibility(),
-                    activeColor: Colors.green,
+                    activeThumbColor: Colors.green,
                   ),
                 ],
               ),
@@ -885,7 +885,7 @@ class _TrackerPageState extends State<TrackerPage> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    value: _exerciseUnit,
+                    initialValue: _exerciseUnit,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                     ),
@@ -947,7 +947,7 @@ class _TrackerPageState extends State<TrackerPage> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    value: _waterUnit,
+                    initialValue: _waterUnit,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                     ),

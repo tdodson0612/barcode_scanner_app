@@ -1,11 +1,10 @@
 // lib/services/profile_service.dart
 // Handles user profile creation, updates, premium status, and picture getters
 
-import 'dart:convert';
 import '../config/app_config.dart';
 
 import 'database_service_core.dart';
-import 'achievements_service.dart'; // awardBadge
+// awardBadge
 import 'profile_data_access.dart'; // NEW: replaces all AuthService/profile DB loops
 
 

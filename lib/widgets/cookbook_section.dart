@@ -5,7 +5,7 @@ import '../services/cookbook_service.dart';
 import '../config/app_config.dart';
 
 class CookbookSection extends StatefulWidget {
-  const CookbookSection({Key? key}) : super(key: key);
+  const CookbookSection({super.key});
 
   @override
   State<CookbookSection> createState() => _CookbookSectionState();
@@ -417,7 +417,7 @@ class _CookbookSectionState extends State<CookbookSection> {
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       subtitle: Text(
-                        recipe.ingredients.split(',').take(2).join(', ') + '...',
+                        '${recipe.ingredients.split(',').take(2).join(', ')}...',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),

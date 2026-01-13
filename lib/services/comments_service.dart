@@ -1,9 +1,7 @@
 // lib/services/comments_service.dart
 // Handles all recipe comment operations, likes, reports, and lookups.
 
-import 'dart:convert';
 
-import '../config/app_config.dart';
 
 import 'database_service_core.dart';     // workerQuery + caching
 

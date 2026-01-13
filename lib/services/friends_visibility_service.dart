@@ -3,7 +3,6 @@
 
 import '../config/app_config.dart';
 import 'database_service_core.dart';
-import 'auth_service.dart';
 import 'profile_service.dart';
 
 class FriendsVisibilityService {

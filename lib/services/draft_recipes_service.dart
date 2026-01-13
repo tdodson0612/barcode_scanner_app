@@ -81,7 +81,7 @@ class DraftRecipesService {
         return [];
       }
 
-      return (result as List)
+      return (result)
           .map((json) => DraftRecipe.fromJson(json as Map<String, dynamic>))
           .toList();
     } catch (e) {

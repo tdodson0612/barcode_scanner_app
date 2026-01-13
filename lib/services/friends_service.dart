@@ -2,7 +2,6 @@
 // Handles friend requests, accepting, declining, removing, and visibility settings.
 // Uses ONLY Dart-side filtering because Cloudflare Worker cannot handle OR filters.
 
-import '../config/app_config.dart';
 import 'dart:convert';
 import 'database_service_core.dart';
 import 'auth_service.dart';

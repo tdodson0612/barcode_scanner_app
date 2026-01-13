@@ -12,7 +12,7 @@ import 'package:intl/intl.dart';
 import '../services/submitted_recipes_service.dart';
 
 class MyCookbookPage extends StatefulWidget {
-  const MyCookbookPage({Key? key}) : super(key: key);
+  const MyCookbookPage({super.key});
 
   @override
   _MyCookbookPageState createState() => _MyCookbookPageState();

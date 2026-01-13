@@ -307,7 +307,7 @@ class CustomIngredientsService {
         return null;
       }
 
-      return (response as List).first;
+      return (response).first;
     } catch (e) {
       AppConfig.debugPrint('❌ Error getting custom ingredient: $e');
       return null;

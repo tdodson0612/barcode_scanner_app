@@ -12,7 +12,7 @@ import '../widgets/submission_status_badge.dart';
 import 'package:intl/intl.dart';
 
 class SubmissionStatusPage extends StatefulWidget {
-  const SubmissionStatusPage({Key? key}) : super(key: key);
+  const SubmissionStatusPage({super.key});
 
   @override
   _SubmissionStatusPageState createState() => _SubmissionStatusPageState();

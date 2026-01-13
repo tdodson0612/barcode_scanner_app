@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:liver_wise/services/saved_ingredients_service.dart';
 import 'package:liver_wise/widgets/nutrition_display.dart';
 import 'package:liver_wise/models/nutrition_info.dart';
-import 'package:liver_wise/liverhealthbar.dart';
 import 'package:liver_wise/services/error_handling_service.dart';
 
 class SavedIngredientsScreen extends StatefulWidget {

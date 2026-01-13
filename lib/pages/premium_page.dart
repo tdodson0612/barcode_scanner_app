@@ -2,7 +2,6 @@
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/auth_service.dart';
 import 'package:liver_wise/services/premium_service.dart';
-import 'package:liver_wise/services/profile_service.dart';
 import 'package:liver_wise/services/scan_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';

@@ -346,7 +346,7 @@ Shared from Recipe Scanner App
         return [];
       }
 
-      return (result as List)
+      return (result)
           .map((json) => RecipeSubmission.fromJson(json as Map<String, dynamic>))
           .toList();
     } catch (e) {

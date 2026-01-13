@@ -222,7 +222,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                         style: TextStyle(fontWeight: FontWeight.bold),
                       ),
                       Text(
-                        'Saved "${name}" with ${validIngredients.length} ingredient${validIngredients.length == 1 ? '' : 's'}',
+                        'Saved "$name" with ${validIngredients.length} ingredient${validIngredients.length == 1 ? '' : 's'}',
                         style: const TextStyle(fontSize: 12),
                       ),
                     ],
@@ -1099,7 +1099,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
           Expanded(
             flex: 2,
             child: DropdownButtonFormField<String>(
-              value: ingredient.measurement,
+              initialValue: ingredient.measurement,
               decoration: InputDecoration(
                 labelText: 'Unit',
                 border: OutlineInputBorder(
@@ -1412,7 +1412,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                   // Ingredient rows
                   ..._ingredients.asMap().entries.map((entry) {
                     return _buildIngredientRow(entry.key);
-                  }).toList(),
+                  }),
                   
                   // Add ingredient button
                   const SizedBox(height: 8),
