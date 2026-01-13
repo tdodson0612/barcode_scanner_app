@@ -125,33 +125,33 @@ class FeedPostsService {
 
       AppConfig.debugPrint('📱 Loading feed for authenticated user: $userId');
 
-      // Get friend IDs
+      // Get friend IDs from friend_requests table (accepted friendships)
       final friendsResult = await DatabaseServiceCore.workerQuery(
         action: 'select',
-        table: 'friends',
+        table: 'friend_requests',
         filters: {'status': 'accepted'},
-        columns: ['user_id', 'friend_id'],
+        columns: ['sender', 'receiver'],
       );
 
       final friendIds = <String>{userId}; // Include self
       
       if (friendsResult != null && (friendsResult as List).isNotEmpty) {
-        AppConfig.debugPrint('👥 Found ${(friendsResult as List).length} friendships');
+        AppConfig.debugPrint('👥 Found ${(friendsResult as List).length} accepted friendships');
         
         for (final friendship in friendsResult) {
-          final user1 = friendship['user_id']?.toString();
-          final user2 = friendship['friend_id']?.toString();
+          final sender = friendship['sender']?.toString();
+          final receiver = friendship['receiver']?.toString();
           
-          AppConfig.debugPrint('  Friendship: $user1 <-> $user2');
+          AppConfig.debugPrint('  Friendship: $sender <-> $receiver');
           
-          if (user1 == userId && user2 != null) {
-            friendIds.add(user2);
-          } else if (user2 == userId && user1 != null) {
-            friendIds.add(user1);
+          if (sender == userId && receiver != null) {
+            friendIds.add(receiver);
+          } else if (receiver == userId && sender != null) {
+            friendIds.add(sender);
           }
         }
       } else {
-        AppConfig.debugPrint('👥 No friends found');
+        AppConfig.debugPrint('👥 No accepted friend requests found');
       }
 
       AppConfig.debugPrint('👥 Final friend IDs (including self): ${friendIds.length} - $friendIds');
