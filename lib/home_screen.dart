@@ -1776,22 +1776,26 @@ class _HomePageState extends State<HomePage>
 
                         Navigator.pop(context);
                         
-                        _loadFeed();
+                        await _loadFeed();
 
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Post created!'),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Post created!'),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                        }
                       } catch (e) {
                         setState(() => isPosting = false);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Failed to create post'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to create post: ${e.toString()}'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
                       }
                     },
               style: ElevatedButton.styleFrom(
@@ -2932,28 +2936,26 @@ class _HomePageState extends State<HomePage>
             ),
 
             Container(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Colors.white.withAlpha((0.9 * 255).toInt()),
                 borderRadius: BorderRadius.circular(15),
               ),
               child: Column(
                 children: [
-                  const Icon(Icons.eco, size: 48, color: Colors.green),
-                  const SizedBox(height: 12),
                   const Text(
                     'Welcome to Liverwise',
                     style: TextStyle(
-                      fontSize: 24,
+                      fontSize: 18,
                       fontWeight: FontWeight.bold,
                       color: Colors.black87,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
                     'Scan products, look up foods, and get nutrition insights!',
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: 13,
                       color: Colors.grey.shade600,
                     ),
                     textAlign: TextAlign.center,
@@ -3745,31 +3747,6 @@ class _HomePageState extends State<HomePage>
         currentPage: 'home',
       ),
       body: _showInitialView ? _buildInitialView() : _buildScanningView(),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          FloatingActionButton(
-            heroTag: 'debug1',
-            mini: true,
-            backgroundColor: Colors.orange,
-            child: const Icon(Icons.bug_report, color: Colors.white),
-            onPressed: _debugCheckAllCaches,
-            tooltip: 'Check Caches',
-          ),
-          const SizedBox(height: 8),
-          FloatingActionButton(
-            heroTag: 'debug2',
-            mini: true,
-            backgroundColor: Colors.red,
-            child: const Icon(Icons.delete_sweep, color: Colors.white),
-            onPressed: () async {
-              await _debugClearAllCaches();
-              setState(() {});
-            },
-            tooltip: 'Clear All Caches',
-          ),
-        ],
-      ),
     );
   }
 }
