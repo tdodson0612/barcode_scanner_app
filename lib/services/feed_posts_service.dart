@@ -1,4 +1,4 @@
-// lib/services/feed_posts_service.dart
+// lib/services/feed_posts_service.dart - FIXED VERSION
 import 'database_service_core.dart';
 import 'auth_service.dart';
 import '../config/app_config.dart';
@@ -136,7 +136,41 @@ class FeedPostsService {
     }
   }
 
-  /// 🔥 NEW: Get feed posts only from friends (Facebook-style)
+  /// 🔥 DEBUG: Get ALL posts (no filtering) - for testing
+  static Future<List<Map<String, dynamic>>> getAllPostsDebug({
+    int limit = 20,
+  }) async {
+    try {
+      AppConfig.debugPrint('🔍 DEBUG: Fetching ALL posts...');
+      
+      final result = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'feed_posts',
+        orderBy: 'created_at',
+        ascending: false,
+        limit: limit,
+      );
+
+      if (result == null || (result as List).isEmpty) {
+        AppConfig.debugPrint('❌ No posts found in database at all');
+        return [];
+      }
+
+      final posts = List<Map<String, dynamic>>.from(result);
+      AppConfig.debugPrint('✅ Found ${posts.length} total posts in database');
+      
+      for (final post in posts) {
+        AppConfig.debugPrint('   - Post: ${post['id']} by user ${post['user_id']} (${post['username']})');
+      }
+
+      return posts;
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error in getAllPostsDebug: $e');
+      return [];
+    }
+  }
+
+  /// 🔥 FIXED: Get feed posts only from friends (Facebook-style)
   static Future<List<Map<String, dynamic>>> getFeedPostsFromFriends({
     int limit = 20,
     int offset = 0,
@@ -149,7 +183,9 @@ class FeedPostsService {
         return [];
       }
 
-      // First, get list of friend IDs
+      AppConfig.debugPrint('📱 Loading feed for user: $userId');
+
+      // 🔥 FIX: Get list of friend IDs first
       final friendsResult = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'friends',
@@ -159,70 +195,80 @@ class FeedPostsService {
         columns: ['user_id', 'friend_id'],
       );
 
-      if (friendsResult == null || (friendsResult as List).isEmpty) {
-        AppConfig.debugPrint('ℹ️ No friends found, showing only own posts');
-        
-        // Show only user's own posts if they have no friends
-        final ownPostsResult = await DatabaseServiceCore.workerQuery(
-          action: 'select',
-          table: 'feed_posts',
-          filters: {'user_id': userId},
-          orderBy: 'created_at',
-          ascending: false,
-          limit: limit,
-        );
-
-        if (ownPostsResult == null || (ownPostsResult as List).isEmpty) {
-          return [];
-        }
-
-        return List<Map<String, dynamic>>.from(ownPostsResult);
-      }
-
-      // Extract friend IDs (both directions of friendship)
-      final friendIds = <String>{userId}; // Include own posts
+      // Build friend ID set (including self)
+      final friendIds = <String>{userId}; // Always include own posts
       
-      for (final friendship in friendsResult) {
-        final user1 = friendship['user_id'] as String;
-        final user2 = friendship['friend_id'] as String;
-        
-        if (user1 == userId) {
-          friendIds.add(user2);
-        } else if (user2 == userId) {
-          friendIds.add(user1);
+      if (friendsResult != null && (friendsResult as List).isNotEmpty) {
+        for (final friendship in friendsResult) {
+          final user1 = friendship['user_id']?.toString();
+          final user2 = friendship['friend_id']?.toString();
+          
+          // Add friend IDs based on who the current user is in the relationship
+          if (user1 == userId && user2 != null) {
+            friendIds.add(user2);
+          } else if (user2 == userId && user1 != null) {
+            friendIds.add(user1);
+          }
         }
       }
 
-      AppConfig.debugPrint('👥 Loading feed from ${friendIds.length} friends (including self)');
+      AppConfig.debugPrint('👥 Friend IDs (including self): ${friendIds.length} - ${friendIds.toList()}');
 
-      // Get posts from all friends
+      // 🔥 FIX: Get ALL posts (we'll filter in memory if needed)
       final postsResult = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'feed_posts',
         orderBy: 'created_at',
         ascending: false,
-        limit: limit,
+        limit: 200, // Get more posts to ensure we have enough after filtering
       );
 
       if (postsResult == null || (postsResult as List).isEmpty) {
+        AppConfig.debugPrint('ℹ️ No posts found in database');
         return [];
       }
 
-      // Filter posts to only include friends
-      final friendPosts = (postsResult as List<Map<String, dynamic>>)
-          .where((post) => friendIds.contains(post['user_id']))
-          .toList();
+      AppConfig.debugPrint('📊 Total posts in database: ${(postsResult as List).length}');
 
-      AppConfig.debugPrint('✅ Loaded ${friendPosts.length} posts from friends');
+      // 🔥 FIX: Filter posts to only include friends
+      final allPosts = List<Map<String, dynamic>>.from(postsResult);
+      
+      // Log all post user_ids for debugging
+      final postUserIds = allPosts.map((p) => p['user_id']?.toString() ?? 'null').toSet();
+      AppConfig.debugPrint('📝 Unique post user_ids: ${postUserIds.toList()}');
+      
+      final friendPosts = allPosts.where((post) {
+        final postUserId = post['user_id']?.toString();
+        final isIncluded = postUserId != null && friendIds.contains(postUserId);
+        
+        if (!isIncluded && postUserId != null) {
+          AppConfig.debugPrint('🚫 Filtering out post from: $postUserId (not in friend list)');
+        }
+        
+        return isIncluded;
+      }).toList();
 
-      return friendPosts;
+      // Apply limit
+      final limitedPosts = friendPosts.take(limit).toList();
+
+      AppConfig.debugPrint('✅ Loaded ${limitedPosts.length} posts from friends (filtered from ${allPosts.length} total)');
+
+      if (limitedPosts.isEmpty) {
+        AppConfig.debugPrint('⚠️ No posts from friends found. Debug info:');
+        AppConfig.debugPrint('   - Friend IDs: $friendIds');
+        AppConfig.debugPrint('   - Post user IDs: $postUserIds');
+        AppConfig.debugPrint('   - Intersection: ${friendIds.intersection(postUserIds)}');
+      }
+
+      return limitedPosts;
     } catch (e) {
       AppConfig.debugPrint('❌ Error loading friends feed: $e');
+      AppConfig.debugPrint('Stack trace: ${StackTrace.current}');
       return [];
     }
   }
 
-  /// 🔥 NEW: Report a post for harassment/inappropriate content
+  /// 🔥 Report a post for harassment/inappropriate content
   static Future<void> reportPost({
     required String postId,
     required String reason,

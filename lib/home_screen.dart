@@ -1602,7 +1602,7 @@ class _HomePageState extends State<HomePage>
 
     try {
       // 🔥 UPDATED: Load friends-only feed
-      final posts = await FeedPostsService.getFeedPostsFromFriends(limit: 20);
+      final posts = await FeedPostsService.getAllPostsDebug(limit: 20);
       
       if (mounted) {
         setState(() {
