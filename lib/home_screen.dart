@@ -2715,6 +2715,41 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  Future<void> _deletePost(Map<String, dynamic> post) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Post'),
+        content: const Text('Are you sure you want to delete this post?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await FeedPostsService.deletePost(post['id']);
+      setState(() {
+        // Trigger rebuild to refresh feed
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to delete post')),
+      );
+    }
+  }
+
   Widget _buildFeedPost(Map<String, dynamic> post) {
     final currentUserId = AuthService.currentUserId;
     final isOwnPost = post['user_id'] == currentUserId;
@@ -2767,29 +2802,41 @@ class _HomePageState extends State<HomePage>
                   ),
                 ),
                 // 🔥 NEW: Report button (only show on other people's posts)
-                if (!isOwnPost)
-                  PopupMenuButton<String>(
-                    icon: Icon(Icons.more_horiz, color: Colors.grey.shade600),
-                    onSelected: (value) {
-                      if (value == 'report') {
-                        _reportPost(post);
-                      }
-                    },
-                    itemBuilder: (context) => [
+                PopupMenuButton<String>(
+                  icon: Icon(Icons.more_horiz, color: Colors.grey.shade600),
+                  onSelected: (value) {
+                    if (value == 'report') {
+                      _reportPost(post);
+                    } else if (value == 'delete') {
+                      _deletePost(post);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    if (!isOwnPost)
                       PopupMenuItem(
                         value: 'report',
                         child: Row(
-                          children: [
+                          children: const [
                             Icon(Icons.flag, color: Colors.red, size: 20),
                             SizedBox(width: 8),
                             Text('Report Post'),
                           ],
                         ),
                       ),
-                    ],
-                  )
-                else
-                  Icon(Icons.more_horiz, color: Colors.grey.shade600),
+                    if (isOwnPost)
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: const [
+                            Icon(Icons.delete, color: Colors.red, size: 20),
+                            SizedBox(width: 8),
+                            Text('Delete Post'),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+
               ],
             ),
           ),
