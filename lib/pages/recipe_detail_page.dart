@@ -329,14 +329,52 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
     }
   }
 
-  // 🔥 NEW: Share recipe to feed
+  // 🔥 NEW: Share recipe to feed with visibility selection
   Future<void> _shareRecipeToFeed() async {
+    // Show visibility selection dialog
+    final visibility = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Share Recipe'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Who can see this post?'),
+            SizedBox(height: 16),
+            ListTile(
+              leading: Icon(Icons.public, color: Colors.blue),
+              title: Text('Public'),
+              subtitle: Text('Anyone can see this'),
+              onTap: () => Navigator.pop(context, 'public'),
+            ),
+            ListTile(
+              leading: Icon(Icons.people, color: Colors.green),
+              title: Text('Friends Only'),
+              subtitle: Text('Only your friends can see this'),
+              onTap: () => Navigator.pop(context, 'friends'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    // If user cancelled, do nothing
+    if (visibility == null) return;
+
     try {
       await FeedPostsService.shareRecipeToFeed(
         recipeName: widget.recipeName,
         description: widget.description,
         ingredients: widget.ingredients,
         directions: widget.directions,
+        visibility: visibility,
       );
 
       if (mounted) {
@@ -347,7 +385,9 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
                 Icon(Icons.check_circle, color: Colors.white),
                 SizedBox(width: 12),
                 Expanded(
-                  child: Text('Recipe shared to your feed!'),
+                  child: Text(
+                    'Recipe shared to your feed (${visibility == 'public' ? 'Public' : 'Friends Only'})!'
+                  ),
                 ),
               ],
             ),

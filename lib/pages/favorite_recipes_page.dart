@@ -349,9 +349,10 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     try {
       await FeedPostsService.shareRecipeToFeed(
         recipeName: recipe.recipeName,
-        description: recipe.description,
+        description: 'Shared from favorites',
         ingredients: recipe.ingredients,
         directions: recipe.directions,
+        visibility: 'public', // or show a dialog to let user choose
       );
 
       if (mounted) {

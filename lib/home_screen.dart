@@ -282,6 +282,9 @@ class _HomePageState extends State<HomePage>
   bool _showInitialView = true;
   NutritionInfo? _currentNutrition;
 
+  String _defaultPostVisibility = 'public'; // Default visibility for new posts
+
+
   late final PremiumGateController _premiumController;
 
   bool _isPremium = false;
@@ -1601,8 +1604,8 @@ class _HomePageState extends State<HomePage>
     setState(() => _isLoadingFeed = true);
 
     try {
-      // 🔥 UPDATED: Load friends-only feed
-      final posts = await FeedPostsService.getAllPostsDebug(limit: 20);
+      // 🔥 NEW: Use the visibility-aware feed method
+      final posts = await FeedPostsService.getFeedPosts(limit: 20);
       
       if (mounted) {
         setState(() {
@@ -1718,6 +1721,7 @@ class _HomePageState extends State<HomePage>
   void _showPostDialog() {
     final TextEditingController postController = TextEditingController();
     bool isPosting = false;
+    String selectedVisibility = _defaultPostVisibility; // Use saved preference
 
     showDialog(
       context: context,
@@ -1732,20 +1736,137 @@ class _HomePageState extends State<HomePage>
           ),
           content: Container(
             width: double.maxFinite,
-            child: TextField(
-              controller: postController,
-              maxLines: 8,
-              autofocus: true,
-              decoration: InputDecoration(
-                hintText: "What's on your mind?",
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Post text field
+                TextField(
+                  controller: postController,
+                  maxLines: 8,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: "What's on your mind?",
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.green, width: 2),
+                    ),
+                  ),
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.green, width: 2),
+                
+                SizedBox(height: 16),
+                
+                // Visibility dropdown
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        selectedVisibility == 'public' 
+                          ? Icons.public 
+                          : Icons.people,
+                        size: 20,
+                        color: Colors.grey.shade700,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        'Visible to:',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade700,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: DropdownButton<String>(
+                          value: selectedVisibility,
+                          isExpanded: true,
+                          underline: SizedBox(),
+                          items: [
+                            DropdownMenuItem(
+                              value: 'public',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.public, size: 18, color: Colors.blue),
+                                  SizedBox(width: 8),
+                                  Text('Everyone (Public)'),
+                                ],
+                              ),
+                            ),
+                            DropdownMenuItem(
+                              value: 'friends',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.people, size: 18, color: Colors.green),
+                                  SizedBox(width: 8),
+                                  Text('Friends Only'),
+                                ],
+                              ),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() => selectedVisibility = value);
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+                
+                SizedBox(height: 8),
+                
+                // Visibility explanation
+                Container(
+                  padding: EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: selectedVisibility == 'public' 
+                      ? Colors.blue.shade50 
+                      : Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: selectedVisibility == 'public' 
+                        ? Colors.blue.shade200 
+                        : Colors.green.shade200,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        size: 16,
+                        color: selectedVisibility == 'public' 
+                          ? Colors.blue.shade700 
+                          : Colors.green.shade700,
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          selectedVisibility == 'public'
+                            ? 'Anyone can see this post'
+                            : 'Only your friends can see this post',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: selectedVisibility == 'public' 
+                              ? Colors.blue.shade900 
+                              : Colors.green.shade900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
           actions: [
@@ -1772,16 +1893,23 @@ class _HomePageState extends State<HomePage>
                       try {
                         await FeedPostsService.createTextPost(
                           content: postController.text.trim(),
+                          visibility: selectedVisibility,
                         );
+
+                        // Save preference for next time
+                        _defaultPostVisibility = selectedVisibility;
 
                         Navigator.pop(context);
                         
                         await _loadFeed();
 
                         if (mounted) {
+                          final visibilityText = selectedVisibility == 'public' 
+                            ? 'publicly' 
+                            : 'to friends only';
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text('Post created!'),
+                              content: Text('Post shared $visibilityText!'),
                               backgroundColor: Colors.green,
                             ),
                           );
@@ -2753,6 +2881,7 @@ class _HomePageState extends State<HomePage>
   Widget _buildFeedPost(Map<String, dynamic> post) {
     final currentUserId = AuthService.currentUserId;
     final isOwnPost = post['user_id'] == currentUserId;
+    final visibility = post['visibility']?.toString() ?? 'public';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -2784,12 +2913,55 @@ class _HomePageState extends State<HomePage>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        post['username'] ?? 'Anonymous',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
+                      Row(
+                        children: [
+                          Text(
+                            post['username'] ?? 'Anonymous',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          // Visibility badge
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: visibility == 'public' 
+                                ? Colors.blue.shade50 
+                                : Colors.green.shade50,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: visibility == 'public' 
+                                  ? Colors.blue.shade200 
+                                  : Colors.green.shade200,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  visibility == 'public' ? Icons.public : Icons.people,
+                                  size: 10,
+                                  color: visibility == 'public' 
+                                    ? Colors.blue.shade700 
+                                    : Colors.green.shade700,
+                                ),
+                                SizedBox(width: 3),
+                                Text(
+                                  visibility == 'public' ? 'Public' : 'Friends',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w600,
+                                    color: visibility == 'public' 
+                                      ? Colors.blue.shade700 
+                                      : Colors.green.shade700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                       Text(
                         _formatPostTime(post['created_at']),
@@ -2801,7 +2973,6 @@ class _HomePageState extends State<HomePage>
                     ],
                   ),
                 ),
-                // 🔥 NEW: Report button (only show on other people's posts)
                 PopupMenuButton<String>(
                   icon: Icon(Icons.more_horiz, color: Colors.grey.shade600),
                   onSelected: (value) {
@@ -2836,7 +3007,6 @@ class _HomePageState extends State<HomePage>
                       ),
                   ],
                 ),
-
               ],
             ),
           ),
@@ -3118,7 +3288,7 @@ class _HomePageState extends State<HomePage>
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.feed, color: Colors.green, size: 24),
+                      Icon(Icons.public, color: Colors.green, size: 24),
                       const SizedBox(width: 12),
                       const Text(
                         "Community Feed",
@@ -3127,11 +3297,36 @@ class _HomePageState extends State<HomePage>
                           fontWeight: FontWeight.bold,
                         ),
                       ),
+                      const Spacer(),
+                      // 🌍 Public indicator badge
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.blue.shade200),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.public, size: 14, color: Colors.blue.shade700),
+                            SizedBox(width: 4),
+                            Text(
+                              'Public',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.blue.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
                   
-                  // 🔥 NEW: Post Composer
+                  // Post Composer
                   _buildPostComposer(),
                   const SizedBox(height: 16),
                   
@@ -3159,7 +3354,7 @@ class _HomePageState extends State<HomePage>
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              'Be the first to share a recipe!',
+                              'Be the first to share something!',
                               style: TextStyle(
                                 fontSize: 14,
                                 color: Colors.grey.shade500,
@@ -3176,9 +3371,18 @@ class _HomePageState extends State<HomePage>
                     
                   if (_feedPosts.length > 3)
                     Center(
-                      child: TextButton(
-                        onPressed: () {},
-                        child: const Text('See More'),
+                      child: TextButton.icon(
+                        onPressed: () {
+                          // TODO: Navigate to full feed page
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Full feed page coming soon!'),
+                              backgroundColor: Colors.blue,
+                            ),
+                          );
+                        },
+                        icon: Icon(Icons.arrow_forward),
+                        label: Text('View All Posts (${_feedPosts.length})'),
                       ),
                     ),
                 ],
