@@ -28,6 +28,8 @@ import 'widgets/auto_barcode_scanner.dart';
 import 'widgets/day7_congrats_popup.dart';
 import 'services/tracker_service.dart';
 import 'package:liver_wise/services/feed_posts_service.dart';
+import 'package:liver_wise/models/draft_recipe.dart';
+import 'package:liver_wise/services/draft_recipes_service.dart';
 
 class Recipe {
   final String title;
@@ -2787,47 +2789,77 @@ class _HomePageState extends State<HomePage>
                 ),
                 const SizedBox(height: 12),
                 
-                Row(
+                // 🔥 UPDATED: Button layout with new "Save as Template" button
+                Column(
                   children: [
-                    Expanded(
-                      child: PremiumGate(
-                        feature: PremiumFeature.favoriteRecipes,
-                        featureName: 'Favorite Recipes',
-                        child: ElevatedButton.icon(
-                          onPressed: () => _toggleFavoriteRecipe(recipe),
-                          icon: const Icon(Icons.favorite),
-                          label: const Text('Favorite'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                            foregroundColor: Colors.white,
+                    // Row 1: Favorite and Cookbook
+                    Row(
+                      children: [
+                        Expanded(
+                          child: PremiumGate(
+                            feature: PremiumFeature.favoriteRecipes,
+                            featureName: 'Favorite Recipes',
+                            child: ElevatedButton.icon(
+                              onPressed: () => _toggleFavoriteRecipe(recipe),
+                              icon: const Icon(Icons.favorite, size: 16),
+                              label: const Text('Favorite', style: TextStyle(fontSize: 12)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white,
+                                padding: EdgeInsets.symmetric(vertical: 8),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    
-                    AddToCookbookButton(
-                      recipeName: recipe.title,
-                      ingredients: recipe.ingredients.join(', '),
-                      directions: recipe.instructions,
-                      compact: true,
-                    ),
-                    const SizedBox(width: 8),
-                    
-                    Expanded(
-                      child: PremiumGate(
-                        feature: PremiumFeature.groceryList,
-                        featureName: 'Grocery List',
-                        child: ElevatedButton.icon(
-                          onPressed: () => _addRecipeIngredientsToGroceryList(recipe),
-                          icon: const Icon(Icons.add_shopping_cart),
-                          label: const Text('Grocery'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
+                        const SizedBox(width: 8),
+                        
+                        Expanded(
+                          child: AddToCookbookButton(
+                            recipeName: recipe.title,
+                            ingredients: recipe.ingredients.join(', '),
+                            directions: recipe.instructions,
+                            compact: true,
                           ),
                         ),
-                      ),
+                      ],
+                    ),
+                    
+                    const SizedBox(height: 8),
+                    
+                    // Row 2: Save as Template and Grocery List
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _saveRecipeAsTemplate(recipe),
+                            icon: const Icon(Icons.save_outlined, size: 16),
+                            label: const Text('Save Template', style: TextStyle(fontSize: 12)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue.shade700,
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: 8),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        
+                        Expanded(
+                          child: PremiumGate(
+                            feature: PremiumFeature.groceryList,
+                            featureName: 'Grocery List',
+                            child: ElevatedButton.icon(
+                              onPressed: () => _addRecipeIngredientsToGroceryList(recipe),
+                              icon: const Icon(Icons.add_shopping_cart, size: 16),
+                              label: const Text('Grocery', style: TextStyle(fontSize: 12)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green,
+                                foregroundColor: Colors.white,
+                                padding: EdgeInsets.symmetric(vertical: 8),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -3995,5 +4027,235 @@ class _HomePageState extends State<HomePage>
       ),
       body: _showInitialView ? _buildInitialView() : _buildScanningView(),
     );
+  }
+  Future<void> _saveRecipeAsTemplate(Recipe recipe) async {
+    try {
+      final userId = AuthService.currentUserId;
+      if (userId == null) {
+        if (mounted) {
+          ErrorHandlingService.showSimpleError(
+            context,
+            'Please log in to save recipes',
+          );
+        }
+        return;
+      }
+
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: Container(
+            padding: EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Saving recipe template...'),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      // Convert Recipe ingredients (strings) to RecipeIngredient objects
+      final recipeIngredients = recipe.ingredients.map((ingredientText) {
+        // Parse ingredient text to extract quantity, unit, and name
+        final parsed = _parseIngredientText(ingredientText);
+        
+        return RecipeIngredient(
+          productName: parsed['name']!,
+          quantity: double.tryParse(parsed['quantity']!) ?? 1.0,
+          unit: parsed['unit']!,
+          source: 'template',
+        );
+      }).toList();
+
+      // Create draft recipe
+      final draftRecipe = DraftRecipe(
+        userId: userId,
+        title: recipe.title,
+        description: recipe.description,
+        ingredients: recipeIngredients,
+        instructions: recipe.instructions,
+        servings: 1,
+        isLiverFriendly: true,
+      );
+
+      // Save to database
+      final draftRecipeId = await DraftRecipesService.createDraftRecipe(draftRecipe);
+
+      // Close loading dialog
+      if (mounted) {
+        Navigator.pop(context);
+      }
+
+      // Show success dialog with options
+      if (mounted) {
+        final shouldEdit = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.green),
+                SizedBox(width: 12),
+                Expanded(child: Text('Recipe Saved!')),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Recipe "${recipe.title}" has been saved as a template.',
+                  style: TextStyle(fontSize: 14),
+                ),
+                SizedBox(height: 16),
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'You can now customize ingredients, add nutrition data, and submit to the community!',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.blue.shade900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text('View Later'),
+              ),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context, true),
+                icon: Icon(Icons.edit),
+                label: Text('Edit Now'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        );
+
+        if (shouldEdit == true && mounted) {
+          // Navigate to submit recipe page with the draft pre-loaded
+          Navigator.pushNamed(
+            context,
+            '/submit-recipe',
+            arguments: {
+              'draftRecipeId': draftRecipeId,
+              'fromTemplate': true,
+            },
+          );
+        }
+      }
+    } catch (e) {
+      // Close loading dialog if still open
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Failed to save recipe template',
+          onRetry: () => _saveRecipeAsTemplate(recipe),
+        );
+      }
+    }
+  }
+
+  // 🔥 NEW: Parse ingredient text into quantity, unit, and name
+  Map<String, String> _parseIngredientText(String text) {
+    // Default values
+    String quantity = '1';
+    String unit = 'piece';
+    String name = text.trim();
+
+    // Common units to look for
+    final units = [
+      'cup', 'cups',
+      'tbsp', 'tablespoon', 'tablespoons',
+      'tsp', 'teaspoon', 'teaspoons',
+      'oz', 'ounce', 'ounces',
+      'lb', 'pound', 'pounds',
+      'g', 'gram', 'grams',
+      'kg', 'kilogram', 'kilograms',
+      'ml', 'milliliter', 'milliliters',
+      'l', 'liter', 'liters',
+      'piece', 'pieces',
+      'slice', 'slices',
+      'pinch', 'dash',
+      'clove', 'cloves',
+      'can', 'cans',
+      'package', 'packages',
+    ];
+
+    // Try to parse "number unit ingredient" pattern
+    final words = text.trim().split(RegExp(r'\s+'));
+    
+    if (words.length >= 2) {
+      // Check if first word is a number
+      final potentialQuantity = double.tryParse(words[0]);
+      if (potentialQuantity != null) {
+        quantity = words[0];
+        
+        // Check if second word is a unit
+        final potentialUnit = words[1].toLowerCase();
+        if (units.contains(potentialUnit)) {
+          unit = potentialUnit;
+          // Rest is the ingredient name
+          name = words.skip(2).join(' ');
+        } else {
+          // No unit found, everything after quantity is the name
+          name = words.skip(1).join(' ');
+        }
+      } else if (words[0].toLowerCase() == 'a' || words[0].toLowerCase() == 'an') {
+        // Handle "a cup of flour" or "an onion"
+        quantity = '1';
+        if (words.length >= 2 && units.contains(words[1].toLowerCase())) {
+          unit = words[1].toLowerCase();
+          name = words.skip(2).join(' ');
+        } else {
+          name = words.skip(1).join(' ');
+        }
+      }
+    }
+
+    // Clean up the name (remove "of" if present at start)
+    if (name.toLowerCase().startsWith('of ')) {
+      name = name.substring(3);
+    }
+
+    return {
+      'quantity': quantity,
+      'unit': unit,
+      'name': name.trim(),
+    };
   }
 }
