@@ -1,5 +1,4 @@
-// lib/widgets/app_drawer.dart - WITH DEBUG BUTTON
-// ✅ Added debug button for badge diagnostics
+// lib/widgets/app_drawer.dart - FIXED: Removed duplicate Premium sections and debug button
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -569,44 +568,6 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
                 }
               },
             ),
-            
-            ListTile(
-              leading: Icon(
-                Icons.star,
-                color: _controller.isPremium ? Colors.amber : Colors.grey,
-              ),
-              title: Text(
-                _controller.isPremium ? 'Premium Active' : 'Upgrade to Premium',
-                style: TextStyle(
-                  color: _controller.isPremium ? Colors.amber : null,
-                  fontWeight: _controller.isPremium ? FontWeight.bold : FontWeight.normal,
-                ),
-              ),
-              trailing: _controller.isPremium 
-                  ? Icon(Icons.check_circle, color: Colors.green)
-                  : Icon(Icons.arrow_forward_ios, size: 16),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, '/purchase');
-              },
-            ),
-            
-            Divider(),
-            
-            // 🐛 DEBUG BUTTON (TEMPORARY)
-            ListTile(
-              leading: Icon(Icons.bug_report, color: Colors.orange),
-              title: Text(
-                '🐛 Debug Badges',
-                style: TextStyle(color: Colors.orange, fontWeight: FontWeight.w600),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, '/badge-debug');
-              },
-            ),
-            
-            Divider(),
             
             ListTile(
               leading: Icon(

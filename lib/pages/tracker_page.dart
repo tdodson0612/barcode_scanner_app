@@ -1,5 +1,5 @@
 // lib/pages/tracker_page.dart
-
+// Updated with unit dropdowns and improved height handling
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/tracker_service.dart';
@@ -20,32 +20,29 @@ class TrackerPage extends StatefulWidget {
 }
 
 class _TrackerPageState extends State<TrackerPage> {
-  // Premium controller
   late final PremiumGateController _premiumController;
   bool _isPremium = false;
-  
-  // Current date being viewed
+
   DateTime _selectedDate = DateTime.now();
-  
-  // Current entry data
   TrackerEntry? _currentEntry;
   String? _diseaseType;
   double? _userHeight;
   bool _weightVisible = false;
   bool _weightLossVisible = false;
   int _currentStreak = 0;
-  
-  // Loading states
+
   bool _isLoading = true;
   bool _isSaving = false;
-  
-  // Form controllers
+
   final TextEditingController _exerciseController = TextEditingController();
   final TextEditingController _waterController = TextEditingController();
   final TextEditingController _weightController = TextEditingController();
-  final TextEditingController _heightController = TextEditingController();
-  
-  // Meal tracking
+
+  // Unit selections
+  String _weightUnit = 'kg';
+  String _exerciseUnit = 'minutes';
+  String _waterUnit = 'cups';
+
   List<Map<String, dynamic>> _meals = [];
 
   @override
@@ -61,7 +58,6 @@ class _TrackerPageState extends State<TrackerPage> {
     _exerciseController.dispose();
     _waterController.dispose();
     _weightController.dispose();
-    _heightController.dispose();
     super.dispose();
   }
 
@@ -79,17 +75,11 @@ class _TrackerPageState extends State<TrackerPage> {
     }
   }
 
-  // ========================================
-  // DISCLAIMER HANDLING
-  // ========================================
-
   Future<void> _checkDisclaimerAndLoad() async {
     final accepted = await TrackerService.hasAcceptedDisclaimer();
-    
     if (!accepted && mounted) {
       await _showDisclaimer();
     }
-    
     if (mounted) {
       await _loadData();
     }
@@ -153,7 +143,7 @@ class _TrackerPageState extends State<TrackerPage> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              Navigator.pop(context); // Exit tracker page
+              Navigator.pop(context);
             },
             child: const Text('Decline'),
           ),
@@ -175,33 +165,26 @@ class _TrackerPageState extends State<TrackerPage> {
     );
   }
 
-  // ========================================
-  // DATA LOADING
-  // ========================================
-
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
-    
+
     try {
       final userId = AuthService.currentUserId;
       if (userId == null) {
         throw Exception('User not logged in');
       }
-      
-      // Load user settings
+
       final diseaseType = await ProfileService.getDiseaseType(userId);
       final height = await ProfileService.getHeight(userId);
       final weightVisible = await ProfileService.getWeightVisibility(userId);
       final weightLossVisible = await ProfileService.getWeightLossVisibility(userId);
       final streak = await TrackerService.getWeightStreak(userId);
-      
-      // Auto-fill missing weights to maintain streak
+
       await TrackerService.autoFillMissingWeights(userId);
-      
-      // Load entry for selected date
+
       final dateString = _selectedDate.toString().split(' ')[0];
       final entry = await TrackerService.getEntryForDate(userId, dateString);
-      
+
       if (mounted) {
         setState(() {
           _diseaseType = diseaseType ?? 'Other (default scoring)';
@@ -210,23 +193,19 @@ class _TrackerPageState extends State<TrackerPage> {
           _weightLossVisible = weightLossVisible;
           _currentStreak = streak;
           _currentEntry = entry;
-          
-          // Populate form fields
+
           _meals = entry?.meals ?? [];
           _exerciseController.text = entry?.exercise ?? '';
           _waterController.text = entry?.waterIntake ?? '';
           _weightController.text = entry?.weight?.toStringAsFixed(1) ?? '';
-          _heightController.text = height?.toStringAsFixed(0) ?? '';
-          
+
           _isLoading = false;
         });
       }
     } catch (e) {
       AppConfig.debugPrint('Error loading tracker data: $e');
-      
       if (mounted) {
         setState(() => _isLoading = false);
-        
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -238,89 +217,102 @@ class _TrackerPageState extends State<TrackerPage> {
     }
   }
 
-  // ========================================
-  // DATA SAVING
-  // ========================================
-
   Future<void> _saveEntry() async {
     final userId = AuthService.currentUserId;
     if (userId == null) return;
-    
+
     setState(() => _isSaving = true);
-    
+
     try {
-      // Calculate daily score
+      // Convert exercise to standard format (minutes)
+      String? exerciseText;
+      if (_exerciseController.text.trim().isNotEmpty) {
+        final value = double.tryParse(_exerciseController.text.trim());
+        if (value != null) {
+          if (_exerciseUnit == 'hours') {
+            exerciseText = '${(value * 60).round()} minutes';
+          } else {
+            exerciseText = '${value.round()} minutes';
+          }
+        }
+      }
+
+      // Convert water to standard format (cups)
+      String? waterText;
+      if (_waterController.text.trim().isNotEmpty) {
+        final value = double.tryParse(_waterController.text.trim());
+        if (value != null) {
+          double cups = value;
+          switch (_waterUnit) {
+            case 'liters':
+              cups = value * 4.227; // 1 liter = 4.227 cups
+              break;
+            case 'oz':
+              cups = value / 8; // 8 oz = 1 cup
+              break;
+            case 'pints':
+              cups = value * 2; // 1 pint = 2 cups
+              break;
+            case 'quarts':
+              cups = value * 4; // 1 quart = 4 cups
+              break;
+            case 'gallons':
+              cups = value * 16; // 1 gallon = 16 cups
+              break;
+          }
+          waterText = '${cups.toStringAsFixed(1)} cups';
+        }
+      }
+
       final score = TrackerService.calculateDailyScore(
         meals: _meals,
         diseaseType: _diseaseType,
-        exercise: _exerciseController.text.trim().isEmpty 
-            ? null 
-            : _exerciseController.text.trim(),
-        waterIntake: _waterController.text.trim().isEmpty 
-            ? null 
-            : _waterController.text.trim(),
+        exercise: exerciseText,
+        waterIntake: waterText,
       );
-      
-      // Parse weight
+
+      // Convert weight to kg if needed
       double? weight;
       if (_weightController.text.trim().isNotEmpty) {
-        weight = double.tryParse(_weightController.text.trim());
+        final value = double.tryParse(_weightController.text.trim());
+        if (value != null) {
+          weight = _weightUnit == 'lbs' ? value * 0.453592 : value;
+        }
       }
-      
-      // Create entry
+
       final entry = TrackerEntry(
         date: _selectedDate.toString().split(' ')[0],
         meals: _meals,
-        exercise: _exerciseController.text.trim().isEmpty 
-            ? null 
-            : _exerciseController.text.trim(),
-        waterIntake: _waterController.text.trim().isEmpty 
-            ? null 
-            : _waterController.text.trim(),
+        exercise: exerciseText,
+        waterIntake: waterText,
         weight: weight,
         dailyScore: score,
       );
-      
-      // Save to local storage
+
       await TrackerService.saveEntry(userId, entry);
-      
-      // Auto-fill any missing weights after saving
       await TrackerService.autoFillMissingWeights(userId);
-      
-      // Save height if changed
-      if (_heightController.text.trim().isNotEmpty) {
-        final newHeight = double.tryParse(_heightController.text.trim());
-        if (newHeight != null && newHeight != _userHeight) {
-          await ProfileService.updateHeight(userId, newHeight);
-        }
-      }
-      
-      // Check if user just reached day 7
+
       final newStreak = await TrackerService.getWeightStreak(userId);
       final hasReachedDay7 = await TrackerService.hasReachedDay7Streak(userId);
       final hasShownPopup = await TrackerService.hasShownDay7Popup(userId);
-      
+
       if (hasReachedDay7 && !hasShownPopup) {
-        // Mark popup as shown (will show on home screen next time)
         await TrackerService.markDay7PopupShown(userId);
         AppConfig.debugPrint('🎉 User reached day 7! Popup will show on home screen.');
       }
-      
+
       if (mounted) {
         setState(() {
           _currentEntry = entry;
           _currentStreak = newStreak;
           _isSaving = false;
         });
-        
         ErrorHandlingService.showSuccess(context, 'Entry saved successfully!');
       }
     } catch (e) {
       AppConfig.debugPrint('Error saving entry: $e');
-      
       if (mounted) {
         setState(() => _isSaving = false);
-        
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
@@ -332,10 +324,6 @@ class _TrackerPageState extends State<TrackerPage> {
     }
   }
 
-  // ========================================
-  // DATE NAVIGATION
-  // ========================================
-
   void _changeDate(int days) {
     setState(() {
       _selectedDate = _selectedDate.add(Duration(days: days));
@@ -346,7 +334,7 @@ class _TrackerPageState extends State<TrackerPage> {
   String _formatDate(DateTime date) {
     final now = DateTime.now();
     final yesterday = now.subtract(const Duration(days: 1));
-    
+
     if (date.year == now.year && 
         date.month == now.month && 
         date.day == now.day) {
@@ -362,16 +350,12 @@ class _TrackerPageState extends State<TrackerPage> {
     }
   }
 
-  // ========================================
-  // MEAL MANAGEMENT
-  // ========================================
-
   Future<void> _addMeal() async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => _MealDialog(),
     );
-    
+
     if (result != null && mounted) {
       setState(() {
         _meals.add(result);
@@ -385,28 +369,23 @@ class _TrackerPageState extends State<TrackerPage> {
     });
   }
 
-  // ========================================
-  // WEIGHT VISIBILITY TOGGLES
-  // ========================================
-
   Future<void> _toggleWeightVisibility() async {
     final userId = AuthService.currentUserId;
     if (userId == null) return;
-    
+
     try {
       final newValue = !_weightVisible;
       await ProfileService.updateWeightVisibility(userId, newValue);
-      
+
       if (mounted) {
         setState(() {
           _weightVisible = newValue;
         });
-        
         ErrorHandlingService.showSuccess(
           context,
           newValue 
-              ? 'Weight stats will appear on your profile'
-              : 'Weight stats hidden from profile',
+            ? 'Weight stats will appear on your profile'
+            : 'Weight stats hidden from profile',
         );
       }
     } catch (e) {
@@ -424,21 +403,20 @@ class _TrackerPageState extends State<TrackerPage> {
   Future<void> _toggleWeightLossVisibility() async {
     final userId = AuthService.currentUserId;
     if (userId == null) return;
-    
+
     try {
       final newValue = !_weightLossVisible;
       await ProfileService.updateWeightLossVisibility(userId, newValue);
-      
+
       if (mounted) {
         setState(() {
           _weightLossVisible = newValue;
         });
-        
         ErrorHandlingService.showSuccess(
           context,
           newValue 
-              ? 'Weight loss stats will appear on your profile'
-              : 'Weight loss stats hidden from profile',
+            ? 'Weight loss stats will appear on your profile'
+            : 'Weight loss stats hidden from profile',
         );
       }
     } catch (e) {
@@ -453,9 +431,104 @@ class _TrackerPageState extends State<TrackerPage> {
     }
   }
 
-  // ========================================
-  // UI BUILD
-  // ========================================
+  // Show height setup dialog on first use
+  Future<void> _showHeightSetupDialog() async {
+    final heightController = TextEditingController();
+    String heightUnit = 'cm';
+
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.height, color: Colors.blue),
+              SizedBox(width: 8),
+              Text('Set Your Height'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Please enter your height. This only needs to be set once.',
+                style: TextStyle(fontSize: 14),
+              ),
+              SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: TextField(
+                      controller: heightController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))
+                      ],
+                      decoration: InputDecoration(
+                        labelText: 'Height',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: heightUnit,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        DropdownMenuItem(value: 'cm', child: Text('cm')),
+                        DropdownMenuItem(value: 'in', child: Text('in')),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setDialogState(() => heightUnit = value);
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () async {
+                final value = double.tryParse(heightController.text.trim());
+                if (value == null || value <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Please enter a valid height')),
+                  );
+                  return;
+                }
+
+                // Convert to cm if needed
+                final heightInCm = heightUnit == 'in' ? value * 2.54 : value;
+
+                final userId = AuthService.currentUserId;
+                if (userId != null) {
+                  await ProfileService.updateHeight(userId, heightInCm);
+                  setState(() {
+                    _userHeight = heightInCm;
+                  });
+                }
+
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+              child: Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -464,6 +537,14 @@ class _TrackerPageState extends State<TrackerPage> {
         title: const Text('Health Tracker'),
         backgroundColor: Colors.green,
         foregroundColor: Colors.white,
+        actions: [
+          if (_userHeight != null)
+            IconButton(
+              icon: Icon(Icons.height),
+              tooltip: 'Update Height',
+              onPressed: _showHeightSetupDialog,
+            ),
+        ],
       ),
       body: PremiumGate(
         feature: PremiumFeature.healthTracker,
@@ -479,6 +560,13 @@ class _TrackerPageState extends State<TrackerPage> {
       return const Center(child: CircularProgressIndicator());
     }
 
+    // Show height setup if not set
+    if (_userHeight == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showHeightSetupDialog();
+      });
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -486,7 +574,7 @@ class _TrackerPageState extends State<TrackerPage> {
         children: [
           _buildDateSelector(),
           const SizedBox(height: 20),
-          _buildHeightWeightSection(),
+          _buildWeightSection(),
           const SizedBox(height: 20),
           _buildMealsSection(),
           const SizedBox(height: 20),
@@ -507,7 +595,7 @@ class _TrackerPageState extends State<TrackerPage> {
     final canGoForward = _selectedDate.isBefore(
       DateTime.now().subtract(const Duration(days: -1)),
     );
-    
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -535,7 +623,7 @@ class _TrackerPageState extends State<TrackerPage> {
     );
   }
 
-  Widget _buildHeightWeightSection() {
+  Widget _buildWeightSection() {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -547,46 +635,60 @@ class _TrackerPageState extends State<TrackerPage> {
                 const Icon(Icons.monitor_weight, color: Colors.blue, size: 24),
                 const SizedBox(width: 8),
                 const Text(
-                  'Height & Weight',
+                  'Weight',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
+                Spacer(),
+                if (_userHeight != null)
+                  Text(
+                    'Height: ${_userHeight!.toStringAsFixed(0)} cm',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
               ],
             ),
             const SizedBox(height: 16),
             
-            // Height input
-            TextField(
-              controller: _heightController,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))],
-              decoration: InputDecoration(
-                labelText: 'Height (cm)',
-                hintText: 'e.g., 170',
-                border: const OutlineInputBorder(),
-                suffixText: 'cm',
-                prefixIcon: const Icon(Icons.height),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _weightController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))
+                    ],
+                    decoration: InputDecoration(
+                      labelText: 'Weight',
+                      hintText: _weightUnit == 'kg' ? 'e.g., 70.5' : 'e.g., 155.5',
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.monitor_weight),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _weightUnit,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'kg', child: Text('kg')),
+                      DropdownMenuItem(value: 'lbs', child: Text('lbs')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => _weightUnit = value);
+                      }
+                    },
+                  ),
+                ),
+              ],
             ),
             
             const SizedBox(height: 12),
             
-            // Weight input
-            TextField(
-              controller: _weightController,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))],
-              decoration: InputDecoration(
-                labelText: 'Weight (kg)',
-                hintText: 'e.g., 70.5',
-                border: const OutlineInputBorder(),
-                suffixText: 'kg',
-                prefixIcon: const Icon(Icons.monitor_weight),
-              ),
-            ),
-            
-            const SizedBox(height: 12),
-            
-            // Weight streak indicator
             if (_currentStreak > 0) ...[
               Container(
                 padding: const EdgeInsets.all(8),
@@ -614,7 +716,6 @@ class _TrackerPageState extends State<TrackerPage> {
               const SizedBox(height: 12),
             ],
             
-            // Privacy toggle for weight average
             Row(
               children: [
                 Icon(
@@ -626,8 +727,8 @@ class _TrackerPageState extends State<TrackerPage> {
                 Expanded(
                   child: Text(
                     _weightVisible 
-                        ? 'Weight average visible on profile'
-                        : 'Weight average hidden from profile',
+                      ? 'Weight average visible on profile'
+                      : 'Weight average hidden from profile',
                     style: TextStyle(
                       fontSize: 13,
                       color: Colors.grey.shade700,
@@ -642,7 +743,6 @@ class _TrackerPageState extends State<TrackerPage> {
               ],
             ),
             
-            // Privacy toggle for weight loss (only show if 14+ days)
             if (_currentStreak >= 14) ...[
               const SizedBox(height: 8),
               Row(
@@ -656,8 +756,8 @@ class _TrackerPageState extends State<TrackerPage> {
                   Expanded(
                     child: Text(
                       _weightLossVisible 
-                          ? 'Weight loss visible on profile'
-                          : 'Weight loss hidden from profile',
+                        ? 'Weight loss visible on profile'
+                        : 'Weight loss hidden from profile',
                       style: TextStyle(
                         fontSize: 13,
                         color: Colors.grey.shade700,
@@ -705,7 +805,6 @@ class _TrackerPageState extends State<TrackerPage> {
                 ),
               ],
             ),
-            
             if (_meals.isEmpty) ...[
               const SizedBox(height: 12),
               Center(
@@ -765,14 +864,43 @@ class _TrackerPageState extends State<TrackerPage> {
               ],
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _exerciseController,
-              decoration: const InputDecoration(
-                labelText: 'Exercise Duration',
-                hintText: 'e.g., 30 minutes, 1 hour',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.directions_run),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _exerciseController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))
+                    ],
+                    decoration: InputDecoration(
+                      labelText: 'Duration',
+                      hintText: _exerciseUnit == 'minutes' ? 'e.g., 30' : 'e.g., 1',
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.directions_run),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _exerciseUnit,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'minutes', child: Text('min')),
+                      DropdownMenuItem(value: 'hours', child: Text('hrs')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => _exerciseUnit = value);
+                      }
+                    },
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -798,14 +926,47 @@ class _TrackerPageState extends State<TrackerPage> {
               ],
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _waterController,
-              decoration: const InputDecoration(
-                labelText: 'Water Amount',
-                hintText: 'e.g., 8 cups, 64 oz',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.local_drink),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: TextField(
+                    controller: _waterController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'Amount',
+                      hintText: 'e.g., 8',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.local_drink),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _waterUnit,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'cups', child: Text('cups')),
+                      DropdownMenuItem(value: 'oz', child: Text('oz')),
+                      DropdownMenuItem(value: 'liters', child: Text('L')),
+                      DropdownMenuItem(value: 'pints', child: Text('pints')),
+                      DropdownMenuItem(value: 'quarts', child: Text('qts')),
+                      DropdownMenuItem(value: 'gallons', child: Text('gal')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => _waterUnit = value);
+                      }
+                    },
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -815,7 +976,7 @@ class _TrackerPageState extends State<TrackerPage> {
 
   Widget _buildScoreSection() {
     final score = _currentEntry?.dailyScore ?? 0;
-    
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -863,15 +1024,15 @@ class _TrackerPageState extends State<TrackerPage> {
       child: ElevatedButton.icon(
         onPressed: _isSaving ? null : _saveEntry,
         icon: _isSaving
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation(Colors.white),
-                ),
-              )
-            : const Icon(Icons.save),
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation(Colors.white),
+              ),
+            )
+          : const Icon(Icons.save),
         label: Text(
           _isSaving ? 'Saving...' : 'Save Entry',
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -887,10 +1048,6 @@ class _TrackerPageState extends State<TrackerPage> {
     );
   }
 }
-
-// ========================================
-// MEAL DIALOG
-// ========================================
 
 class _MealDialog extends StatefulWidget {
   @override

@@ -1,5 +1,5 @@
 // lib/pages/nutrition_search_screen.dart
-// Fixed version with proper item selection handling
+// Updated with recipe suggestions based on selected nutrition item
 
 import 'package:flutter/material.dart';
 import 'package:liver_wise/models/nutrition_info.dart';
@@ -8,6 +8,37 @@ import 'package:liver_wise/widgets/nutrition_display.dart';
 import 'package:liver_wise/services/error_handling_service.dart';
 import 'package:liver_wise/services/search_history_service.dart';
 import 'package:liver_wise/liverhealthbar.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../config/app_config.dart';
+import '../services/favorite_recipes_service.dart';
+import '../models/favorite_recipe.dart';
+
+class Recipe {
+  final String title;
+  final String description;
+  final List<String> ingredients;
+  final String instructions;
+
+  Recipe({
+    required this.title,
+    required this.description,
+    required this.ingredients,
+    required this.instructions,
+  });
+
+  factory Recipe.fromJson(Map<String, dynamic> json) => Recipe(
+        title: json['title'] ?? json['name'] ?? '',
+        description: json['description'] ?? '',
+        ingredients: json['ingredients'] is String
+            ? (json['ingredients'] as String)
+                .split(',')
+                .map((e) => e.trim())
+                .toList()
+            : List<String>.from(json['ingredients'] ?? []),
+        instructions: json['instructions'] ?? json['directions'] ?? '',
+      );
+}
 
 class NutritionSearchScreen extends StatefulWidget {
   const NutritionSearchScreen({super.key});
@@ -25,6 +56,17 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
 
   List<String> _searchHistory = [];
 
+  // Recipe suggestions
+  List<Recipe> _recipeSuggestions = [];
+  bool _isLoadingRecipes = false;
+  List<String> _keywordTokens = [];
+  Set<String> _selectedKeywords = {};
+  int _currentRecipeIndex = 0;
+  static const int _recipesPerPage = 2;
+
+  // Favorites
+  List<FavoriteRecipe> _favoriteRecipes = [];
+
   static const String disclaimer =
       "These are average nutritional values and may vary depending on brand or source. "
       "For more accurate details, try scanning the barcode.";
@@ -33,11 +75,87 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
   void initState() {
     super.initState();
     _loadHistory();
+    _loadFavoriteRecipes();
   }
 
   Future<void> _loadHistory() async {
     final history = await SearchHistoryService.loadHistory();
     setState(() => _searchHistory = history);
+  }
+
+  Future<void> _loadFavoriteRecipes() async {
+    try {
+      final recipes = await FavoriteRecipesService.getFavoriteRecipes();
+      if (mounted) {
+        setState(() => _favoriteRecipes = recipes);
+      }
+    } catch (e) {
+      print('Error loading favorites: $e');
+    }
+  }
+
+  bool _isRecipeFavorited(String recipeTitle) {
+    return _favoriteRecipes.any((fav) => fav.recipeName == recipeTitle);
+  }
+
+  Future<void> _toggleFavoriteRecipe(Recipe recipe) async {
+    try {
+      final name = recipe.title;
+      final ingredients = recipe.ingredients.join(', ');
+      final directions = recipe.instructions;
+
+      final existing = await FavoriteRecipesService.findExistingFavorite(recipeName: name);
+
+      if (existing != null) {
+        if (existing.id == null) {
+          throw Exception('Favorite recipe has no ID — cannot remove');
+        }
+
+        await FavoriteRecipesService.removeFavoriteRecipe(existing.id!);
+
+        setState(() {
+          _favoriteRecipes.removeWhere((r) => r.recipeName == name);
+        });
+
+        if (mounted) {
+          ErrorHandlingService.showSuccess(context, 'Removed from favorites');
+        }
+      } else {
+        try {
+          final created = await FavoriteRecipesService.addFavoriteRecipe(
+            name,
+            ingredients,
+            directions,
+          );
+
+          setState(() => _favoriteRecipes.add(created));
+
+          if (mounted) {
+            ErrorHandlingService.showSuccess(context, 'Added to favorites!');
+          }
+        } catch (e) {
+          if (e.toString().contains('already in your favorites')) {
+            if (mounted) {
+              ErrorHandlingService.showSimpleError(
+                context,
+                'This recipe is already in your favorites',
+              );
+            }
+            return;
+          }
+          rethrow;
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Error saving recipe',
+        );
+      }
+    }
   }
 
   Future<void> _performSearch() async {
@@ -53,15 +171,16 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
     setState(() {
       _isLoading = true;
       _results = [];
-      _selectedItem = null; // Clear any previous selection
+      _selectedItem = null;
+      _recipeSuggestions = [];
+      _keywordTokens = [];
+      _selectedKeywords = {};
     });
 
     try {
-      // Save search history
       await SearchHistoryService.addToHistory(query);
       await _loadHistory();
 
-      // Call API
       final items = await NutritionApiService.searchByName(query);
 
       if (items.isEmpty) {
@@ -86,10 +205,14 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
   void _selectItem(NutritionInfo item) {
     setState(() {
       _selectedItem = item;
+      _recipeSuggestions = [];
+      _currentRecipeIndex = 0;
     });
     
-    // Scroll to show the nutrition display
-    // Small delay to ensure the widget is built first
+    // Initialize keywords and auto-search recipes
+    _initKeywordButtonsFromProductName(item.productName);
+    _searchRecipesBySelectedKeywords();
+    
     Future.delayed(const Duration(milliseconds: 100), () {
       if (mounted) {
         Scrollable.ensureVisible(
@@ -104,7 +227,381 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
   void _clearSelection() {
     setState(() {
       _selectedItem = null;
+      _recipeSuggestions = [];
+      _keywordTokens = [];
+      _selectedKeywords = {};
     });
+  }
+
+  void _initKeywordButtonsFromProductName(String productName) {
+    final tokens = productName
+        .split(RegExp(r'\s+'))
+        .map((w) => w.replaceAll(RegExp(r'[^\w]'), ''))
+        .where((w) => w.length > 2)
+        .toList();
+
+    setState(() {
+      _keywordTokens = tokens;
+      _selectedKeywords = tokens.toSet();
+    });
+  }
+
+  void _toggleKeyword(String word) {
+    setState(() {
+      if (_selectedKeywords.contains(word)) {
+        _selectedKeywords.remove(word);
+      } else {
+        _selectedKeywords.add(word);
+      }
+    });
+  }
+
+  Future<void> _searchRecipesBySelectedKeywords() async {
+    if (_selectedKeywords.isEmpty) {
+      ErrorHandlingService.showSimpleError(
+        context,
+        'Please select at least one keyword.',
+      );
+      return;
+    }
+
+    try {
+      setState(() {
+        _isLoadingRecipes = true;
+        _currentRecipeIndex = 0;
+      });
+
+      final recipes = await _searchRecipes(_selectedKeywords.toList());
+
+      if (mounted) {
+        setState(() => _recipeSuggestions = recipes);
+      }
+
+      if (recipes.isEmpty) {
+        ErrorHandlingService.showSimpleError(
+          context,
+          'No recipes found for those ingredients.',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.databaseError,
+          customMessage: 'Error searching recipes',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingRecipes = false);
+      }
+    }
+  }
+
+  Future<List<Recipe>> _searchRecipes(List<String> keywords) async {
+    final cleanKeywords = keywords
+        .map((w) => w.trim().toLowerCase())
+        .where((w) => w.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (cleanKeywords.isEmpty) {
+      return [];
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'search_recipes',
+          'keyword': cleanKeywords,
+          'limit': 50,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        return [];
+      }
+
+      final data = jsonDecode(response.body);
+
+      if (data is Map<String, dynamic>) {
+        final results = data['results'] as List? ?? [];
+
+        if (results.isEmpty) {
+          return [];
+        }
+
+        final recipes = results
+            .map((item) => Recipe.fromJson(item as Map<String, dynamic>))
+            .where((r) => r.title.isNotEmpty)
+            .toList();
+
+        return recipes;
+      }
+
+      return [];
+    } catch (e) {
+      print('Error searching recipes: $e');
+      return [];
+    }
+  }
+
+  void _loadNextRecipeSuggestions() {
+    if (_recipeSuggestions.isEmpty) return;
+    
+    setState(() {
+      _currentRecipeIndex += _recipesPerPage;
+      if (_currentRecipeIndex >= _recipeSuggestions.length) {
+        _currentRecipeIndex = 0;
+      }
+    });
+  }
+
+  List<Recipe> _getCurrentPageRecipes() {
+    if (_recipeSuggestions.isEmpty) return [];
+    
+    final endIndex = (_currentRecipeIndex + _recipesPerPage).clamp(0, _recipeSuggestions.length);
+    
+    return _recipeSuggestions.sublist(_currentRecipeIndex, endIndex);
+  }
+
+  Widget _buildRecipeCard(Recipe recipe) {
+    final isFavorite = _isRecipeFavorited(recipe.title);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ExpansionTile(
+        title: Text(
+          recipe.title,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(
+                isFavorite ? Icons.favorite : Icons.favorite_border,
+                color: isFavorite ? Colors.red : Colors.grey,
+                size: 20,
+              ),
+              onPressed: () => _toggleFavoriteRecipe(recipe),
+            ),
+            const Icon(Icons.expand_more),
+          ],
+        ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  recipe.description,
+                  style: const TextStyle(fontSize: 14, color: Colors.black87),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Ingredients: ${recipe.ingredients.join(', ')}',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Instructions: ${recipe.instructions}',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+                const SizedBox(height: 12),
+                
+                ElevatedButton.icon(
+                  onPressed: () => _toggleFavoriteRecipe(recipe),
+                  icon: Icon(isFavorite ? Icons.favorite : Icons.favorite_border),
+                  label: Text(isFavorite ? 'Unfavorite' : 'Favorite'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isFavorite ? Colors.grey : Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecipeSuggestions() {
+    if (_selectedItem == null) return const SizedBox.shrink();
+
+    final hasKeywords = _keywordTokens.isNotEmpty;
+    final hasRecipes = _recipeSuggestions.isNotEmpty;
+
+    if (!hasKeywords && !hasRecipes && !_isLoadingRecipes) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(top: 20),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade800,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Recipe Suggestions:',
+            style: TextStyle(
+              fontSize: 20,
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          if (hasKeywords) ...[
+            const Text(
+              'Select your key search word(s):',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.white70,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _keywordTokens.map((word) {
+                final selected = _selectedKeywords.contains(word);
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _toggleKeyword(word),
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: selected 
+                            ? Colors.green 
+                            : Colors.white.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: selected ? Colors.white : Colors.white30,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Text(
+                        word,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+
+            const SizedBox(height: 14),
+
+            Align(
+              alignment: Alignment.centerRight,
+              child: ElevatedButton.icon(
+                onPressed: _isLoadingRecipes ? null : _searchRecipesBySelectedKeywords,
+                icon: _isLoadingRecipes
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : const Icon(Icons.search),
+                label: Text(_isLoadingRecipes ? 'Searching...' : 'Search Recipes'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 18),
+          ],
+
+          if (_isLoadingRecipes)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: CircularProgressIndicator(color: Colors.white),
+              ),
+            )
+          else if (hasRecipes) ...[
+            const SizedBox(height: 8),
+            
+            ..._getCurrentPageRecipes().map((r) => _buildRecipeCard(r)),
+            
+            if (_recipeSuggestions.length > _recipesPerPage) ...[
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Showing ${_currentRecipeIndex + 1}-${(_currentRecipeIndex + _recipesPerPage).clamp(0, _recipeSuggestions.length)} of ${_recipeSuggestions.length} recipes',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.white70,
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _loadNextRecipeSuggestions,
+                    icon: const Icon(Icons.arrow_forward, size: 16),
+                    label: const Text('Next'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ] else if (!_isLoadingRecipes && hasKeywords) ...[
+            const Text(
+              'No recipes found. Try selecting different keywords.',
+              style: TextStyle(fontSize: 12, color: Colors.white60),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget _buildHistorySection() {
@@ -214,7 +711,6 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // SEARCH BAR
             TextField(
               controller: _searchController,
               decoration: InputDecoration(
@@ -229,7 +725,6 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
 
             const SizedBox(height: 16),
 
-            // SEARCH BUTTON
             SizedBox(
               width: double.infinity,
               height: 52,
@@ -252,19 +747,15 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
 
             const SizedBox(height: 20),
 
-            // LOADING INDICATOR
             if (_isLoading)
               const Center(child: CircularProgressIndicator()),
 
-            // SEARCH HISTORY
             if (!_isLoading) _buildHistorySection(),
 
-            // RESULTS LIST
             if (!_isLoading) _buildResultsList(),
 
             const SizedBox(height: 20),
 
-            // SELECTED NUTRITION DISPLAY
             if (_selectedItem != null) ...[
               const Divider(thickness: 2),
               const SizedBox(height: 12),
@@ -276,6 +767,8 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
                 ),
               ),
               const SizedBox(height: 12),
+              
+              // Nutrition display with liver health bar
               NutritionDisplay(
                 nutrition: _selectedItem!,
                 liverScore: LiverHealthCalculator.calculate(
@@ -286,6 +779,23 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
                 ),
                 disclaimer: disclaimer,
               ),
+              
+              const SizedBox(height: 16),
+              
+              // Liver Health Bar with smiley face
+              LiverHealthBar(
+                healthScore: LiverHealthCalculator.calculate(
+                  fat: _selectedItem!.fat,
+                  sodium: _selectedItem!.sodium,
+                  sugar: _selectedItem!.sugar,
+                  calories: _selectedItem!.calories,
+                ),
+              ),
+              
+              const SizedBox(height: 20),
+              
+              // Recipe suggestions
+              _buildRecipeSuggestions(),
             ],
           ],
         ),

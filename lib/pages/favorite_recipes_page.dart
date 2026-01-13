@@ -1,5 +1,5 @@
-// lib/pages/favorite_recipes_page.dart - FIXED: Shows title, description, ingredients, directions + SHARE BUTTON
-// UPDATED: Uses Cloudflare Worker for database queries
+// lib/pages/favorite_recipes_page.dart - UPDATED: Added 4-button action bar
+// Uses Cloudflare Worker for database queries
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
@@ -28,33 +28,27 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
   List<FavoriteRecipe> _favoriteRecipes = [];
   bool _isLoading = false;
 
-  // Cache configuration - favorites rarely change once loaded
   static const Duration _cacheDuration = Duration(minutes: 10);
 
   @override
   void initState() {
     super.initState();
-    // Initialize with passed recipes, but always reload from database/cache
     _favoriteRecipes = List.from(widget.favoriteRecipes);
-    // Force immediate load to ensure we have latest data
     _loadFavoriteRecipes(forceRefresh: false);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Reload when page becomes visible again (e.g., after navigation)
     if (mounted) {
       _loadFavoriteRecipes(forceRefresh: false);
     }
   }
 
-  // ========== CACHING HELPERS ==========
   Future<List<FavoriteRecipe>?> _getCachedFavorites() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // Check if we have a cached version with timestamp
       final cachedData = prefs.getString('favorite_recipes_cached');
       if (cachedData != null) {
         final data = json.decode(cachedData);
@@ -62,8 +56,9 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         
         if (timestamp != null) {
           final age = DateTime.now().millisecondsSinceEpoch - timestamp;
-          if (age < _cacheDuration.inMilliseconds) {
-            // Cache is still valid
+          final isCacheValid = age < _cacheDuration.inMilliseconds;
+          
+          if (isCacheValid) {
             final recipes = (data['recipes'] as List)
                 .map((jsonString) {
                   try {
@@ -82,7 +77,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         }
       }
       
-      // Fall back to old format if new format doesn't exist or is stale
       final favoriteRecipesJson = prefs.getStringList('favorite_recipes_detailed') ?? [];
       if (favoriteRecipesJson.isEmpty) return null;
       
@@ -98,7 +92,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
           .cast<FavoriteRecipe>()
           .toList();
       
-      // Migrate to new format with timestamp
       await _cacheFavorites(recipes);
       print('📦 Loaded from old cache format and migrated (${recipes.length} recipes)');
       return recipes;
@@ -112,7 +105,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // Save with timestamp for validation
       final cacheData = {
         'recipes': recipes.map((recipe) => json.encode(recipe.toJson())).toList(),
         '_cached_at': DateTime.now().millisecondsSinceEpoch,
@@ -120,7 +112,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
       
       await prefs.setString('favorite_recipes_cached', json.encode(cacheData));
       
-      // Also maintain old format for backwards compatibility
       final favoriteRecipesJson = recipes
           .map((recipe) => json.encode(recipe.toJson()))
           .toList();
@@ -142,7 +133,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
-  /// Static method to invalidate cache from other pages
   static Future<void> invalidateCache() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -152,7 +142,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
-  // ========== LOAD FROM DATABASE VIA CLOUDFLARE WORKER ==========
   Future<void> _loadFavoriteRecipes({bool forceRefresh = false}) async {
     try {
       setState(() => _isLoading = true);
@@ -166,7 +155,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         return;
       }
 
-      // Try cache first unless force refresh
       if (!forceRefresh) {
         final cachedRecipes = await _getCachedFavorites();
         if (cachedRecipes != null) {
@@ -180,7 +168,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         }
       }
 
-      // ✅ USE THE SERVICE INSTEAD OF MANUAL QUERY
       final recipes = await FavoriteRecipesService.getFavoriteRecipes();
 
       if (mounted) {
@@ -189,7 +176,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
           _isLoading = false;
         });
 
-        // ✅ CACHE THE LOADED RECIPES
         await _cacheFavorites(recipes);
         print('✅ Loaded ${recipes.length} favorites from database');
       }
@@ -208,7 +194,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
-  // ========== REMOVE FROM DATABASE VIA CLOUDFLARE WORKER ==========
   Future<void> _removeFavoriteRecipe(FavoriteRecipe recipe) async {
     try {
       final currentUserId = AuthService.currentUserId;
@@ -217,7 +202,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
       String? favoriteId = recipe.id?.toString();
 
       if (favoriteId == null) {
-        // Fallback: Find the favorite record via Cloudflare Worker
         final searchResponse = await http.post(
           Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
           headers: {'Content-Type': 'application/json'},
@@ -242,7 +226,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         favoriteId = favorites[0]['id'];
       }
 
-      // Store for undo
       final removedRecipe = recipe;
       final removedIndex = _favoriteRecipes.indexOf(recipe);
 
@@ -250,10 +233,8 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         _favoriteRecipes.remove(recipe);
       });
 
-      // Invalidate cache
       await _invalidateFavoritesCache();
 
-      // Delete from database via Cloudflare Worker
       final deleteResponse = await http.post(
         Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
         headers: {'Content-Type': 'application/json'},
@@ -290,7 +271,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
-  // ========== UNDO REMOVE (RE-ADD TO DATABASE VIA CLOUDFLARE WORKER) ==========
   Future<void> _undoRemoveFavorite(FavoriteRecipe recipe, int index) async {
     try {
       final currentUserId = AuthService.currentUserId;
@@ -303,7 +283,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
         return;
       }
 
-      // Find the recipe ID via Cloudflare Worker
       final searchResponse = await http.post(
         Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
         headers: {'Content-Type': 'application/json'},
@@ -325,7 +304,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
 
       final recipeId = recipes[0]['id'];
 
-      // Re-add to database via Cloudflare Worker
       final readdResponse = await http.post(
         Uri.parse(AppConfig.cloudflareWorkerQueryEndpoint),
         headers: {'Content-Type': 'application/json'},
@@ -345,7 +323,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
       );
 
       if (readdResponse.statusCode == 200 || readdResponse.statusCode == 201) {
-        // Invalidate cache
         await _invalidateFavoritesCache();
 
         setState(() {
@@ -368,7 +345,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
-  // ========== 🔥 NEW: SHARE RECIPE TO FEED ==========
   Future<void> _shareRecipeToFeed(FavoriteRecipe recipe) async {
     try {
       await FeedPostsService.shareRecipeToFeed(
@@ -414,15 +390,12 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
     }
   }
 
-  // ========== 🔥 FIXED RECIPE DETAILS DIALOG ==========
   void _showRecipeDetails(FavoriteRecipe recipe) {
-    // Parse ingredients into a list with ROBUST error handling
     List<String> ingredientsList = [];
     try {
       if (recipe.ingredients.trim().isEmpty) {
         ingredientsList = ['No ingredients listed'];
       } else {
-        // Try JSON format first (structured ingredients)
         try {
           final parsed = jsonDecode(recipe.ingredients);
           if (parsed is List) {
@@ -437,13 +410,11 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
             }).where((line) => line.trim().isNotEmpty).toList();
           }
         } catch (e) {
-          // Fall back to plain text (one per line)
           ingredientsList = recipe.ingredients
               .split('\n')
               .where((line) => line.trim().isNotEmpty)
               .toList();
           
-          // If still empty, try comma-separated
           if (ingredientsList.isEmpty) {
             ingredientsList = recipe.ingredients
                 .split(',')
@@ -452,7 +423,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
           }
         }
         
-        // Final fallback - just show the raw text
         if (ingredientsList.isEmpty && recipe.ingredients.trim().isNotEmpty) {
           ingredientsList = [recipe.ingredients];
         }
@@ -462,7 +432,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
       ingredientsList = [recipe.ingredients.isNotEmpty ? recipe.ingredients : 'No ingredients listed'];
     }
 
-    // Parse directions into bullet points with ROBUST error handling
     List<String> directionsList = [];
     try {
       if (recipe.directions.trim().isEmpty) {
@@ -473,7 +442,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
             .where((line) => line.trim().isNotEmpty)
             .toList();
         
-        // If no newlines found, treat as single direction
         if (directionsList.isEmpty) {
           directionsList = [recipe.directions];
         }
@@ -482,14 +450,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
       print('❌ Error parsing directions: $e');
       directionsList = [recipe.directions.isNotEmpty ? recipe.directions : 'No directions provided'];
     }
-
-    print('🔍 Debug Recipe Details:');
-    print('  Recipe Name: ${recipe.recipeName}');
-    print('  Description: ${recipe.description}');
-    print('  Ingredients Count: ${ingredientsList.length}');
-    print('  Directions Count: ${directionsList.length}');
-    print('  First Ingredient: ${ingredientsList.isNotEmpty ? ingredientsList.first : "NONE"}');
-    print('  First Direction: ${directionsList.isNotEmpty ? directionsList.first : "NONE"}');
 
     showDialog(
       context: context,
@@ -505,7 +465,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Header with recipe name
               Container(
                 padding: EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -537,14 +496,12 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                 ),
               ),
 
-              // Scrollable content
               Expanded(
                 child: SingleChildScrollView(
                   padding: EdgeInsets.all(20),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Recipe Title Section (ALWAYS SHOW)
                       Container(
                         padding: EdgeInsets.all(16),
                         decoration: BoxDecoration(
@@ -577,7 +534,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                       ),
                       SizedBox(height: 16),
 
-                      // Description section (if exists)
                       if (recipe.description != null && recipe.description!.trim().isNotEmpty) ...[
                         Container(
                           padding: EdgeInsets.all(16),
@@ -623,7 +579,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                         SizedBox(height: 16),
                       ],
 
-                      // 🔥 FIXED: Ingredients section (ALWAYS SHOW - removed conditional)
                       Row(
                         children: [
                           Icon(Icons.shopping_cart, 
@@ -685,7 +640,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                       ),
                       SizedBox(height: 24),
 
-                      // 🔥 FIXED: Directions section (ALWAYS SHOW - removed conditional)
                       Row(
                         children: [
                           Icon(Icons.format_list_numbered, 
@@ -763,7 +717,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                 ),
               ),
 
-              // Bottom action buttons with SHARE
               Container(
                 padding: EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -775,7 +728,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                 ),
                 child: Row(
                   children: [
-                    // Share button
                     Expanded(
                       child: ElevatedButton.icon(
                         onPressed: () {
@@ -801,7 +753,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                       ),
                     ),
                     SizedBox(width: 12),
-                    // Close button
                     Expanded(
                       child: ElevatedButton(
                         onPressed: () => Navigator.pop(context),
@@ -829,6 +780,47 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback? onPressed,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 56,
+          height: 56,
+          decoration: BoxDecoration(
+            color: onPressed == null ? Colors.grey : color,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: IconButton(
+            icon: Icon(icon, color: Colors.white, size: 28),
+            onPressed: onPressed,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade700,
+          ),
+        ),
+      ],
     );
   }
 
@@ -944,7 +936,6 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
                                     ],
                                   ),
                                 ),
-                                // Menu options
                                 PopupMenuButton<String>(
                                   icon: Icon(Icons.more_vert, color: Colors.grey.shade600),
                                   shape: RoundedRectangleBorder(
@@ -1042,47 +1033,49 @@ class _FavoriteRecipesPageState extends State<FavoriteRecipesPage> {
               ),
             ),
             SizedBox(height: 32),
-            // Start Scanning button
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
-              },
-              icon: Icon(Icons.camera_alt, size: 22),
-              label: Text(
-                'Start Scanning Products',
-                style: TextStyle(fontSize: 16),
+            
+            // 🔥 NEW: 4-Button Action Bar (replacing the 2 buttons)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(15),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                elevation: 2,
-                minimumSize: Size(double.infinity, 56),
-              ),
-            ),
-            SizedBox(height: 12),
-            // Manual Barcode Entry button
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.pushNamed(context, '/manual-barcode-entry');
-              },
-              icon: Icon(Icons.edit, size: 22),
-              label: Text(
-                'Manual Barcode Entry',
-                style: TextStyle(fontSize: 16),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                elevation: 2,
-                minimumSize: Size(double.infinity, 56),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildActionButton(
+                    icon: Icons.qr_code_scanner,
+                    label: 'Auto',
+                    color: Colors.purple.shade600,
+                    onPressed: () => Navigator.pushNamed(context, '/home'),
+                  ),
+                  _buildActionButton(
+                    icon: Icons.camera_alt,
+                    label: 'Scan',
+                    color: Colors.green.shade600,
+                    onPressed: () => Navigator.pushNamed(context, '/home'),
+                  ),
+                  _buildActionButton(
+                    icon: Icons.edit_outlined,
+                    label: 'Code',
+                    color: Colors.blue.shade600,
+                    onPressed: () => Navigator.pushNamed(context, '/manual-barcode-entry'),
+                  ),
+                  _buildActionButton(
+                    icon: Icons.search,
+                    label: 'Search',
+                    color: Colors.orange.shade800,
+                    onPressed: () => Navigator.pushNamed(context, '/nutrition-search'),
+                  ),
+                ],
               ),
             ),
           ],
