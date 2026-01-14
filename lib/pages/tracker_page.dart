@@ -1,12 +1,15 @@
 // lib/pages/tracker_page.dart
-// Updated with unit dropdowns and improved height handling
+// Updated with unit dropdowns, improved height handling, and ingredient auto-fill
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/tracker_service.dart';
 import '../services/profile_service.dart';
 import '../services/auth_service.dart';
 import '../services/error_handling_service.dart';
+import '../services/saved_ingredients_service.dart';
 import '../models/tracker_entry.dart';
+import '../models/nutrition_info.dart';
 import '../liverhealthbar.dart';
 import '../config/app_config.dart';
 import '../widgets/premium_gate.dart';
@@ -42,6 +45,11 @@ class _TrackerPageState extends State<TrackerPage> {
   String _weightUnit = 'kg';
   String _exerciseUnit = 'minutes';
   String _waterUnit = 'cups';
+
+  // SharedPreferences keys for unit persistence
+  static const String _PREF_WEIGHT_UNIT = 'tracker_weight_unit_';
+  static const String _PREF_EXERCISE_UNIT = 'tracker_exercise_unit_';
+  static const String _PREF_WATER_UNIT = 'tracker_water_unit_';
 
   List<Map<String, dynamic>> _meals = [];
 
@@ -165,10 +173,37 @@ class _TrackerPageState extends State<TrackerPage> {
     );
   }
 
+  Future<void> _loadUnitPreferences() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = AuthService.currentUserId ?? '';
+      
+      setState(() {
+        _weightUnit = prefs.getString('$_PREF_WEIGHT_UNIT$userId') ?? 'lbs';
+        _exerciseUnit = prefs.getString('$_PREF_EXERCISE_UNIT$userId') ?? 'minutes';
+        _waterUnit = prefs.getString('$_PREF_WATER_UNIT$userId') ?? 'cups';
+      });
+    } catch (e) {
+      AppConfig.debugPrint('Error loading unit preferences: $e');
+    }
+  }
+
+  Future<void> _saveUnitPreference(String key, String value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = AuthService.currentUserId ?? '';
+      await prefs.setString('$key$userId', value);
+    } catch (e) {
+      AppConfig.debugPrint('Error saving unit preference: $e');
+    }
+  }
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
 
     try {
+      await _loadUnitPreferences();
+      
       final userId = AuthService.currentUserId;
       if (userId == null) {
         throw Exception('User not logged in');
@@ -245,19 +280,19 @@ class _TrackerPageState extends State<TrackerPage> {
           double cups = value;
           switch (_waterUnit) {
             case 'liters':
-              cups = value * 4.227; // 1 liter = 4.227 cups
+              cups = value * 4.227;
               break;
             case 'oz':
-              cups = value / 8; // 8 oz = 1 cup
+              cups = value / 8;
               break;
             case 'pints':
-              cups = value * 2; // 1 pint = 2 cups
+              cups = value * 2;
               break;
             case 'quarts':
-              cups = value * 4; // 1 quart = 4 cups
+              cups = value * 4;
               break;
             case 'gallons':
-              cups = value * 16; // 1 gallon = 16 cups
+              cups = value * 16;
               break;
           }
           waterText = '${cups.toStringAsFixed(1)} cups';
@@ -431,10 +466,11 @@ class _TrackerPageState extends State<TrackerPage> {
     }
   }
 
-  // Show height setup dialog on first use
   Future<void> _showHeightSetupDialog() async {
-    final heightController = TextEditingController();
-    String heightUnit = 'cm';
+    final feetController = TextEditingController();
+    final inchesController = TextEditingController();
+    final cmController = TextEditingController();
+    String heightSystem = 'standard'; // 'standard' or 'metric'
 
     return showDialog(
       context: context,
@@ -456,57 +492,146 @@ class _TrackerPageState extends State<TrackerPage> {
                 style: TextStyle(fontSize: 14),
               ),
               SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: TextField(
-                      controller: heightController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))
-                      ],
-                      decoration: InputDecoration(
-                        labelText: 'Height',
-                        border: OutlineInputBorder(),
+              
+              // Unit System Selector
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: DropdownButton<String>(
+                  value: heightSystem,
+                  isExpanded: true,
+                  underline: SizedBox(),
+                  items: [
+                    DropdownMenuItem(
+                      value: 'standard',
+                      child: Row(
+                        children: [
+                          Icon(Icons.straighten, size: 18, color: Colors.blue),
+                          SizedBox(width: 8),
+                          Text('Standard (ft/in)'),
+                        ],
                       ),
                     ),
-                  ),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      initialValue: heightUnit,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(),
+                    DropdownMenuItem(
+                      value: 'metric',
+                      child: Row(
+                        children: [
+                          Icon(Icons.straighten, size: 18, color: Colors.green),
+                          SizedBox(width: 8),
+                          Text('Metric (cm)'),
+                        ],
                       ),
-                      items: [
-                        DropdownMenuItem(value: 'cm', child: Text('cm')),
-                        DropdownMenuItem(value: 'in', child: Text('in')),
-                      ],
-                      onChanged: (value) {
-                        if (value != null) {
-                          setDialogState(() => heightUnit = value);
-                        }
-                      },
                     ),
-                  ),
-                ],
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setDialogState(() => heightSystem = value);
+                    }
+                  },
+                ),
               ),
+              
+              SizedBox(height: 16),
+              
+              // Conditional Height Input Fields
+              if (heightSystem == 'standard') ...[
+                // Feet and Inches Input
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: feetController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        decoration: InputDecoration(
+                          labelText: 'Feet',
+                          hintText: 'e.g., 5',
+                          border: OutlineInputBorder(),
+                          suffixText: 'ft',
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: inchesController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        decoration: InputDecoration(
+                          labelText: 'Inches',
+                          hintText: 'e.g., 8',
+                          border: OutlineInputBorder(),
+                          suffixText: 'in',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ] else ...[
+                // Centimeters Input
+                TextField(
+                  controller: cmController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,1}'))
+                  ],
+                  decoration: InputDecoration(
+                    labelText: 'Height',
+                    hintText: 'e.g., 173',
+                    border: OutlineInputBorder(),
+                    suffixText: 'cm',
+                  ),
+                ),
+              ],
             ],
           ),
           actions: [
             ElevatedButton(
               onPressed: () async {
-                final value = double.tryParse(heightController.text.trim());
-                if (value == null || value <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Please enter a valid height')),
-                  );
-                  return;
+                double? heightInCm;
+                
+                if (heightSystem == 'standard') {
+                  // Parse feet and inches
+                  final feet = int.tryParse(feetController.text.trim());
+                  final inches = int.tryParse(inchesController.text.trim());
+                  
+                  if (feet == null || feet < 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Please enter valid feet')),
+                    );
+                    return;
+                  }
+                  
+                  if (inches == null || inches < 0 || inches >= 12) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Please enter valid inches (0-11)')),
+                    );
+                    return;
+                  }
+                  
+                  // Convert to cm: 1 foot = 30.48 cm, 1 inch = 2.54 cm
+                  final totalInches = (feet * 12) + inches;
+                  heightInCm = totalInches * 2.54;
+                  
+                } else {
+                  // Parse centimeters
+                  heightInCm = double.tryParse(cmController.text.trim());
+                  
+                  if (heightInCm == null || heightInCm <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Please enter a valid height in cm')),
+                    );
+                    return;
+                  }
                 }
-
-                // Convert to cm if needed
-                final heightInCm = heightUnit == 'in' ? value * 2.54 : value;
 
                 final userId = AuthService.currentUserId;
                 if (userId != null) {
@@ -560,7 +685,6 @@ class _TrackerPageState extends State<TrackerPage> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    // Show height setup if not set
     if (_userHeight == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _showHeightSetupDialog();
@@ -651,7 +775,7 @@ class _TrackerPageState extends State<TrackerPage> {
             Row(
               children: [
                 Expanded(
-                  flex: 2,
+                  flex: 3,
                   child: TextField(
                     controller: _weightController,
                     keyboardType: TextInputType.number,
@@ -667,9 +791,10 @@ class _TrackerPageState extends State<TrackerPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
+                SizedBox(
+                  width: 80,
                   child: DropdownButtonFormField<String>(
-                    initialValue: _weightUnit,
+                    value: _weightUnit,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                     ),
@@ -680,6 +805,7 @@ class _TrackerPageState extends State<TrackerPage> {
                     onChanged: (value) {
                       if (value != null) {
                         setState(() => _weightUnit = value);
+                        _saveUnitPreference(_PREF_WEIGHT_UNIT, value);
                       }
                     },
                   ),
@@ -726,9 +852,7 @@ class _TrackerPageState extends State<TrackerPage> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    _weightVisible 
-                      ? 'Weight average visible on profile'
-                      : 'Weight average hidden from profile',
+                    'Weight average visible on profile',
                     style: TextStyle(
                       fontSize: 13,
                       color: Colors.grey.shade700,
@@ -755,9 +879,7 @@ class _TrackerPageState extends State<TrackerPage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      _weightLossVisible 
-                        ? 'Weight loss visible on profile'
-                        : 'Weight loss hidden from profile',
+                      'Weight loss visible on profile',
                       style: TextStyle(
                         fontSize: 13,
                         color: Colors.grey.shade700,
@@ -867,7 +989,7 @@ class _TrackerPageState extends State<TrackerPage> {
             Row(
               children: [
                 Expanded(
-                  flex: 2,
+                  flex: 3,
                   child: TextField(
                     controller: _exerciseController,
                     keyboardType: TextInputType.number,
@@ -883,9 +1005,10 @@ class _TrackerPageState extends State<TrackerPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
+                SizedBox(
+                  width: 80,
                   child: DropdownButtonFormField<String>(
-                    initialValue: _exerciseUnit,
+                    value: _exerciseUnit,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                     ),
@@ -896,6 +1019,7 @@ class _TrackerPageState extends State<TrackerPage> {
                     onChanged: (value) {
                       if (value != null) {
                         setState(() => _exerciseUnit = value);
+                        _saveUnitPreference(_PREF_EXERCISE_UNIT, value);
                       }
                     },
                   ),
@@ -929,7 +1053,7 @@ class _TrackerPageState extends State<TrackerPage> {
             Row(
               children: [
                 Expanded(
-                  flex: 2,
+                  flex: 3,
                   child: TextField(
                     controller: _waterController,
                     keyboardType: TextInputType.number,
@@ -945,9 +1069,10 @@ class _TrackerPageState extends State<TrackerPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
+                SizedBox(
+                  width: 90,
                   child: DropdownButtonFormField<String>(
-                    initialValue: _waterUnit,
+                    value: _waterUnit,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                     ),
@@ -962,6 +1087,7 @@ class _TrackerPageState extends State<TrackerPage> {
                     onChanged: (value) {
                       if (value != null) {
                         setState(() => _waterUnit = value);
+                        _saveUnitPreference(_PREF_WATER_UNIT, value);
                       }
                     },
                   ),
@@ -1049,6 +1175,7 @@ class _TrackerPageState extends State<TrackerPage> {
   }
 }
 
+// 🔥 UPDATED: Meal Dialog with Saved Ingredients auto-fill
 class _MealDialog extends StatefulWidget {
   @override
   State<_MealDialog> createState() => _MealDialogState();
@@ -1064,6 +1191,15 @@ class _MealDialogState extends State<_MealDialog> {
   final _fiberController = TextEditingController();
   final _saturatedFatController = TextEditingController();
 
+  List<NutritionInfo> _savedIngredients = [];
+  bool _isLoadingIngredients = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedIngredients();
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -1075,6 +1211,43 @@ class _MealDialogState extends State<_MealDialog> {
     _fiberController.dispose();
     _saturatedFatController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSavedIngredients() async {
+    try {
+      final ingredients = await SavedIngredientsService.loadSavedIngredients();
+      if (mounted) {
+        setState(() {
+          _savedIngredients = ingredients;
+          _isLoadingIngredients = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingIngredients = false;
+        });
+      }
+      AppConfig.debugPrint('Error loading saved ingredients: $e');
+    }
+  }
+
+  void _autofillFromIngredient(NutritionInfo ingredient) {
+    setState(() {
+      _nameController.text = ingredient.productName;
+      _caloriesController.text = ingredient.calories.toStringAsFixed(0);
+      _fatController.text = ingredient.fat.toStringAsFixed(1);
+      _sodiumController.text = ingredient.sodium.toStringAsFixed(0);
+      _sugarController.text = ingredient.sugar.toStringAsFixed(1);
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Auto-filled from "${ingredient.productName}"'),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   void _saveMeal() {
@@ -1106,7 +1279,148 @@ class _MealDialogState extends State<_MealDialog> {
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 🔥 NEW: Saved Ingredients Section
+            if (_savedIngredients.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.bookmark, color: Colors.blue.shade700, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Quick Fill from Saved Ingredients:',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue.shade900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 100,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _savedIngredients.length,
+                        itemBuilder: (context, index) {
+                          final ingredient = _savedIngredients[index];
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: InkWell(
+                              onTap: () => _autofillFromIngredient(ingredient),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                width: 140,
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: Colors.blue.shade300),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      ingredient.productName,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${ingredient.calories.toStringAsFixed(0)} cal',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Row(
+                                      children: [
+                                        Icon(Icons.touch_app, size: 12, color: Colors.blue.shade700),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'Tap to fill',
+                                          style: TextStyle(
+                                            fontSize: 9,
+                                            color: Colors.blue.shade700,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Center(
+                child: Row(
+                  children: [
+                    Expanded(child: Divider(color: Colors.grey.shade400)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        'OR ENTER MANUALLY',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ),
+                    Expanded(child: Divider(color: Colors.grey.shade400)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ] else if (_isLoadingIngredients) ...[
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Loading saved ingredients...',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // Manual Entry Fields
             TextField(
               controller: _nameController,
               decoration: const InputDecoration(

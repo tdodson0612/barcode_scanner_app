@@ -1,5 +1,5 @@
 // lib/pages/nutrition_search_screen.dart
-// Updated with recipe suggestions based on selected nutrition item
+// Updated with filter options: product, brand, ingredient, substitutes
 
 import 'package:flutter/material.dart';
 import 'package:liver_wise/models/nutrition_info.dart';
@@ -55,6 +55,9 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
   NutritionInfo? _selectedItem;
 
   List<String> _searchHistory = [];
+
+  // Search filter
+  String _searchType = 'product'; // 'product', 'brand', 'ingredient', 'substitute'
 
   // Recipe suggestions
   List<Recipe> _recipeSuggestions = [];
@@ -163,7 +166,7 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
     if (query.isEmpty) {
       ErrorHandlingService.showSimpleError(
         context,
-        "Enter a food name to search.",
+        "Enter a ${_getSearchTypeLabel()} to search.",
       );
       return;
     }
@@ -181,12 +184,15 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
       await SearchHistoryService.addToHistory(query);
       await _loadHistory();
 
-      final items = await NutritionApiService.searchByName(query);
+      final items = await NutritionApiService.searchByName(
+        query,
+        searchType: _searchType,
+      );
 
       if (items.isEmpty) {
         ErrorHandlingService.showSimpleError(
           context,
-          "No results found.",
+          "No results found for $_searchType: $query",
         );
       }
 
@@ -195,10 +201,36 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
       ErrorHandlingService.handleError(
         context: context,
         error: e,
-        customMessage: "Error searching for food.",
+        customMessage: "Error searching for $_searchType.",
       );
     } finally {
       setState(() => _isLoading = false);
+    }
+  }
+
+  String _getSearchTypeLabel() {
+    switch (_searchType) {
+      case 'brand':
+        return 'brand name';
+      case 'ingredient':
+        return 'ingredient';
+      case 'substitute':
+        return 'food item';
+      default:
+        return 'food name';
+    }
+  }
+
+  String _getSearchTypeDescription() {
+    switch (_searchType) {
+      case 'brand':
+        return 'Search by brand (e.g., "Tyson", "Organic Valley")';
+      case 'ingredient':
+        return 'Search by ingredient (e.g., "beef", "almonds")';
+      case 'substitute':
+        return 'Find healthier alternatives (e.g., "ground beef" → turkey/chicken)';
+      default:
+        return 'Search by product name';
     }
   }
 
@@ -209,7 +241,6 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
       _currentRecipeIndex = 0;
     });
     
-    // Initialize keywords and auto-search recipes
     _initKeywordButtonsFromProductName(item.productName);
     _searchRecipesBySelectedKeywords();
     
@@ -711,10 +742,98 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // Search Type Dropdown
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.filter_list, color: Colors.green.shade700, size: 20),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Search by:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: DropdownButton<String>(
+                      value: _searchType,
+                      isExpanded: true,
+                      underline: const SizedBox(),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'product',
+                          child: Text('Product Name'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'brand',
+                          child: Text('Brand'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'ingredient',
+                          child: Text('Ingredient'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'substitute',
+                          child: Text('Healthy Substitutes'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() {
+                            _searchType = value;
+                            _results = [];
+                            _selectedItem = null;
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // Description text
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 16, color: Colors.blue.shade700),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _getSearchTypeDescription(),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.blue.shade900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Search field
             TextField(
               controller: _searchController,
               decoration: InputDecoration(
-                labelText: "Search food name",
+                labelText: "Search ${_getSearchTypeLabel()}",
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -725,6 +844,7 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
 
             const SizedBox(height: 16),
 
+            // Search button
             SizedBox(
               width: double.infinity,
               height: 52,
@@ -768,7 +888,6 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
               ),
               const SizedBox(height: 12),
               
-              // Nutrition display with liver health bar
               NutritionDisplay(
                 nutrition: _selectedItem!,
                 liverScore: LiverHealthCalculator.calculate(
@@ -782,7 +901,6 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
               
               const SizedBox(height: 16),
               
-              // Liver Health Bar with smiley face
               LiverHealthBar(
                 healthScore: LiverHealthCalculator.calculate(
                   fat: _selectedItem!.fat,
@@ -794,7 +912,6 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
               
               const SizedBox(height: 20),
               
-              // Recipe suggestions
               _buildRecipeSuggestions(),
             ],
           ],

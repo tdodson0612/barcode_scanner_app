@@ -1,4 +1,4 @@
-// lib/contact_screen.dart - FIXED: Routes through DatabaseService → Worker
+// lib/contact_screen.dart - IMPROVED: Real-time validation & character count
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/contact_service.dart';
 import 'widgets/app_drawer.dart';
@@ -16,6 +16,45 @@ class _ContactScreenState extends State<ContactScreen> {
   final TextEditingController _messageController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
+  // 🔥 NEW: Real-time validation states
+  String? _emailError;
+  int _messageLength = 0;
+  bool _isEmailValid = false;
+
+  @override
+  void initState() {
+    super.initState();
+    
+    // 🔥 NEW: Add listeners for real-time updates
+    _emailController.addListener(_validateEmail);
+    _messageController.addListener(_updateMessageLength);
+  }
+
+  // 🔥 NEW: Real-time email validation
+  void _validateEmail() {
+    final email = _emailController.text.trim();
+    
+    setState(() {
+      if (email.isEmpty) {
+        _emailError = null;
+        _isEmailValid = false;
+      } else if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email)) {
+        _emailError = 'Please enter a valid email address';
+        _isEmailValid = false;
+      } else {
+        _emailError = null;
+        _isEmailValid = true;
+      }
+    });
+  }
+
+  // 🔥 NEW: Real-time message length counter
+  void _updateMessageLength() {
+    setState(() {
+      _messageLength = _messageController.text.length;
+    });
+  }
+
   Future<void> _submitForm() async {
     if (_formKey.currentState!.validate()) {
       try {
@@ -24,7 +63,6 @@ class _ContactScreenState extends State<ContactScreen> {
           const SnackBar(content: Text('Sending message...')),
         );
 
-        // FIXED: Route through DatabaseService → Worker instead of direct Supabase
         await ContactService.submitContactMessage(
           name: _nameController.text,
           email: _emailController.text,
@@ -192,53 +230,172 @@ class _ContactScreenState extends State<ContactScreen> {
 
                         const SizedBox(height: 15),
 
-                        // Email Field
-                        TextFormField(
-                          controller: _emailController,
-                          decoration: const InputDecoration(
-                            labelText: 'Email',
-                            prefixIcon: Icon(Icons.email),
-                            border: OutlineInputBorder(),
-                            focusedBorder: OutlineInputBorder(
-                              borderSide: BorderSide(color: Colors.blue, width: 2),
+                        // 🔥 IMPROVED: Email Field with real-time validation
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            TextFormField(
+                              controller: _emailController,
+                              decoration: InputDecoration(
+                                labelText: 'Email',
+                                prefixIcon: const Icon(Icons.email),
+                                suffixIcon: _emailController.text.isNotEmpty
+                                    ? Icon(
+                                        _isEmailValid ? Icons.check_circle : Icons.error,
+                                        color: _isEmailValid ? Colors.green : Colors.red,
+                                      )
+                                    : null,
+                                border: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                    color: _emailError != null ? Colors.red : Colors.grey,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderSide: BorderSide(
+                                    color: _emailError != null 
+                                        ? Colors.red 
+                                        : Colors.blue,
+                                    width: 2,
+                                  ),
+                                ),
+                                errorBorder: const OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.red, width: 2),
+                                ),
+                              ),
+                              keyboardType: TextInputType.emailAddress,
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Please enter your email';
+                                }
+                                if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                                  return 'Please enter a valid email';
+                                }
+                                return null;
+                              },
                             ),
-                          ),
-                          keyboardType: TextInputType.emailAddress,
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Please enter your email';
-                            }
-                            if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
-                              return 'Please enter a valid email';
-                            }
-                            return null;
-                          },
+                            
+                            // 🔥 NEW: Real-time error message
+                            if (_emailError != null)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 12, top: 6),
+                                child: Text(
+                                  _emailError!,
+                                  style: const TextStyle(
+                                    color: Colors.red,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            
+                            // 🔥 NEW: Success indicator
+                            if (_isEmailValid && _emailError == null)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 12, top: 6),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.check_circle, size: 16, color: Colors.green),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'Valid email address',
+                                      style: TextStyle(
+                                        color: Colors.green,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
                         ),
 
                         const SizedBox(height: 15),
 
-                        // Message Field
-                        TextFormField(
-                          controller: _messageController,
-                          decoration: const InputDecoration(
-                            labelText: 'Message',
-                            prefixIcon: Icon(Icons.message),
-                            border: OutlineInputBorder(),
-                            focusedBorder: OutlineInputBorder(
-                              borderSide: BorderSide(color: Colors.blue, width: 2),
+                        // 🔥 IMPROVED: Message Field with character counter
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            TextFormField(
+                              controller: _messageController,
+                              decoration: InputDecoration(
+                                labelText: 'Message',
+                                prefixIcon: const Icon(Icons.message),
+                                border: const OutlineInputBorder(),
+                                focusedBorder: const OutlineInputBorder(
+                                  borderSide: BorderSide(color: Colors.blue, width: 2),
+                                ),
+                                alignLabelWithHint: true,
+                                // 🔥 NEW: Character counter in hint
+                                helperText: '', // Reserve space for helper
+                              ),
+                              maxLines: 5,
+                              maxLength: 500, // Add max length
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Please enter your message';
+                                }
+                                if (value.length < 10) {
+                                  return 'Message must be at least 10 characters long';
+                                }
+                                return null;
+                              },
                             ),
-                            alignLabelWithHint: true,
-                          ),
-                          maxLines: 5,
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Please enter your message';
-                            }
-                            if (value.length < 10) {
-                              return 'Message must be at least 10 characters long';
-                            }
-                            return null;
-                          },
+                            
+                            // 🔥 NEW: Character count indicator
+                            Padding(
+                              padding: const EdgeInsets.only(left: 12, top: 4),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.text_fields,
+                                    size: 14,
+                                    color: _messageLength < 10 
+                                        ? Colors.orange 
+                                        : Colors.green,
+                                  ),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    '$_messageLength/500 characters',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: _messageLength < 10 
+                                          ? Colors.orange 
+                                          : Colors.green,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  if (_messageLength < 10)
+                                    Text(
+                                      ' (${10 - _messageLength} more needed)',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            
+                            // 🔥 NEW: Progress bar
+                            Padding(
+                              padding: const EdgeInsets.only(left: 12, top: 8, right: 12),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: (_messageLength / 500).clamp(0.0, 1.0),
+                                  backgroundColor: Colors.grey.shade200,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    _messageLength < 10 
+                                        ? Colors.orange 
+                                        : _messageLength > 450 
+                                            ? Colors.red 
+                                            : Colors.green,
+                                  ),
+                                  minHeight: 6,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
 
                         const SizedBox(height: 20),

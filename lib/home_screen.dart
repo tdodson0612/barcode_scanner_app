@@ -1469,52 +1469,70 @@ class _HomePageState extends State<HomePage>
       if (nutrition == null) {
         if (mounted && !_isDisposed) {
           setState(() {
-            _nutritionText = "No barcode found or product not recognized.\n\nTips:\n• Ensure barcode is clearly visible\n• Try better lighting\n• Hold camera steady\n• Make sure barcode fills most of frame";
-            _showLiverBar = false;
             _isLoading = false;
           });
           
           if (mounted) {
             showDialog(
               context: context,
+              barrierDismissible: false,
               builder: (context) => AlertDialog(
-                title: Row(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.error_outline, color: Colors.orange),
-                    SizedBox(width: 8),
-                    Text('Barcode Not Found'),
+                    Icon(
+                      Icons.error_outline,
+                      size: 64,
+                      color: Colors.orange,
+                    ),
+                    SizedBox(height: 16),
+                    Text(
+                      'Sorry, please try again',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _executeTakePhoto();
+                        },
+                        icon: Icon(Icons.camera_alt),
+                        label: Text('Retake'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _resetToHome();
+                        },
+                        child: Text('Cancel'),
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
-                content: Text(
-                  'We couldn\'t detect a barcode in this image.\n\n'
-                  'Tips for better results:\n'
-                  '• Ensure barcode is clearly visible and centered\n'
-                  '• Use good lighting (avoid shadows)\n'
-                  '• Hold camera steady when taking photo\n'
-                  '• Make sure barcode is not blurry\n'
-                  '• Try holding phone closer or further away'
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _resetToHome();
-                    },
-                    child: Text('Cancel'),
-                  ),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      _executeTakePhoto();
-                    },
-                    icon: Icon(Icons.camera_alt),
-                    label: Text('Try Again'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                    ),
-                  ),
-                ],
               ),
             );
           }
