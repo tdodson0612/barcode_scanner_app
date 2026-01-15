@@ -1,4 +1,4 @@
-// lib/pages/submit_recipe.dart - ENHANCED with structured ingredient rows
+// lib/pages/submit_recipe.dart - COMPLETE WITH ALL 3 TABS
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/submitted_recipes_service.dart';
 import 'package:liver_wise/services/grocery_service.dart';
@@ -13,7 +13,6 @@ import 'package:liver_wise/models/nutrition_info.dart';
 import 'dart:convert';
 import '../services/draft_recipes_service.dart';
 import '../models/draft_recipe.dart';
-
 
 class IngredientRow {
   String quantity;
@@ -60,20 +59,13 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _directionsController = TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
 
-  // 🔥 NEW: Structured ingredients
   List<IngredientRow> _ingredients = [IngredientRow()];
   final List<String> _measurements = [
-    'cup', 'cups',
-    'tbsp', 'tsp',
-    'oz', 'lb', 'g', 'kg',
-    'ml', 'l',
-    'piece', 'pieces',
-    'pinch', 'dash',
-    'to taste',
+    'cup', 'cups', 'tbsp', 'tsp', 'oz', 'lb', 'g', 'kg',
+    'ml', 'l', 'piece', 'pieces', 'pinch', 'dash', 'to taste',
   ];
-
-  final TextEditingController _descriptionController = TextEditingController();
 
   bool isSubmitting = false;
   bool isLoading = true;
@@ -83,18 +75,27 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
   Map<String, dynamic> _drafts = {};
   String? _loadedDraftName;
 
-  // Nutrition aggregation state
   List<NutritionInfo> _matchedNutritionIngredients = [];
   RecipeNutrition? _recipeNutrition;
   bool _isAnalyzingNutrition = false;
+
+  List<Map<String, dynamic>> _submittedRecipes = [];
+  bool _isLoadingSubmitted = false;
+
+  String _ingredientsToPlainText() {
+    return _ingredients
+        .where((i) => i.isValid)
+        .map((i) => '${i.quantity} ${i.measurement} ${i.name}')
+        .join('\n');
+  }
 
   @override
   void initState() {
     super.initState();
     _initializeUser();
     _loadDrafts();
+    _loadSubmittedRecipes();
 
-    // Prefill data if passed in
     if (widget.initialIngredients != null) {
       _parseInitialIngredients(widget.initialIngredients!);
     }
@@ -105,15 +106,11 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
   void _parseInitialIngredients(String ingredients) {
     try {
-      // Try to parse as JSON first
       final List<dynamic> parsed = jsonDecode(ingredients);
       _ingredients = parsed.map((e) => IngredientRow.fromJson(e)).toList();
     } catch (e) {
-      // If not JSON, parse as plain text (one per line)
       final lines = ingredients.split('\n').where((l) => l.trim().isNotEmpty).toList();
-      _ingredients = lines.map((line) {
-        return IngredientRow(name: line.trim());
-      }).toList();
+      _ingredients = lines.map((line) => IngredientRow(name: line.trim())).toList();
     }
     
     if (_ingredients.isEmpty) {
@@ -124,13 +121,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
   String _serializeIngredients() {
     final validIngredients = _ingredients.where((i) => i.isValid).toList();
     return jsonEncode(validIngredients.map((i) => i.toJson()).toList());
-  }
-
-  String _ingredientsToPlainText() {
-    return _ingredients
-        .where((i) => i.isValid)
-        .map((i) => '${i.quantity} ${i.measurement} ${i.name}')
-        .join('\n');
   }
 
   @override
@@ -155,22 +145,55 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     setState(() => _drafts = d);
   }
 
+  Future<void> _loadSubmittedRecipes() async {
+    setState(() => _isLoadingSubmitted = true);
+    
+    try {
+      final userId = AuthService.currentUserId;
+      if (userId == null) {
+        if (mounted) {
+          setState(() {
+            _submittedRecipes = [];
+            _isLoadingSubmitted = false;
+          });
+        }
+        return;
+      }
+
+      final submissions = await SubmittedRecipesService.getUserSubmissions(userId);
+      
+      if (mounted) {
+        setState(() {
+          _submittedRecipes = submissions.map((submission) => {
+            'id': submission.id,
+            'title': submission.draftRecipeId, // This would need to be fetched from draft_recipes
+            'status': submission.status,
+            'submitted_at': submission.submittedAt,
+            'approved_at': submission.reviewedAt,
+            'views': 0, // Not tracked yet
+            'rejection_reason': submission.rejectionReason,
+          }).toList();
+          _isLoadingSubmitted = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingSubmitted = false);
+      }
+      print('Error loading submitted recipes: $e');
+    }
+  }
+
   void _addIngredientRow() {
-    setState(() {
-      _ingredients.add(IngredientRow());
-    });
+    setState(() => _ingredients.add(IngredientRow()));
   }
 
   void _removeIngredientRow(int index) {
     if (_ingredients.length > 1) {
-      setState(() {
-        _ingredients.removeAt(index);
-      });
+      setState(() => _ingredients.removeAt(index));
     }
   }
 
-  // SAVE DRAFT LOCALLY
-  // SAVE DRAFT LOCALLY
   Future<void> _saveRecipe() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -258,7 +281,87 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     }
   }
 
-  // Add to grocery list
+  Future<void> _updateDraft() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final validIngredients = _ingredients.where((i) => i.isValid).toList();
+    
+    if (validIngredients.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please add at least one valid ingredient'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    if (_loadedDraftName == null) {
+      // No draft loaded, just save as new
+      _saveRecipe();
+      return;
+    }
+
+    setState(() => isSubmitting = true);
+
+    try {
+      final name = _nameController.text.trim();
+      final description = _descriptionController.text.trim();
+      final ing = _serializeIngredients();
+      final dir = _directionsController.text.trim();
+
+      // If name changed, delete old draft
+      if (_loadedDraftName != name) {
+        await LocalDraftService.deleteDraft(_loadedDraftName!);
+      }
+
+      await LocalDraftService.saveDraft(
+        name: name,
+        description: description.isNotEmpty ? description : null,
+        ingredients: ing,
+        directions: dir,
+      );
+
+      _loadedDraftName = name;
+      _isSaved = true;
+      await _loadDrafts();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Draft "$name" updated!',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.blue,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating draft: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => isSubmitting = false);
+      }
+    }
+  }
+
   Future<void> _addToGroceryList() async {
     final validIngredients = _ingredients.where((i) => i.isValid).toList();
     
@@ -393,6 +496,8 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
         _loadedDraftName = null;
       }
 
+      await _loadSubmittedRecipes();
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -416,7 +521,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
               label: 'View Status',
               textColor: Colors.white,
               onPressed: () {
-                Navigator.pushNamed(context, '/submission-status');
+                setState(() => _tabIndex = 2);
               },
             ) : null,
           ),
@@ -425,14 +530,12 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
         // Clear form
         _nameController.clear();
         _directionsController.clear();
+        _descriptionController.clear();
         setState(() {
           _ingredients = [IngredientRow()];
           _isSaved = false;
           _loadedDraftName = null;
         });
-
-        // Return to previous screen with success flag
-        Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
@@ -514,89 +617,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       rethrow;
     }
   }
-// 🔥 NEW: Update existing draft
-  Future<void> _updateDraft() async {
-    if (!_formKey.currentState!.validate()) return;
 
-    final validIngredients = _ingredients.where((i) => i.isValid).toList();
-    
-    if (validIngredients.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please add at least one valid ingredient'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    if (_loadedDraftName == null) {
-      // No draft loaded, just save as new
-      _saveRecipe();
-      return;
-    }
-
-    setState(() => isSubmitting = true);
-
-    try {
-      final name = _nameController.text.trim();
-      final description = _descriptionController.text.trim();
-      final ing = _serializeIngredients();
-      final dir = _directionsController.text.trim();
-
-      // If name changed, delete old draft
-      if (_loadedDraftName != name) {
-        await LocalDraftService.deleteDraft(_loadedDraftName!);
-      }
-
-      await LocalDraftService.saveDraft(
-        name: name,
-        description: description.isNotEmpty ? description : null,
-        ingredients: ing,
-        directions: dir,
-      );
-
-      _loadedDraftName = name;
-      _isSaved = true;
-      await _loadDrafts();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Draft "$name" updated!',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: Colors.blue,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error updating draft: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => isSubmitting = false);
-      }
-    }
-  }
-
-  // Analyze recipe nutrition
   // Analyze recipe nutrition
   Future<void> _analyzeRecipeNutrition() async {
     final validIngredients = _ingredients.where((i) => i.isValid).toList();
@@ -620,11 +641,9 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     try {
       final saved = await SavedIngredientsService.loadSavedIngredients();
       
-      // 🔥 FIXED: Better error message with actionable guidance
       if (saved.isEmpty) {
         if (mounted) {
           setState(() => _isAnalyzingNutrition = false);
-          
           showDialog(
             context: context,
             builder: (context) => AlertDialog(
@@ -645,10 +664,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                 'Saved ingredients help us calculate accurate nutrition for your recipes!'
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('OK'),
-                ),
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
                 ElevatedButton.icon(
                   onPressed: () {
                     Navigator.pop(context);
@@ -669,28 +685,19 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       }
 
       final List<NutritionInfo> matches = [];
-
-      // 🔥 IMPROVED: More flexible ingredient matching
       for (var ingredient in validIngredients) {
         final name = ingredient.name.trim().toLowerCase();
-        
-        // Skip very short ingredient names (like "salt", "oil")
         if (name.length < 3) continue;
         
         final found = saved.where((item) {
           final itemName = item.productName.toLowerCase();
-          
-          // Match if ingredient name is in product name OR product name is in ingredient
-          // Also try matching individual words
           final nameWords = name.split(' ');
           final itemWords = itemName.split(' ');
           
-          // Direct contains check
           if (itemName.contains(name) || name.contains(itemName)) {
             return true;
           }
           
-          // Word-by-word matching (at least 1 word must match)
           for (var word in nameWords) {
             if (word.length >= 3 && itemWords.any((iw) => iw.contains(word))) {
               return true;
@@ -699,12 +706,9 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
           
           return false;
         }).toList();
-
+        
         for (var item in found) {
-          final already = matches.any(
-            (m) => m.productName.toLowerCase() == item.productName.toLowerCase(),
-          );
-          if (!already) {
+          if (!matches.any((m) => m.productName.toLowerCase() == item.productName.toLowerCase())) {
             matches.add(item);
           }
         }
@@ -713,7 +717,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       if (matches.isEmpty) {
         if (mounted) {
           setState(() => _isAnalyzingNutrition = false);
-          
           showDialog(
             context: context,
             builder: (context) => AlertDialog(
@@ -728,14 +731,9 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'We couldn\'t match your recipe ingredients to saved items.\n'
-                  ),
+                  Text('We couldn\'t match your recipe ingredients to saved items.\n'),
                   SizedBox(height: 12),
-                  Text(
-                    'Recipe ingredients:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
+                  Text('Recipe ingredients:', style: TextStyle(fontWeight: FontWeight.bold)),
                   ...validIngredients.take(5).map((ing) => 
                     Padding(
                       padding: EdgeInsets.only(left: 8, top: 4),
@@ -748,10 +746,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                       child: Text('... and ${validIngredients.length - 5} more'),
                     ),
                   SizedBox(height: 12),
-                  Text(
-                    'You have ${saved.length} saved ingredient${saved.length == 1 ? '' : 's'}:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
+                  Text('You have ${saved.length} saved ingredient${saved.length == 1 ? '' : 's'}:', style: TextStyle(fontWeight: FontWeight.bold)),
                   ...saved.take(3).map((item) => 
                     Padding(
                       padding: EdgeInsets.only(left: 8, top: 4),
@@ -766,10 +761,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                 ],
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('OK'),
-                ),
+                TextButton(onPressed: () => Navigator.pop(context), child: Text('OK')),
                 ElevatedButton.icon(
                   onPressed: () {
                     Navigator.pop(context);
@@ -796,13 +788,9 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
           _matchedNutritionIngredients = matches;
           _recipeNutrition = totals;
         });
-        
-        // 🔥 NEW: Show success message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              '✅ Matched ${matches.length} ingredient${matches.length == 1 ? '' : 's'}!'
-            ),
+            content: Text('✅ Matched ${matches.length} ingredient${matches.length == 1 ? '' : 's'}!'),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 2),
           ),
@@ -810,20 +798,161 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       }
     } catch (e) {
       if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          customMessage: 'Error analyzing recipe nutrition',
-        );
+        await ErrorHandlingService.handleError(context: context, error: e, customMessage: 'Error analyzing nutrition');
       }
     } finally {
+      if (mounted) setState(() => _isAnalyzingNutrition = false);
+    }
+  }
+
+  void _loadDraftForEditing(String name, Map<String, dynamic> draft) {
+    setState(() {
+      _nameController.text = draft["name"] ?? '';
+      _directionsController.text = draft["directions"] ?? '';
+      _descriptionController.text = draft["description"] ?? '';
+      
+      try {
+        final List<dynamic> parsed = jsonDecode(draft["ingredients"]);
+        _ingredients = parsed.map((e) => IngredientRow.fromJson(e)).toList();
+      } catch (e) {
+        _ingredients = [IngredientRow(name: draft["ingredients"] ?? '')];
+      }
+      
+      if (_ingredients.isEmpty) {
+        _ingredients = [IngredientRow()];
+      }
+      
+      _loadedDraftName = name;
+      _isSaved = true;
+      _tabIndex = 0;
+    });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Loaded "$name" for editing'), backgroundColor: Colors.blue, duration: const Duration(seconds: 2)),
+    );
+  }
+
+  Future<void> _confirmDeleteDraft(String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Draft'),
+        content: Text('Are you sure you want to delete "$name"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed == true) {
+      await LocalDraftService.deleteDraft(name);
+      await _loadDrafts();
+      
       if (mounted) {
-        setState(() => _isAnalyzingNutrition = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Deleted "$name"'), backgroundColor: Colors.orange),
+        );
       }
     }
   }
 
-  // UI BUILDERS -----------------------------------------------------
+  String _formatDateTime(dynamic timestamp) {
+    try {
+      if (timestamp == null) return 'Unknown';
+      
+      DateTime date;
+      if (timestamp is String) {
+        date = DateTime.parse(timestamp);
+      } else if (timestamp is DateTime) {
+        date = timestamp;
+      } else {
+        return 'Unknown';
+      }
+      
+      final now = DateTime.now();
+      final diff = now.difference(date);
+      
+      if (diff.inDays == 0) {
+        if (diff.inHours == 0) return '${diff.inMinutes} min ago';
+        return '${diff.inHours} hr ago';
+      } else if (diff.inDays < 7) {
+        return '${diff.inDays} day${diff.inDays == 1 ? '' : 's'} ago';
+      } else {
+        return '${date.month}/${date.day}/${date.year}';
+      }
+    } catch (e) {
+      return 'Unknown';
+    }
+  }
+
+  void _showSubmittedRecipeDetails(Map<String, dynamic> recipe) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(recipe['title'] ?? 'Recipe Details'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildDetailRow('Status', recipe['status'] ?? 'pending'),
+              _buildDetailRow('Submitted', _formatDateTime(recipe['submitted_at'])),
+              if (recipe['approved_at'] != null)
+                _buildDetailRow('Approved', _formatDateTime(recipe['approved_at'])),
+              if (recipe['views'] != null)
+                _buildDetailRow('Views', recipe['views'].toString()),
+              if (recipe['rejection_reason'] != null) ...[
+                const SizedBox(height: 12),
+                const Text('Rejection Reason:', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                const SizedBox(height: 4),
+                Text(recipe['rejection_reason'], style: const TextStyle(color: Colors.red)),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved': return Colors.green;
+      case 'rejected': return Colors.red;
+      default: return Colors.orange;
+    }
+  }
+
+  IconData _getStatusIcon(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved': return Icons.check_circle;
+      case 'rejected': return Icons.cancel;
+      default: return Icons.pending;
+    }
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text('$label:', style: const TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          Expanded(child: Text(value)),
+        ],
+      ),
+    );
+  }
 
   Widget _buildTabButton(String title, int index) {
     final selected = _tabIndex == index;
@@ -839,7 +968,9 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
               style: TextStyle(
                 color: selected ? Colors.white : Colors.black87,
                 fontWeight: FontWeight.bold,
+                fontSize: 13,
               ),
+              textAlign: TextAlign.center,
             ),
           ),
         ),
@@ -854,7 +985,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
           padding: const EdgeInsets.all(20),
           margin: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.white.withAlpha((0.9 * 255).toInt()),
+            color: Colors.white.withAlpha(230),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(
@@ -862,13 +993,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
             children: [
               Icon(Icons.bookmark_border, size: 64, color: Colors.grey.shade400),
               const SizedBox(height: 16),
-              const Text(
-                "No drafts saved yet",
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              const Text("No drafts saved yet", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Text(
                 "Save your recipes as drafts to edit them later",
@@ -888,9 +1013,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
           elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: ListTile(
             contentPadding: const EdgeInsets.all(16),
             leading: Container(
@@ -901,13 +1024,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
               ),
               child: Icon(Icons.receipt_long, color: Colors.green.shade700),
             ),
-            title: Text(
-              name,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            title: Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -917,25 +1034,17 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                 ),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: Colors.blue.shade200),
-                      ),
-                      child: Text(
-                        'DRAFT',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue.shade700,
-                        ),
-                      ),
-                    ),
-                  ],
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.blue.shade200),
+                  ),
+                  child: Text(
+                    'DRAFT',
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue.shade700),
+                  ),
                 ),
               ],
             ),
@@ -945,9 +1054,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                 IconButton(
                   icon: const Icon(Icons.edit, color: Colors.blue),
                   tooltip: 'Edit Draft',
-                  onPressed: () {
-                    _loadDraftForEditing(name, draft);
-                  },
+                  onPressed: () => _loadDraftForEditing(name, draft),
                 ),
                 IconButton(
                   icon: const Icon(Icons.delete, color: Colors.red),
@@ -956,108 +1063,129 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                 ),
               ],
             ),
-            onTap: () {
-              _loadDraftForEditing(name, draft);
-            },
+            onTap: () => _loadDraftForEditing(name, draft),
           ),
         );
       }).toList(),
     );
   }
 
-  // 🔥 NEW: Helper method to format date/time
-  String _formatDateTime(String? dateTime) {
-    if (dateTime == null) return 'Unknown';
-    
-    try {
-      final dt = DateTime.parse(dateTime);
-      final now = DateTime.now();
-      final difference = now.difference(dt);
-      
-      if (difference.inDays == 0) {
-        if (difference.inHours == 0) {
-          return '${difference.inMinutes} minutes ago';
-        }
-        return '${difference.inHours} hours ago';
-      } else if (difference.inDays == 1) {
-        return 'Yesterday';
-      } else if (difference.inDays < 7) {
-        return '${difference.inDays} days ago';
-      } else {
-        return '${dt.month}/${dt.day}/${dt.year}';
-      }
-    } catch (e) {
-      return dateTime;
+  Widget _buildSubmittedList() {
+    if (_isLoadingSubmitted) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(40),
+          child: CircularProgressIndicator(),
+        ),
+      );
     }
-  }
 
-  // 🔥 NEW: Separate method for loading draft with better UX
-  void _loadDraftForEditing(String name, Map<String, dynamic> draft) {
-    setState(() {
-      _nameController.text = draft["name"] ?? '';
-      _directionsController.text = draft["directions"] ?? '';
-      
-      // Parse ingredients
-      try {
-        final List<dynamic> parsed = jsonDecode(draft["ingredients"]);
-        _ingredients = parsed.map((e) => IngredientRow.fromJson(e)).toList();
-      } catch (e) {
-        _ingredients = [IngredientRow(name: draft["ingredients"] ?? '')];
-      }
-      
-      if (_ingredients.isEmpty) {
-        _ingredients = [IngredientRow()];
-      }
-      
-      _loadedDraftName = name;
-      _isSaved = true;
-      _tabIndex = 0; // Switch to Submit Recipe tab
-    });
-    
-    // Show success message
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Loaded "$name" for editing'),
-        backgroundColor: Colors.blue,
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
+    if (_submittedRecipes.isEmpty) {
+      return Center(
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          margin: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white.withAlpha(230),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.send_outlined, size: 64, color: Colors.grey.shade400),
+              const SizedBox(height: 16),
+              const Text(
+                "No submitted recipes yet",
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Submit a recipe to see it here",
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
-  // 🔥 NEW: Confirm before deleting draft
-  Future<void> _confirmDeleteDraft(String name) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Draft'),
-        content: Text('Are you sure you want to delete "$name"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+    return ListView(
+      padding: const EdgeInsets.all(10),
+      children: _submittedRecipes.map((recipe) {
+        final status = recipe['status'] ?? 'pending';
+        final statusColor = _getStatusColor(status);
+        final statusIcon = _getStatusIcon(status);
+        
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    
-    if (confirmed == true) {
-      await LocalDraftService.deleteDraft(name);
-      await _loadDrafts();
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Deleted "$name"'),
-            backgroundColor: Colors.orange,
+          child: ListTile(
+            contentPadding: const EdgeInsets.all(16),
+            leading: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: statusColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(statusIcon, color: statusColor),
+            ),
+            title: Text(
+              recipe['title'] ?? 'Untitled',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 4),
+                Text(
+                  "Submitted: ${_formatDateTime(recipe['submitted_at'])}",
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: statusColor),
+                      ),
+                      child: Text(
+                        status.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: statusColor,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    if (recipe['views'] != null) ...[
+                      const SizedBox(width: 8),
+                      Icon(Icons.visibility, size: 14, color: Colors.grey.shade600),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${recipe['views']}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () => _showSubmittedRecipeDetails(recipe),
           ),
         );
-      }
-    }
+      }).toList(),
+    );
   }
 
   Widget _buildIngredientRow(int index) {
@@ -1073,7 +1201,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       ),
       child: Row(
         children: [
-          // Quantity field
           Expanded(
             flex: 2,
             child: TextFormField(
@@ -1081,48 +1208,32 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
               decoration: InputDecoration(
                 labelText: 'Qty',
                 hintText: '1',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 isDense: true,
               ),
-              keyboardType: TextInputType.numberWithOptions(decimal: true),
-              onChanged: (value) {
-                ingredient.quantity = value;
-              },
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (value) => ingredient.quantity = value,
             ),
           ),
           const SizedBox(width: 8),
-          
-          // Measurement dropdown
           Expanded(
             flex: 2,
             child: DropdownButtonFormField<String>(
-              initialValue: ingredient.measurement,
+              value: ingredient.measurement,
               decoration: InputDecoration(
                 labelText: 'Unit',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 isDense: true,
               ),
-              items: _measurements.map((m) {
-                return DropdownMenuItem(value: m, child: Text(m));
-              }).toList(),
+              items: _measurements.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
               onChanged: (value) {
-                if (value != null) {
-                  setState(() {
-                    ingredient.measurement = value;
-                  });
-                }
+                if (value != null) setState(() => ingredient.measurement = value);
               },
             ),
           ),
           const SizedBox(width: 8),
-          
-          // Ingredient name field
           Expanded(
             flex: 4,
             child: TextFormField(
@@ -1130,15 +1241,11 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
               decoration: InputDecoration(
                 labelText: 'Ingredient',
                 hintText: 'flour',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 isDense: true,
               ),
-              onChanged: (value) {
-                ingredient.name = value;
-              },
+              onChanged: (value) => ingredient.name = value,
               validator: (value) {
                 if (ingredient.quantity.isNotEmpty && (value == null || value.trim().isEmpty)) {
                   return 'Required';
@@ -1148,8 +1255,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
             ),
           ),
           const SizedBox(width: 8),
-          
-          // Delete button
           IconButton(
             icon: const Icon(Icons.remove_circle, color: Colors.red),
             onPressed: _ingredients.length > 1 ? () => _removeIngredientRow(index) : null,
@@ -1170,7 +1275,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withAlpha((0.9 * 255).toInt()),
+        color: Colors.white.withAlpha(230),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
@@ -1180,14 +1285,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
             children: [
               Icon(_getIconForField(label), color: Colors.green, size: 20),
               const SizedBox(width: 8),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-              ),
+              Text(label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
             ],
           ),
           const SizedBox(height: 12),
@@ -1222,25 +1320,17 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
   IconData _getIconForField(String label) {
     switch (label) {
-      case 'Recipe Name':
-        return Icons.restaurant;
-      case 'Ingredients':
-        return Icons.list_alt;
-      case 'Directions':
-        return Icons.description;
-      default:
-        return Icons.edit;
+      case 'Recipe Name': return Icons.restaurant;
+      case 'Ingredients': return Icons.list_alt;
+      case 'Directions': return Icons.description;
+      default: return Icons.edit;
     }
   }
-
-  // MAIN BUILD -----------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
@@ -1251,9 +1341,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       ),
       body: Stack(
         children: [
-          Positioned.fill(
-            child: Image.asset('assets/background.png', fit: BoxFit.cover),
-          ),
+          Positioned.fill(child: Image.asset('assets/background.png', fit: BoxFit.cover)),
           Column(
             children: [
               Container(
@@ -1262,11 +1350,16 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                   children: [
                     _buildTabButton("Submit Recipe", 0),
                     _buildTabButton("Saved Drafts", 1),
+                    _buildTabButton("Submitted", 2),
                   ],
                 ),
               ),
               Expanded(
-                child: _tabIndex == 0 ? _buildSubmitForm() : _buildDraftList(),
+                child: _tabIndex == 0
+                    ? _buildSubmitForm()
+                    : _tabIndex == 1
+                        ? _buildDraftList()
+                        : _buildSubmittedList(),
               ),
             ],
           ),
@@ -1286,7 +1379,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                color: Colors.white.withAlpha(230),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Column(
@@ -1327,7 +1420,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                color: Colors.white.withAlpha(230),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Column(
@@ -1382,12 +1475,11 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
             const SizedBox(height: 20),
 
-
             // 🔥 NEW: Structured Ingredients Section
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                color: Colors.white.withAlpha(230),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Column(
@@ -1457,7 +1549,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                color: Colors.white.withAlpha(230),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Column(
@@ -1558,7 +1650,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                color: Colors.white.withAlpha(230),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Column(

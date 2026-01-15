@@ -1,4 +1,4 @@
-// lib/services/feed_posts_service.dart - WITH ENHANCED DEBUG LOGGING
+// lib/services/feed_posts_service.dart - COMPLETELY REWRITTEN WITH OPTIMIZED QUERIES
 import 'database_service_core.dart';
 import 'auth_service.dart';
 import '../config/app_config.dart';
@@ -107,6 +107,7 @@ class FeedPostsService {
     return buffer.toString();
   }
 
+  /// 🔥 NEW: Optimized feed loading with separate queries for public/friends posts
   /// Get feed posts based on current user's friend status
   /// Shows: Public posts + Friends-only posts from friends
   static Future<List<Map<String, dynamic>>> getFeedPosts({
@@ -120,12 +121,51 @@ class FeedPostsService {
       
       if (userId == null) {
         AppConfig.debugPrint('⚠️ User not authenticated, showing only public posts');
-        return await _getPublicPostsOnly(limit: limit);
+        return await _getPublicPostsOnly(limit: limit, offset: offset);
       }
 
       AppConfig.debugPrint('📱 Loading feed for authenticated user: $userId');
 
-      // Get friend IDs from friend_requests table (accepted friendships)
+      // Step 1: Get friend IDs
+      final friendIds = await _getFriendIds(userId);
+      AppConfig.debugPrint('👥 Total friends (including self): ${friendIds.length}');
+
+      // Step 2: Get public posts
+      AppConfig.debugPrint('📡 Querying PUBLIC posts...');
+      final publicPosts = await _getPublicPosts(limit: limit * 2);
+      AppConfig.debugPrint('✅ Found ${publicPosts.length} public posts');
+
+      // Step 3: Get friends-only posts
+      List<Map<String, dynamic>> friendsPosts = [];
+      
+      if (friendIds.length > 1) { // More than just self
+        AppConfig.debugPrint('📡 Querying FRIENDS-ONLY posts...');
+        friendsPosts = await _getFriendsOnlyPosts(friendIds, limit: 50);
+        AppConfig.debugPrint('✅ Found ${friendsPosts.length} friends-only posts');
+      }
+
+      // Step 4: Combine, deduplicate, and sort
+      final allPosts = [...publicPosts, ...friendsPosts];
+      final uniquePosts = _deduplicateAndSort(allPosts);
+
+      // Step 5: Apply pagination
+      final paginatedPosts = _applyPagination(uniquePosts, limit: limit, offset: offset);
+
+      AppConfig.debugPrint('✅ Returning ${paginatedPosts.length} posts (total: ${uniquePosts.length})');
+
+      return paginatedPosts;
+    } catch (e, stackTrace) {
+      AppConfig.debugPrint('❌ Error loading feed: $e');
+      AppConfig.debugPrint('Stack trace: $stackTrace');
+      return [];
+    }
+  }
+
+  /// Get friend IDs for the current user
+  static Future<Set<String>> _getFriendIds(String userId) async {
+    final friendIds = <String>{userId}; // Include self
+    
+    try {
       final friendsResult = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'friend_requests',
@@ -133,16 +173,12 @@ class FeedPostsService {
         columns: ['sender', 'receiver'],
       );
 
-      final friendIds = <String>{userId}; // Include self
-      
       if (friendsResult != null && (friendsResult as List).isNotEmpty) {
         AppConfig.debugPrint('👥 Found ${(friendsResult as List).length} accepted friendships');
         
         for (final friendship in friendsResult) {
           final sender = friendship['sender']?.toString();
           final receiver = friendship['receiver']?.toString();
-          
-          AppConfig.debugPrint('  Friendship: $sender <-> $receiver');
           
           if (sender == userId && receiver != null) {
             friendIds.add(receiver);
@@ -153,92 +189,18 @@ class FeedPostsService {
       } else {
         AppConfig.debugPrint('👥 No accepted friend requests found');
       }
-
-      AppConfig.debugPrint('👥 Final friend IDs (including self): ${friendIds.length} - $friendIds');
-
-      // Get all posts
-      AppConfig.debugPrint('📡 Querying feed_posts table...');
-      
-      final postsResult = await DatabaseServiceCore.workerQuery(
-        action: 'select',
-        table: 'feed_posts',
-        orderBy: 'created_at',
-        ascending: false,
-        limit: 200,
-      );
-
-      if (postsResult == null) {
-        AppConfig.debugPrint('❌ postsResult is NULL');
-        return [];
-      }
-      
-      if ((postsResult as List).isEmpty) {
-        AppConfig.debugPrint('❌ postsResult is EMPTY (no posts in database)');
-        return [];
-      }
-
-      final allPosts = List<Map<String, dynamic>>.from(postsResult);
-      
-      AppConfig.debugPrint('📊 Total posts in database: ${allPosts.length}');
-      
-      // Debug: Show all posts
-      for (var i = 0; i < allPosts.length && i < 5; i++) {
-        final post = allPosts[i];
-        AppConfig.debugPrint('  Post $i:');
-        AppConfig.debugPrint('    - ID: ${post['id']}');
-        AppConfig.debugPrint('    - User ID: ${post['user_id']}');
-        AppConfig.debugPrint('    - Username: ${post['username']}');
-        AppConfig.debugPrint('    - Visibility: ${post['visibility']}');
-        AppConfig.debugPrint('    - Content: ${post['content']?.toString().substring(0, 30)}...');
-      }
-      
-      // Filter posts based on visibility rules:
-      // 1. All PUBLIC posts (from anyone)
-      // 2. FRIENDS-ONLY posts from friends
-      final visiblePosts = allPosts.where((post) {
-        final visibility = post['visibility']?.toString() ?? 'public';
-        final postUserId = post['user_id']?.toString();
-        
-        AppConfig.debugPrint('🔍 Checking post ${post['id']}: visibility=$visibility, postUserId=$postUserId');
-        
-        // Show all public posts
-        if (visibility == 'public') {
-          AppConfig.debugPrint('  ✅ PUBLIC post - showing');
-          return true;
-        }
-        
-        // Show friends-only posts only from friends
-        if (visibility == 'friends' && postUserId != null) {
-          final isFriend = friendIds.contains(postUserId);
-          AppConfig.debugPrint('  ${isFriend ? "✅" : "❌"} FRIENDS-ONLY post - ${isFriend ? "showing" : "hiding"}');
-          return isFriend;
-        }
-        
-        AppConfig.debugPrint('  ❌ Unknown visibility - hiding');
-        return false;
-      }).toList();
-
-      AppConfig.debugPrint('✅ Visible posts after filtering: ${visiblePosts.length}');
-
-      final limitedPosts = visiblePosts.take(limit).toList();
-
-      AppConfig.debugPrint('✅ Returning ${limitedPosts.length} posts (limit: $limit)');
-
-      return limitedPosts;
-    } catch (e, stackTrace) {
-      AppConfig.debugPrint('❌ Error loading feed: $e');
-      AppConfig.debugPrint('Stack trace: $stackTrace');
-      return [];
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Error fetching friend IDs: $e');
     }
+
+    return friendIds;
   }
 
-  /// Get only public posts (for unauthenticated users)
-  static Future<List<Map<String, dynamic>>> _getPublicPostsOnly({
-    int limit = 20,
+  /// Get public posts (visible to everyone)
+  static Future<List<Map<String, dynamic>>> _getPublicPosts({
+    int limit = 40,
   }) async {
     try {
-      AppConfig.debugPrint('🌍 Loading PUBLIC posts only...');
-      
       final result = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'feed_posts',
@@ -249,19 +211,120 @@ class FeedPostsService {
       );
 
       if (result == null || (result as List).isEmpty) {
+        return [];
+      }
+
+      return List<Map<String, dynamic>>.from(result as List);
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error fetching public posts: $e');
+      return [];
+    }
+  }
+
+  /// Get friends-only posts from friend list
+  static Future<List<Map<String, dynamic>>> _getFriendsOnlyPosts(
+    Set<String> friendIds, {
+    int limit = 50,
+  }) async {
+    final friendsPosts = <Map<String, dynamic>>[];
+
+    try {
+      // Query friends-only posts for each friend
+      // Note: We query each friend separately because Supabase REST API 
+      // via worker doesn't support SQL IN operator easily
+      for (final friendId in friendIds) {
+        final result = await DatabaseServiceCore.workerQuery(
+          action: 'select',
+          table: 'feed_posts',
+          filters: {
+            'visibility': 'friends',
+            'user_id': friendId,
+          },
+          orderBy: 'created_at',
+          ascending: false,
+          limit: 20, // Limit per friend to avoid too many results
+        );
+
+        if (result != null && (result as List).isNotEmpty) {
+          friendsPosts.addAll(List<Map<String, dynamic>>.from(result as List));
+        }
+      }
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error fetching friends-only posts: $e');
+    }
+
+    return friendsPosts;
+  }
+
+  /// Deduplicate posts by ID and sort by created_at descending
+  static List<Map<String, dynamic>> _deduplicateAndSort(
+    List<Map<String, dynamic>> posts,
+  ) {
+    // Remove duplicates
+    final seenIds = <String>{};
+    final uniquePosts = posts.where((post) {
+      final id = post['id']?.toString();
+      if (id == null || seenIds.contains(id)) return false;
+      seenIds.add(id);
+      return true;
+    }).toList();
+
+    // Sort by created_at descending (newest first)
+    uniquePosts.sort((a, b) {
+      final aTime = a['created_at']?.toString() ?? '';
+      final bTime = b['created_at']?.toString() ?? '';
+      return bTime.compareTo(aTime); // Newest first
+    });
+
+    return uniquePosts;
+  }
+
+  /// Apply pagination to post list
+  static List<Map<String, dynamic>> _applyPagination(
+    List<Map<String, dynamic>> posts, {
+    required int limit,
+    required int offset,
+  }) {
+    final startIndex = offset.clamp(0, posts.length);
+    final endIndex = (offset + limit).clamp(0, posts.length);
+    
+    return posts.sublist(startIndex, endIndex);
+  }
+
+  /// Get only public posts (for unauthenticated users)
+  static Future<List<Map<String, dynamic>>> _getPublicPostsOnly({
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    try {
+      AppConfig.debugPrint('🌍 Loading PUBLIC posts only...');
+      
+      final result = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'feed_posts',
+        filters: {'visibility': 'public'},
+        orderBy: 'created_at',
+        ascending: false,
+        limit: limit + offset, // Get extra to account for offset
+      );
+
+      if (result == null || (result as List).isEmpty) {
         AppConfig.debugPrint('❌ No public posts found');
         return [];
       }
 
-      AppConfig.debugPrint('✅ Found ${(result as List).length} public posts');
-      return List<Map<String, dynamic>>.from(result);
+      final allPosts = List<Map<String, dynamic>>.from(result as List);
+      final paginatedPosts = _applyPagination(allPosts, limit: limit, offset: offset);
+
+      AppConfig.debugPrint('✅ Found ${paginatedPosts.length} public posts');
+      return paginatedPosts;
     } catch (e) {
       AppConfig.debugPrint('❌ Error loading public posts: $e');
       return [];
     }
   }
 
-  /// LEGACY: Keep this for compatibility
+  /// LEGACY: Keep this for compatibility (redirects to new method)
   static Future<List<Map<String, dynamic>>> getFeedPostsFromFriends({
     int limit = 20,
     int offset = 0,
@@ -269,6 +332,7 @@ class FeedPostsService {
     return getFeedPosts(limit: limit, offset: offset);
   }
 
+  /// Report a post for harassment or inappropriate content
   static Future<void> reportPost({
     required String postId,
     required String reason,
@@ -280,6 +344,7 @@ class FeedPostsService {
         throw Exception('User not authenticated');
       }
 
+      // Check if user has already reported this post
       final existingReport = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'post_reports',
@@ -294,6 +359,7 @@ class FeedPostsService {
         throw Exception('You have already reported this post');
       }
 
+      // Create new report
       await DatabaseServiceCore.workerQuery(
         action: 'insert',
         table: 'post_reports',
@@ -313,6 +379,7 @@ class FeedPostsService {
     }
   }
 
+  /// Delete a post (only post owner can delete)
   static Future<void> deletePost(String postId) async {
     try {
       final userId = AuthService.currentUserId;
@@ -321,12 +388,13 @@ class FeedPostsService {
         throw Exception('User not authenticated');
       }
 
+      // Delete post (only if user_id matches - enforced by filters)
       await DatabaseServiceCore.workerQuery(
         action: 'delete',
         table: 'feed_posts',
         filters: {
           'id': postId,
-          'user_id': userId,
+          'user_id': userId, // Security: only delete your own posts
         },
       );
 
@@ -337,6 +405,7 @@ class FeedPostsService {
     }
   }
 
+  /// Like a post
   static Future<void> likePost(String postId) async {
     try {
       final userId = AuthService.currentUserId;
@@ -358,10 +427,17 @@ class FeedPostsService {
       AppConfig.debugPrint('✅ Post liked: $postId');
     } catch (e) {
       AppConfig.debugPrint('❌ Error liking post: $e');
+      
+      // Check if error is duplicate (user already liked)
+      if (e.toString().toLowerCase().contains('duplicate')) {
+        throw Exception('You have already liked this post');
+      }
+      
       throw Exception('Failed to like post: $e');
     }
   }
 
+  /// Unlike a post
   static Future<void> unlikePost(String postId) async {
     try {
       final userId = AuthService.currentUserId;
@@ -386,6 +462,7 @@ class FeedPostsService {
     }
   }
 
+  /// Check if current user has liked a post
   static Future<bool> hasUserLikedPost(String postId) async {
     try {
       final userId = AuthService.currentUserId;
@@ -411,23 +488,110 @@ class FeedPostsService {
     }
   }
 
+  /// Get total like count for a post
   static Future<int> getPostLikeCount(String postId) async {
     try {
       final result = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'feed_post_likes',
         filters: {'post_id': postId},
-        columns: ['COUNT(*) as count'],
       );
 
       if (result == null || (result as List).isEmpty) {
         return 0;
       }
 
-      return result[0]['count'] as int? ?? 0;
+      return (result as List).length;
     } catch (e) {
       AppConfig.debugPrint('❌ Error getting like count: $e');
       return 0;
+    }
+  }
+
+  /// Get comments for a post
+  static Future<List<Map<String, dynamic>>> getPostComments(
+    String postId, {
+    int limit = 50,
+  }) async {
+    try {
+      final result = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'feed_post_comments',
+        filters: {'post_id': postId},
+        orderBy: 'created_at',
+        ascending: true, // Oldest first for comments
+        limit: limit,
+      );
+
+      if (result == null || (result as List).isEmpty) {
+        return [];
+      }
+
+      return List<Map<String, dynamic>>.from(result as List);
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error getting comments: $e');
+      return [];
+    }
+  }
+
+  /// Add a comment to a post
+  static Future<void> addComment({
+    required String postId,
+    required String content,
+  }) async {
+    try {
+      final userId = AuthService.currentUserId;
+      final username = await AuthService.fetchCurrentUsername();
+
+      if (userId == null || username == null) {
+        throw Exception('User not authenticated');
+      }
+
+      if (content.trim().isEmpty) {
+        throw Exception('Comment cannot be empty');
+      }
+
+      await DatabaseServiceCore.workerQuery(
+        action: 'insert',
+        table: 'feed_post_comments',
+        data: {
+          'post_id': postId,
+          'user_id': userId,
+          'username': username,
+          'content': content.trim(),
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
+
+      AppConfig.debugPrint('✅ Comment added to post: $postId');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error adding comment: $e');
+      throw Exception('Failed to add comment: $e');
+    }
+  }
+
+  /// Delete a comment (only comment owner can delete)
+  static Future<void> deleteComment(String commentId) async {
+    try {
+      final userId = AuthService.currentUserId;
+      
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+
+      await DatabaseServiceCore.workerQuery(
+        action: 'delete',
+        table: 'feed_post_comments',
+        filters: {
+          'id': commentId,
+          'user_id': userId, // Security: only delete your own comments
+        },
+      );
+
+      AppConfig.debugPrint('✅ Comment deleted: $commentId');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error deleting comment: $e');
+      throw Exception('Failed to delete comment: $e');
     }
   }
 }
