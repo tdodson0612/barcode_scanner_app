@@ -56,6 +56,9 @@
 		<string>This app needs access to your photos to select and upload images.</string>
 		<key>NSPhotoLibraryAddUsageDescription</key>
 		<string>This app needs permission to save photos to your library.</string>
+		<key>NSCameraUsageDescription</key>
+		<string>This app uses the camera to capture photos for analysis.</string>
+
 
 		<!-- SKAdNetwork Configuration -->
 		<key>SKAdNetworkItems</key>
