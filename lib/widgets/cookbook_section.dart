@@ -1,5 +1,7 @@
-// lib/widgets/cookbook_section.dart
+// lib/widgets/cookbook_section.dart - COMPLETE WITH NUTRITION TABS
 import 'package:flutter/material.dart';
+import 'package:liver_wise/widgets/nutrition_facts_label.dart';
+import 'package:liver_wise/models/nutrition_info.dart';
 import '../models/cookbook_recipe.dart';
 import '../services/cookbook_service.dart';
 import '../config/app_config.dart';
@@ -144,115 +146,41 @@ class _CookbookSectionState extends State<CookbookSection> {
               
               const Divider(height: 1),
               
-              // Content
+              // Content with tabs if nutrition available
               Expanded(
-                child: ListView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    // Notes (if any)
-                    if (recipe.notes != null && recipe.notes!.isNotEmpty) ...[
-                      _buildSection(
-                        'My Notes',
-                        const Icon(Icons.note, color: Colors.orange),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.yellow[50],
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.yellow[200]!),
+                child: recipe.nutrition != null
+                  ? DefaultTabController(
+                      length: 3,
+                      child: Column(
+                        children: [
+                          TabBar(
+                            labelColor: Colors.orange,
+                            unselectedLabelColor: Colors.grey,
+                            indicatorColor: Colors.orange,
+                            tabs: const [
+                              Tab(text: 'Recipe'),
+                              Tab(text: 'Nutrition'),
+                              Tab(text: 'Notes'),
+                            ],
                           ),
-                          child: Text(
-                            recipe.notes!,
-                            style: const TextStyle(
-                              fontStyle: FontStyle.italic,
-                              fontSize: 15,
+                          Expanded(
+                            child: TabBarView(
+                              children: [
+                                // Tab 1: Recipe
+                                _buildRecipeTab(recipe, scrollController),
+                                
+                                // Tab 2: Nutrition
+                                _buildNutritionTab(recipe, scrollController),
+                                
+                                // Tab 3: Notes
+                                _buildNotesTab(recipe, scrollController),
+                              ],
                             ),
                           ),
-                        ),
+                        ],
                       ),
-                      const SizedBox(height: 24),
-                    ],
-                    
-                    // Ingredients
-                    _buildSection(
-                      'Ingredients',
-                      const Icon(Icons.shopping_basket, color: Colors.orange),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: recipe.ingredients
-                            .split(',')
-                            .map((ingredient) => Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 4),
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      const Text('• ', style: TextStyle(fontSize: 16)),
-                                      Expanded(
-                                        child: Text(
-                                          ingredient.trim(),
-                                          style: const TextStyle(fontSize: 15),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ))
-                            .toList(),
-                      ),
-                    ),
-                    
-                    const SizedBox(height: 24),
-                    
-                    // Directions
-                    _buildSection(
-                      'Directions',
-                      const Icon(Icons.format_list_numbered, color: Colors.orange),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: recipe.directions
-                            .split('.')
-                            .where((step) => step.trim().isNotEmpty)
-                            .toList()
-                            .asMap()
-                            .entries
-                            .map((entry) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Container(
-                                        width: 24,
-                                        height: 24,
-                                        decoration: const BoxDecoration(
-                                          color: Colors.orange,
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: Center(
-                                          child: Text(
-                                            '${entry.key + 1}',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Text(
-                                          '${entry.value.trim()}.',
-                                          style: const TextStyle(fontSize: 15, height: 1.5),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ))
-                            .toList(),
-                      ),
-                    ),
-                  ],
-                ),
+                    )
+                  : _buildRecipeTab(recipe, scrollController),
               ),
               
               // Actions
@@ -290,6 +218,298 @@ class _CookbookSectionState extends State<CookbookSection> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildRecipeTab(CookbookRecipe recipe, ScrollController scrollController) {
+    return ListView(
+      controller: scrollController,
+      padding: const EdgeInsets.all(16),
+      children: [
+        // Ingredients
+        _buildSection(
+          'Ingredients',
+          const Icon(Icons.shopping_basket, color: Colors.orange),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: recipe.ingredients
+                .split(',')
+                .map((ingredient) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('• ', style: TextStyle(fontSize: 16)),
+                          Expanded(
+                            child: Text(
+                              ingredient.trim(),
+                              style: const TextStyle(fontSize: 15),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ))
+                .toList(),
+          ),
+        ),
+        
+        const SizedBox(height: 24),
+        
+        // Directions
+        _buildSection(
+          'Directions',
+          const Icon(Icons.format_list_numbered, color: Colors.orange),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: recipe.directions
+                .split('.')
+                .where((step) => step.trim().isNotEmpty)
+                .toList()
+                .asMap()
+                .entries
+                .map((entry) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: const BoxDecoration(
+                              color: Colors.orange,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Center(
+                              child: Text(
+                                '${entry.key + 1}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              '${entry.value.trim()}.',
+                              style: const TextStyle(fontSize: 15, height: 1.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ))
+                .toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNutritionTab(CookbookRecipe recipe, ScrollController scrollController) {
+    if (recipe.nutrition == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.restaurant_menu, size: 64, color: Colors.grey[400]),
+              const SizedBox(height: 16),
+              Text(
+                'No nutrition data available',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey[600],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Nutrition facts will appear here when available',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[500],
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView(
+      controller: scrollController,
+      padding: const EdgeInsets.all(16),
+      children: [
+        NutritionFactsLabel(
+          nutrition: recipe.nutrition!,
+          servings: recipe.servings,
+          showLiverScore: true,
+        ),
+        
+        const SizedBox(height: 16),
+        
+        // Quick insights
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.blue.shade50,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.blue.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.insights, size: 16, color: Colors.blue.shade700),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Quick Insights',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue.shade900,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              
+              if (recipe.servings != null)
+                _buildInsightRow(
+                  'Per Serving',
+                  '${(recipe.nutrition!.calories / recipe.servings!).toStringAsFixed(0)} calories',
+                  recipe.nutrition!.calories / recipe.servings! < 300 
+                    ? Colors.green 
+                    : recipe.nutrition!.calories / recipe.servings! < 500
+                      ? Colors.orange
+                      : Colors.red,
+                ),
+              
+              if (recipe.nutrition!.protein > 0)
+                _buildInsightRow(
+                  'Protein content',
+                  '${recipe.nutrition!.protein.toStringAsFixed(1)}g total',
+                  recipe.nutrition!.protein >= 20 ? Colors.green : Colors.grey,
+                ),
+              
+              if (recipe.nutrition!.fiber != null && recipe.nutrition!.fiber! > 0)
+                _buildInsightRow(
+                  'Fiber content',
+                  '${recipe.nutrition!.fiber!.toStringAsFixed(1)}g total',
+                  recipe.nutrition!.fiber! >= 5 ? Colors.green : Colors.grey,
+                ),
+              
+              if (recipe.nutrition!.sodium > 0)
+                _buildInsightRow(
+                  'Sodium',
+                  '${recipe.nutrition!.sodium.toStringAsFixed(0)}mg total',
+                  recipe.nutrition!.sodium < 400 
+                    ? Colors.green 
+                    : recipe.nutrition!.sodium < 800
+                      ? Colors.orange
+                      : Colors.red,
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildNotesTab(CookbookRecipe recipe, ScrollController scrollController) {
+    return ListView(
+      controller: scrollController,
+      padding: const EdgeInsets.all(16),
+      children: [
+        if (recipe.notes != null && recipe.notes!.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.yellow[50],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.yellow[200]!),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.note, color: Colors.orange, size: 24),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'My Notes',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  recipe.notes!,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    height: 1.5,
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(40),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.note_outlined, size: 64, color: Colors.grey[400]),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No notes yet',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildInsightRow(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Icon(Icons.circle, size: 8, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
       ),
     );
   }

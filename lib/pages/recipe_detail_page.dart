@@ -1,8 +1,10 @@
-// lib/pages/recipe_detail_page.dart - OPTIMIZED: Cache comments, likes, favorite status + SHARE BUTTON
+// lib/pages/recipe_detail_page.dart - COMPLETE WITH NUTRITION
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/comments_service.dart';
 import 'package:liver_wise/services/grocery_service.dart';
 import 'package:liver_wise/services/feed_posts_service.dart';
+import 'package:liver_wise/widgets/nutrition_facts_label.dart';
+import 'package:liver_wise/models/nutrition_info.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../services/error_handling_service.dart';
@@ -16,6 +18,8 @@ class RecipeDetailPage extends StatefulWidget {
   final String ingredients;
   final String directions;
   final int recipeId;
+  final NutritionInfo? nutrition;      // 🔥 NEW - Optional
+  final int? servings;                 // 🔥 NEW - Optional
 
   const RecipeDetailPage({
     super.key,
@@ -24,6 +28,8 @@ class RecipeDetailPage extends StatefulWidget {
     required this.ingredients,
     required this.directions,
     required this.recipeId,
+    this.nutrition,    // 🔥 NEW - Optional parameter
+    this.servings,     // 🔥 NEW - Optional parameter
   });
 
   @override
@@ -327,7 +333,6 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
     }
   }
 
-  // 🔥 NEW: Share recipe to feed with visibility selection
   Future<void> _shareRecipeToFeed() async {
     // Show visibility selection dialog
     final visibility = await showDialog<String>(
@@ -819,6 +824,43 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
     }
   }
 
+  // 🔥 NEW: Build nutrition insight row
+  Widget _buildNutritionInsight(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -861,7 +903,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 🔥 UPDATED: Action buttons with Share
+                      // Action buttons with Share
                       Container(
                         padding: EdgeInsets.all(16),
                         decoration: BoxDecoration(
@@ -904,7 +946,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
                               ],
                             ),
                             SizedBox(height: 12),
-                            // 🔥 NEW: Share to Feed button
+                            // Share to Feed button
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton.icon(
@@ -924,7 +966,7 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
                       
                       SizedBox(height: 24),
 
-                      // 🔥 Description section (if exists)
+                      // Description section (if exists)
                       if (widget.description != null && widget.description!.trim().isNotEmpty) ...[
                         Container(
                           padding: EdgeInsets.all(16),
@@ -990,6 +1032,102 @@ class _RecipeDetailPageState extends State<RecipeDetailPage> with SingleTickerPr
                       ),
                       SizedBox(height: 8),
                       Text(widget.directions),
+
+                      // 🔥 NEW: Nutrition Facts Section
+                      if (widget.nutrition != null) ...[
+                        const SizedBox(height: 24),
+                        const Divider(thickness: 2),
+                        const SizedBox(height: 16),
+                        
+                        Row(
+                          children: [
+                            Icon(Icons.restaurant_menu, color: Colors.green, size: 24),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Nutrition Facts',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        
+                        NutritionFactsLabel(
+                          nutrition: widget.nutrition!,
+                          servings: widget.servings,
+                          showLiverScore: true,
+                        ),
+                        
+                        const SizedBox(height: 16),
+                        
+                        // Quick nutrition insights
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.blue.shade200),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.lightbulb_outline, size: 16, color: Colors.blue.shade700),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Nutrition Insights',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.blue.shade900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              
+                              if (widget.servings != null)
+                                _buildNutritionInsight(
+                                  'Calories per serving',
+                                  '${(widget.nutrition!.calories / widget.servings!).toStringAsFixed(0)} kcal',
+                                  widget.nutrition!.calories / widget.servings! < 300 
+                                    ? Colors.green 
+                                    : widget.nutrition!.calories / widget.servings! < 500
+                                      ? Colors.orange
+                                      : Colors.red,
+                                ),
+                              
+                              if (widget.nutrition!.protein > 0)
+                                _buildNutritionInsight(
+                                  'Protein content',
+                                  '${widget.nutrition!.protein.toStringAsFixed(1)}g total',
+                                  widget.nutrition!.protein >= 20 ? Colors.green : Colors.grey,
+                                ),
+                              
+                              if (widget.nutrition!.fiber != null && widget.nutrition!.fiber! > 0)
+                                _buildNutritionInsight(
+                                  'Fiber content',
+                                  '${widget.nutrition!.fiber!.toStringAsFixed(1)}g total',
+                                  widget.nutrition!.fiber! >= 5 ? Colors.green : Colors.grey,
+                                ),
+                              
+                              if (widget.nutrition!.sodium > 0)
+                                _buildNutritionInsight(
+                                  'Sodium',
+                                  '${widget.nutrition!.sodium.toStringAsFixed(0)}mg total',
+                                  widget.nutrition!.sodium < 400 
+                                    ? Colors.green 
+                                    : widget.nutrition!.sodium < 800
+                                      ? Colors.orange
+                                      : Colors.red,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

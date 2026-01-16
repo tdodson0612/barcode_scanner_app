@@ -8,6 +8,9 @@ import 'package:liver_wise/widgets/nutrition_display.dart';
 import 'package:liver_wise/services/error_handling_service.dart';
 import 'package:liver_wise/services/search_history_service.dart';
 import 'package:liver_wise/liverhealthbar.dart';
+import 'package:liver_wise/widgets/nutrition_facts_label.dart';
+import 'package:liver_wise/services/saved_ingredients_service.dart';
+import 'package:liver_wise/services/grocery_service.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../config/app_config.dart';
@@ -879,34 +882,203 @@ class _NutritionSearchScreenState extends State<NutritionSearchScreen> {
             if (_selectedItem != null) ...[
               const Divider(thickness: 2),
               const SizedBox(height: 12),
-              const Text(
-                "Nutrition Information",
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 12),
               
-              NutritionDisplay(
-                nutrition: _selectedItem!,
-                liverScore: LiverHealthCalculator.calculate(
-                  fat: _selectedItem!.fat,
-                  sodium: _selectedItem!.sodium,
-                  sugar: _selectedItem!.sugar,
-                  calories: _selectedItem!.calories,
-                ),
-                disclaimer: disclaimer,
-              ),
-              
-              const SizedBox(height: 16),
-              
-              LiverHealthBar(
-                healthScore: LiverHealthCalculator.calculate(
-                  fat: _selectedItem!.fat,
-                  sodium: _selectedItem!.sodium,
-                  sugar: _selectedItem!.sugar,
-                  calories: _selectedItem!.calories,
+              // 🔥 NEW: Tabbed Nutrition View
+              DefaultTabController(
+                length: 2,
+                child: Column(
+                  children: [
+                    // Tab Bar
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: TabBar(
+                        labelColor: Colors.green,
+                        unselectedLabelColor: Colors.grey.shade600,
+                        indicatorColor: Colors.green,
+                        indicatorWeight: 3,
+                        tabs: [
+                          Tab(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.analytics, size: 18),
+                                SizedBox(width: 6),
+                                Text('Quick View'),
+                              ],
+                            ),
+                          ),
+                          Tab(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.restaurant_menu, size: 18),
+                                SizedBox(width: 6),
+                                Text('Full Label'),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 16),
+                    
+                    // Tab Views
+                    SizedBox(
+                      height: 550,
+                      child: TabBarView(
+                        children: [
+                          // Tab 1: Quick View (existing display)
+                          SingleChildScrollView(
+                            child: Column(
+                              children: [
+                                NutritionDisplay(
+                                  nutrition: _selectedItem!,
+                                  liverScore: LiverHealthCalculator.calculate(
+                                    fat: _selectedItem!.fat,
+                                    sodium: _selectedItem!.sodium,
+                                    sugar: _selectedItem!.sugar,
+                                    calories: _selectedItem!.calories,
+                                  ),
+                                  disclaimer: disclaimer,
+                                ),
+                                const SizedBox(height: 16),
+                                LiverHealthBar(
+                                  healthScore: LiverHealthCalculator.calculate(
+                                    fat: _selectedItem!.fat,
+                                    sodium: _selectedItem!.sodium,
+                                    sugar: _selectedItem!.sugar,
+                                    calories: _selectedItem!.calories,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          
+                          // Tab 2: Full FDA Label
+                          SingleChildScrollView(
+                            child: Column(
+                              children: [
+                                NutritionFactsLabel(
+                                  nutrition: _selectedItem!,
+                                  showLiverScore: true,
+                                ),
+                                
+                                const SizedBox(height: 16),
+                                
+                                // Action buttons
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade50,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Quick Actions',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.grey.shade700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: ElevatedButton.icon(
+                                              onPressed: () async {
+                                                // Save to ingredients
+                                                try {
+                                                  await SavedIngredientsService.saveIngredient(_selectedItem!);
+                                                  if (mounted) {
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      SnackBar(
+                                                        content: Text('Saved "${_selectedItem!.productName}" to ingredients!'),
+                                                        backgroundColor: Colors.green,
+                                                      ),
+                                                    );
+                                                  }
+                                                } catch (e) {
+                                                  if (mounted) {
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      SnackBar(
+                                                        content: Text('Error saving: ${e.toString()}'),
+                                                        backgroundColor: Colors.red,
+                                                      ),
+                                                    );
+                                                  }
+                                                }
+                                              },
+                                              icon: Icon(Icons.bookmark_add, size: 18),
+                                              label: Text('Save', style: TextStyle(fontSize: 13)),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.teal,
+                                                foregroundColor: Colors.white,
+                                                padding: EdgeInsets.symmetric(vertical: 10),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: ElevatedButton.icon(
+                                              onPressed: () async {
+                                                // Add to grocery list
+                                                try {
+                                                  await GroceryService.addToGroceryList(_selectedItem!.productName);
+                                                  if (mounted) {
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      SnackBar(
+                                                        content: Text('Added to grocery list!'),
+                                                        backgroundColor: Colors.green,
+                                                        action: SnackBarAction(
+                                                          label: 'VIEW',
+                                                          textColor: Colors.white,
+                                                          onPressed: () {
+                                                            Navigator.pushNamed(context, '/grocery-list');
+                                                          },
+                                                        ),
+                                                      ),
+                                                    );
+                                                  }
+                                                } catch (e) {
+                                                  if (mounted) {
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      SnackBar(
+                                                        content: Text('Error: ${e.toString()}'),
+                                                        backgroundColor: Colors.red,
+                                                      ),
+                                                    );
+                                                  }
+                                                }
+                                              },
+                                              icon: Icon(Icons.add_shopping_cart, size: 18),
+                                              label: Text('List', style: TextStyle(fontSize: 13)),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.purple,
+                                                foregroundColor: Colors.white,
+                                                padding: EdgeInsets.symmetric(vertical: 10),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
               

@@ -1,4 +1,4 @@
-// lib/pages/submit_recipe.dart - COMPLETE WITH ALL 3 TABS
+// lib/pages/submit_recipe.dart - COMPLETE WITH TABBED NUTRITION
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/submitted_recipes_service.dart';
 import 'package:liver_wise/services/grocery_service.dart';
@@ -10,6 +10,7 @@ import 'package:liver_wise/widgets/recipe_nutrition_display.dart';
 import 'package:liver_wise/services/recipe_nutrition_service.dart';
 import 'package:liver_wise/services/saved_ingredients_service.dart';
 import 'package:liver_wise/models/nutrition_info.dart';
+import 'package:liver_wise/widgets/nutrition_facts_label.dart'; // 🔥 ADDED
 import 'dart:convert';
 import '../services/draft_recipes_service.dart';
 import '../models/draft_recipe.dart';
@@ -89,6 +90,48 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
         .join('\n');
   }
 
+  // 🔥 NEW: Convert RecipeNutrition to NutritionInfo for FDA label
+  NutritionInfo _convertRecipeNutritionToInfo(RecipeNutrition recipeNutr) {
+    return recipeNutr.toNutritionInfo(
+      productName: _nameController.text.isNotEmpty 
+        ? _nameController.text 
+        : 'Recipe Nutrition',
+    );
+  }
+
+  // 🔥 NEW: Build dietary badge
+  Widget _buildBadge(String label, Color color) {
+    // Determine text color based on badge background color
+    final textColor = _getBadgeTextColor(color);
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.4)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          color: textColor,
+        ),
+      ),
+    );
+  }
+
+  // Helper to get appropriate text color for badges
+  Color _getBadgeTextColor(Color badgeColor) {
+    if (badgeColor == Colors.blue) return Colors.blue.shade900;
+    if (badgeColor == Colors.orange) return Colors.orange.shade900;
+    if (badgeColor == Colors.purple) return Colors.purple.shade900;
+    if (badgeColor == Colors.green) return Colors.green.shade900;
+    if (badgeColor == Colors.red) return Colors.red.shade900;
+    return Colors.black87; // Default fallback
+  }
+
   @override
   void initState() {
     super.initState();
@@ -166,11 +209,11 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
         setState(() {
           _submittedRecipes = submissions.map((submission) => {
             'id': submission.id,
-            'title': submission.draftRecipeId, // This would need to be fetched from draft_recipes
+            'title': submission.draftRecipeId,
             'status': submission.status,
             'submitted_at': submission.submittedAt,
             'approved_at': submission.reviewedAt,
-            'views': 0, // Not tracked yet
+            'views': 0,
             'rejection_reason': submission.rejectionReason,
           }).toList();
           _isLoadingSubmitted = false;
@@ -297,7 +340,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     }
 
     if (_loadedDraftName == null) {
-      // No draft loaded, just save as new
       _saveRecipe();
       return;
     }
@@ -310,7 +352,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       final ing = _serializeIngredients();
       final dir = _directionsController.text.trim();
 
-      // If name changed, delete old draft
       if (_loadedDraftName != name) {
         await LocalDraftService.deleteDraft(_loadedDraftName!);
       }
@@ -424,7 +465,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       return;
     }
 
-    // 🔥 NEW: Show submission options dialog
     final submissionType = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -444,7 +484,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
             ),
             const SizedBox(height: 12),
             
-            // Option 1: Save as Draft (Sprint 2)
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.save, color: Colors.blue),
@@ -455,7 +494,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
             
             const Divider(),
             
-            // Option 2: Submit for Community Review (Sprint 3)
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.send, color: Colors.green),
@@ -482,14 +520,11 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       DatabaseServiceCore.ensureUserAuthenticated();
 
       if (submissionType == 'draft') {
-        // 🔥 SPRINT 2: Save as Draft Recipe
         await _saveDraftRecipe();
       } else if (submissionType == 'community') {
-        // 🔥 SPRINT 3: Submit for Community Review
         await _submitForCommunityReview();
       }
 
-      // Delete local draft if it came from one
       if (_loadedDraftName != null) {
         await LocalDraftService.deleteDraft(_loadedDraftName!);
         await _loadDrafts();
@@ -527,7 +562,6 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
           ),
         );
 
-        // Clear form
         _nameController.clear();
         _directionsController.clear();
         _descriptionController.clear();
@@ -554,17 +588,14 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     }
   }
 
-  // 🔥 NEW: Save as Draft Recipe (Sprint 2)
   Future<void> _saveDraftRecipe() async {
     try {
-      // Create RecipeIngredients from IngredientRows
       final recipeIngredients = _ingredients
           .where((i) => i.isValid)
           .map((ing) => RecipeIngredient(
                 productName: ing.name,
                 quantity: double.tryParse(ing.quantity) ?? 1.0,
                 unit: ing.measurement,
-                // Note: No nutrition data in basic form - would need ingredient lookup
               ))
           .toList();
 
@@ -585,10 +616,8 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
     }
   }
 
-  // 🔥 NEW: Submit for Community Review (Sprint 3)
   Future<void> _submitForCommunityReview() async {
     try {
-      // First create as draft recipe
       final recipeIngredients = _ingredients
           .where((i) => i.isValid)
           .map((ing) => RecipeIngredient(
@@ -610,15 +639,12 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
       );
 
       final draftRecipeId = await DraftRecipesService.createDraftRecipe(draftRecipe);
-
-      // Then submit for review
       await SubmittedRecipesService.submitRecipeForReview(draftRecipeId);
     } catch (e) {
       rethrow;
     }
   }
 
-  // Analyze recipe nutrition
   Future<void> _analyzeRecipeNutrition() async {
     final validIngredients = _ingredients.where((i) => i.isValid).toList();
     
@@ -1475,7 +1501,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
             const SizedBox(height: 20),
 
-            // 🔥 NEW: Structured Ingredients Section
+            // Structured Ingredients Section
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -1545,7 +1571,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
             const SizedBox(height: 20),
 
-            // Recipe Nutrition Section
+            // 🔥 NEW: Recipe Nutrition Section with TABBED VIEW
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -1577,6 +1603,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                   ),
                   const SizedBox(height: 12),
 
+                  // Analyze button
                   SizedBox(
                     width: double.infinity,
                     height: 48,
@@ -1608,38 +1635,292 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
 
                   // Matched ingredient list
                   if (_matchedNutritionIngredients.isNotEmpty) ...[
-                    const Text(
-                      'Matched Ingredients:',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 4),
-                    ..._matchedNutritionIngredients.map(
-                      (n) => Row(
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.check, size: 14, color: Colors.green),
-                          const SizedBox(width: 4),
-                          Expanded(child: Text(n.productName, style: const TextStyle(fontSize: 13))),
+                          Row(
+                            children: [
+                              Icon(Icons.check_circle, size: 16, color: Colors.green.shade700),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Matched ${_matchedNutritionIngredients.length} ingredient${_matchedNutritionIngredients.length == 1 ? '' : 's'}:',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.green.shade900,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          ..._matchedNutritionIngredients.map(
+                            (n) => Padding(
+                              padding: const EdgeInsets.only(left: 8, top: 2),
+                              child: Text(
+                                '• ${n.productName}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.green.shade800,
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                   ],
 
-                  // FINAL TOTALS + DISCLAIMER
+                  // 🔥 NEW: Tabbed Nutrition Display
                   if (_recipeNutrition != null) ...[
-                    RecipeNutritionDisplay(nutrition: _recipeNutrition!),
-                    const SizedBox(height: 8),
-
-                    const Text(
-                      "🛈 This is an estimate based on your saved ingredients. "
-                      "Accuracy depends on the items you have saved.",
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.black54,
-                        fontStyle: FontStyle.italic,
+                    DefaultTabController(
+                      length: 2,
+                      child: Column(
+                        children: [
+                          // Tab Bar
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: TabBar(
+                              labelColor: Colors.green,
+                              unselectedLabelColor: Colors.grey.shade600,
+                              indicatorColor: Colors.green,
+                              indicatorWeight: 3,
+                              tabs: [
+                                Tab(
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.summarize, size: 16),
+                                      SizedBox(width: 6),
+                                      Text('Summary', style: TextStyle(fontSize: 13)),
+                                    ],
+                                  ),
+                                ),
+                                Tab(
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.restaurant_menu, size: 16),
+                                      SizedBox(width: 6),
+                                      Text('Full Label', style: TextStyle(fontSize: 13)),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          
+                          const SizedBox(height: 12),
+                          
+                          // Tab Views
+                          SizedBox(
+                            height: 450,
+                            child: TabBarView(
+                              children: [
+                                // Tab 1: Summary (existing display)
+                                SingleChildScrollView(
+                                  child: RecipeNutritionDisplay(nutrition: _recipeNutrition!),
+                                ),
+                                
+                                // Tab 2: Full FDA Label with Insights
+                                SingleChildScrollView(
+                                  child: Column(
+                                    children: [
+                                      NutritionFactsLabel(
+                                        nutrition: _convertRecipeNutritionToInfo(_recipeNutrition!),
+                                        showLiverScore: true,
+                                      ),
+                                      
+                                      const SizedBox(height: 12),
+                                      
+                                      // Nutrition quality indicators
+                                      Container(
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.blue.shade50,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: Colors.blue.shade200),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Icon(Icons.eco, size: 16, color: Colors.blue.shade700),
+                                                const SizedBox(width: 6),
+                                                Text(
+                                                  'Recipe Profile',
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.blue.shade900,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 8),
+                                            
+                                            // Dietary labels
+                                            Wrap(
+                                              spacing: 6,
+                                              runSpacing: 6,
+                                              children: [
+                                                if (RecipeNutritionService.isHighProtein(_recipeNutrition!))
+                                                  _buildBadge('High Protein', Colors.blue),
+                                                if (RecipeNutritionService.isLowCarb(_recipeNutrition!))
+                                                  _buildBadge('Low Carb', Colors.orange),
+                                                if (RecipeNutritionService.isLowFat(_recipeNutrition!))
+                                                  _buildBadge('Low Fat', Colors.purple),
+                                                if (RecipeNutritionService.isKeto(_recipeNutrition!))
+                                                  _buildBadge('Keto', Colors.green),
+                                                if (RecipeNutritionService.isHeartHealthy(_recipeNutrition!))
+                                                  _buildBadge('Heart Healthy', Colors.red),
+                                              ],
+                                            ),
+                                            
+                                            // Health warnings
+                                            if (RecipeNutritionService.getHealthWarnings(_recipeNutrition!).isNotEmpty) ...[
+                                              const SizedBox(height: 12),
+                                              Container(
+                                                padding: const EdgeInsets.all(8),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.orange.shade50,
+                                                  borderRadius: BorderRadius.circular(6),
+                                                  border: Border.all(color: Colors.orange.shade200),
+                                                ),
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(
+                                                      children: [
+                                                        Icon(Icons.warning_amber, size: 14, color: Colors.orange.shade700),
+                                                        const SizedBox(width: 4),
+                                                        Text(
+                                                          'Health Notes:',
+                                                          style: TextStyle(
+                                                            fontSize: 11,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: Colors.orange.shade900,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    ...RecipeNutritionService.getHealthWarnings(_recipeNutrition!).map(
+                                                      (warning) => Padding(
+                                                        padding: const EdgeInsets.only(left: 8, top: 2),
+                                                        child: Text(
+                                                          '• $warning',
+                                                          style: TextStyle(
+                                                            fontSize: 10,
+                                                            color: Colors.orange.shade800,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                            
+                                            // Health benefits
+                                            if (RecipeNutritionService.getHealthBenefits(_recipeNutrition!).isNotEmpty) ...[
+                                              const SizedBox(height: 12),
+                                              Container(
+                                                padding: const EdgeInsets.all(8),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.green.shade50,
+                                                  borderRadius: BorderRadius.circular(6),
+                                                  border: Border.all(color: Colors.green.shade200),
+                                                ),
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Row(
+                                                      children: [
+                                                        Icon(Icons.thumb_up, size: 14, color: Colors.green.shade700),
+                                                        const SizedBox(width: 4),
+                                                        Text(
+                                                          'Benefits:',
+                                                          style: TextStyle(
+                                                            fontSize: 11,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: Colors.green.shade900,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    const SizedBox(height: 4),
+                                                    ...RecipeNutritionService.getHealthBenefits(_recipeNutrition!).map(
+                                                      (benefit) => Padding(
+                                                        padding: const EdgeInsets.only(left: 8, top: 2),
+                                                        child: Text(
+                                                          '• $benefit',
+                                                          style: TextStyle(
+                                                            fontSize: 10,
+                                                            color: Colors.green.shade800,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
+                    
+                    const SizedBox(height: 12),
                   ],
+                  
+                  // Disclaimer
+                  if (_recipeNutrition != null)
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.info_outline, size: 14, color: Colors.grey.shade700),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              "🛈 This is an estimate based on your saved ingredients. "
+                              "Accuracy depends on the items you have saved.",
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey.shade700,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -1655,7 +1936,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
               ),
               child: Column(
                 children: [
-                  // 🔥 NEW: Show which draft is being edited
+                  // Show which draft is being edited
                   if (_loadedDraftName != null) ...[
                     Container(
                       padding: const EdgeInsets.all(12),

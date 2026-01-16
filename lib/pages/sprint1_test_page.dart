@@ -321,8 +321,7 @@ class _Sprint1TestPageState extends State<Sprint1TestPage>
         _nutritionItem('Fat', '${nutrition.fat.toStringAsFixed(1)}g'),
         _nutritionItem('Sodium', '${nutrition.sodium.toStringAsFixed(0)}mg'),
         _nutritionItem('Sugar', '${nutrition.sugar.toStringAsFixed(1)}g'),
-        if (nutrition.protein != null)
-          _nutritionItem('Protein', '${nutrition.protein!.toStringAsFixed(1)}g'),
+        _nutritionItem('Protein', '${nutrition.protein.toStringAsFixed(1)}g'),
         if (nutrition.fiber != null)
           _nutritionItem('Fiber', '${nutrition.fiber!.toStringAsFixed(1)}g'),
       ],
@@ -481,7 +480,9 @@ class _Sprint1TestPageState extends State<Sprint1TestPage>
         calories: double.tryParse(_caloriesController.text) ?? 0,
         fat: double.tryParse(_fatController.text) ?? 0,
         sodium: double.tryParse(_sodiumController.text) ?? 0,
+        carbs: 0.0,  // ✅ FIXED: Added required parameter
         sugar: double.tryParse(_sugarController.text) ?? 0,
+        protein: 0.0,  // ✅ FIXED: Added required parameter
       );
 
       await CustomIngredientsService.addCustomIngredient(

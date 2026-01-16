@@ -8,13 +8,10 @@ String getFaceEmoji(int score) {
   return '😄';
 }
 
-class LiverHealthBar extends StatelessWidget {
-  final int healthScore;
-
-  const LiverHealthBar({super.key, required this.healthScore});
-
-  // ⬇️ NEW STATIC FUNCTION FOR ALL NUTRITION SYSTEMS
-  static int calculateScore({
+/// 🔥 NEW: Standalone calculator class for all pages to use
+class LiverHealthCalculator {
+  /// Main calculate method - matches the signature used across all pages
+  static int calculate({
     required double fat,
     required double sodium,
     required double sugar,
@@ -56,11 +53,40 @@ class LiverHealthBar extends StatelessWidget {
       );
     }
   }
+}
+
+class LiverHealthBar extends StatelessWidget {
+  final int healthScore;
+
+  const LiverHealthBar({super.key, required this.healthScore});
+
+  /// Legacy static function for backwards compatibility
+  /// Delegates to LiverHealthCalculator.calculate()
+  static int calculateScore({
+    required double fat,
+    required double sodium,
+    required double sugar,
+    required double calories,
+    String? diseaseType,
+    double? protein,
+    double? fiber,
+    double? saturatedFat,
+  }) {
+    return LiverHealthCalculator.calculate(
+      fat: fat,
+      sodium: sodium,
+      sugar: sugar,
+      calories: calories,
+      diseaseType: diseaseType,
+      protein: protein,
+      fiber: fiber,
+      saturatedFat: saturatedFat,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final face = getFaceEmoji(healthScore);
-
     return Stack(
       children: [
         // Gradient Bar
