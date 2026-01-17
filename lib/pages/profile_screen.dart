@@ -313,19 +313,24 @@ class _ProfileScreenState extends State<ProfileScreen>
 // ======================================================
   Future<bool> requestImagePermission(ImageSource source) async {
     if (source == ImageSource.camera) {
+      // Request camera permission
       final status = await Permission.camera.request();
+      
       if (!status.isGranted) {
         if (status.isPermanentlyDenied) {
-          openAppSettings();
+          if (mounted) {
+            _showPermissionError('Camera');
+          }
+          await openAppSettings();
         }
         return false;
       }
       return true;
     }
 
-    // ---- GALLERY ----
+    // ---- GALLERY (Photo Library) ----
     if (Platform.isAndroid) {
-      // Try photos permission first (Android 13+)
+      // Android: Try photos permission first (Android 13+)
       var status = await Permission.photos.request();
       
       if (status.isGranted) return true;
@@ -336,20 +341,31 @@ class _ProfileScreenState extends State<ProfileScreen>
         if (status.isGranted) return true;
       }
       
-      // If permanently denied, open settings
+      // If permanently denied, show error and open settings
       if (status.isPermanentlyDenied) {
-        openAppSettings();
+        if (mounted) {
+          _showPermissionError('Photos');
+        }
+        await openAppSettings();
       }
       
-      return false;
+      return status.isGranted;
     }
 
-    // iOS
+    // iOS & iPadOS - Use unified photo library permission
     final status = await Permission.photos.request();
-    if (!status.isGranted && status.isPermanentlyDenied) {
-      openAppSettings();
+    
+    if (!status.isGranted) {
+      if (status.isPermanentlyDenied) {
+        if (mounted) {
+          _showPermissionError('Photos');
+        }
+        await openAppSettings();
+      }
+      return false;
     }
-    return status.isGranted;
+    
+    return true;
   }
 
 
@@ -847,29 +863,91 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  // Helper method for showing permission errors
+  // Helper method for showing permission errors (iPad-optimized)
   void _showPermissionError(String permissionType) {
     if (!mounted) return;
     
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: Text('$permissionType Access Required'),
-        content: Text(
-          'This app needs access to your $permissionType to upload pictures.\n\n'
-          'Please enable $permissionType access in your device settings.',
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '$permissionType Permission Required',
+                style: TextStyle(fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'LiverWise needs access to your $permissionType to upload pictures.',
+              style: TextStyle(fontSize: 15),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.settings, color: Colors.blue.shade700, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'To enable access:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue.shade900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '1. Open Settings\n'
+                    '2. Scroll to "LiverWise"\n'
+                    '3. Tap "$permissionType"\n'
+                    '4. Select "Allow Access to All Photos"',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.blue.shade900,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: const Text('Not Now'),
           ),
-          ElevatedButton(
+          ElevatedButton.icon(
             onPressed: () {
               Navigator.pop(context);
-              openAppSettings(); // Opens device settings
+              openAppSettings();
             },
-            child: const Text('Open Settings'),
+            icon: const Icon(Icons.settings),
+            label: const Text('Open Settings'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
           ),
         ],
       ),
