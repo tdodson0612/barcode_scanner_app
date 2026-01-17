@@ -204,7 +204,6 @@ class FeedPostsService {
       final result = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'feed_posts',
-        filters: {'visibility': 'public'},
         orderBy: 'created_at',
         ascending: false,
         limit: limit,
