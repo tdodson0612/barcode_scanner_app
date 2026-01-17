@@ -1622,10 +1622,18 @@ class _HomePageState extends State<HomePage>
     try {
       AppConfig.debugPrint('🔄 Starting feed load...');
       
-      // 🔥 NEW: Use the visibility-aware feed method
       final posts = await FeedPostsService.getFeedPosts(limit: 20);
       
       AppConfig.debugPrint('📊 Feed loaded: ${posts.length} posts');
+      
+      // 🔥 ADD THIS DEBUG BLOCK:
+      print('\n========== FEED DEBUG ==========');
+      print('Posts received: ${posts.length}');
+      print('Posts type: ${posts.runtimeType}');
+      if (posts.isNotEmpty) {
+        print('First post: ${posts[0]}');
+      }
+      print('================================\n');
       
       if (posts.isNotEmpty) {
         AppConfig.debugPrint('📝 First post preview:');
