@@ -5,6 +5,7 @@
 import 'dart:convert';
 import 'database_service_core.dart';
 import 'auth_service.dart';
+import '../exceptions/friend_request_exception.dart';
 
 class FriendsService {
   // ==================================================
@@ -133,13 +134,22 @@ class FriendsService {
 
         if (match) {
           if (status == 'accepted') {
-            throw Exception('You are already friends');
+            throw FriendRequestException(
+              'You are already friends',
+              FriendRequestErrorType.alreadyFriends,
+            );
           }
           if (status == 'pending' && sender == currentUser) {
-            throw Exception('Friend request already sent');
+            throw FriendRequestException(
+              'Friend request already sent',
+              FriendRequestErrorType.alreadySent,
+            );
           }
           if (status == 'pending' && sender == receiverId) {
-            throw Exception('This user already sent you a request');
+            throw FriendRequestException(
+              'This user already sent you a request',
+              FriendRequestErrorType.alreadyReceived,
+            );
           }
         }
       }
@@ -164,6 +174,10 @@ class FriendsService {
 
       return null;
     } catch (e) {
+      // Re-throw custom exceptions as-is
+      if (e is FriendRequestException) {
+        rethrow;
+      }
       throw Exception('Failed to send friend request: $e');
     }
   }

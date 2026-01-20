@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 // REPLACED DATABASE SERVICE WITH SPECIFIC SERVICES
 import '../services/user_search_service.dart';
 import '../services/friends_service.dart';
+import '../exceptions/friend_request_exception.dart';
 
 import 'user_profile_page.dart';
 import '../widgets/app_drawer.dart';
@@ -422,10 +423,34 @@ class _SearchUsersPageState extends State<SearchUsersPage>
           backgroundColor: Colors.green,
         ),
       );
+    } on FriendRequestException catch (e) {
+      if (!mounted) return;
+      
+      // 🔥 Pretty green banner for "already sent" case
+      if (e.type == FriendRequestErrorType.alreadySent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Friend request already sent'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        // Other friend request errors (already friends, etc.)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }

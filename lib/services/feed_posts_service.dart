@@ -1,4 +1,4 @@
-// lib/services/feed_posts_service.dart - FULLY FIXED VERSION
+// lib/services/feed_posts_service.dart - COMPLETE VERSION WITH PHOTO SUPPORT
 import 'database_service_core.dart';
 import 'auth_service.dart';
 import '../config/app_config.dart';
@@ -39,6 +39,42 @@ class FeedPostsService {
     } catch (e) {
       AppConfig.debugPrint('❌ Error creating text post: $e');
       throw Exception('Failed to create post: $e');
+    }
+  }
+
+  /// 🔥 NEW: Create a photo post with R2 URL
+  static Future<void> createPhotoPost({
+    required String caption,
+    required String photoUrl,
+    required String visibility, // 'public' or 'friends'
+  }) async {
+    try {
+      final userId = AuthService.currentUserId;
+      final username = await AuthService.fetchCurrentUsername();
+
+      if (userId == null || username == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // Insert into feed_posts table with photo URL
+      await DatabaseServiceCore.workerQuery(
+        action: 'insert',
+        table: 'feed_posts',
+        data: {
+          'user_id': userId,
+          'username': username,
+          'content': caption.trim(),
+          'post_type': 'photo',
+          'photo_url': photoUrl, // R2 public URL
+          'visibility': visibility,
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
+
+      AppConfig.debugPrint('✅ Photo post created with visibility: $visibility');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error creating photo post: $e');
+      throw Exception('Failed to create photo post: $e');
     }
   }
 
@@ -107,7 +143,6 @@ class FeedPostsService {
     return buffer.toString();
   }
 
-  /// 🔥 FIXED: Optimized feed loading with proper pagination
   /// Get feed posts based on current user's friend status
   /// Shows: Public posts + Friends-only posts from friends
   static Future<List<Map<String, dynamic>>> getFeedPosts({
@@ -132,15 +167,15 @@ class FeedPostsService {
 
       // Step 2: Get public posts
       AppConfig.debugPrint('📡 Querying PUBLIC posts...');
-      final publicPosts = await _getPublicPosts(limit: 100); // ✅ Fetch enough for pagination
+      final publicPosts = await _getPublicPosts(limit: 100);
       AppConfig.debugPrint('✅ Found ${publicPosts.length} public posts');
 
       // Step 3: Get friends-only posts
       List<Map<String, dynamic>> friendsPosts = [];
       
-      if (friendIds.length > 1) { // More than just self
+      if (friendIds.length > 1) {
         AppConfig.debugPrint('📡 Querying FRIENDS-ONLY posts...');
-        friendsPosts = await _getFriendsOnlyPosts(friendIds, limit: 100); // ✅ Fetch enough
+        friendsPosts = await _getFriendsOnlyPosts(friendIds, limit: 100);
         AppConfig.debugPrint('✅ Found ${friendsPosts.length} friends-only posts');
       }
 
@@ -196,15 +231,15 @@ class FeedPostsService {
     return friendIds;
   }
 
-  /// 🔥 CRITICAL FIX: Get public posts ONLY (filter by visibility)
+  /// Get public posts ONLY (filter by visibility)
   static Future<List<Map<String, dynamic>>> _getPublicPosts({
-    int limit = 100, // ✅ Fetch more to account for pagination
+    int limit = 100,
   }) async {
     try {
       final result = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'feed_posts',
-        filters: {'visibility': 'public'}, // ✅ CRITICAL: Only public posts
+        filters: {'visibility': 'public'},
         orderBy: 'created_at',
         ascending: false,
         limit: limit,
@@ -225,10 +260,10 @@ class FeedPostsService {
     }
   }
 
-  /// 🔥 FIXED: Get friends-only posts from friend list
+  /// Get friends-only posts from friend list
   static Future<List<Map<String, dynamic>>> _getFriendsOnlyPosts(
     Set<String> friendIds, {
-    int limit = 100, // ✅ Fetch more to account for pagination
+    int limit = 100,
   }) async {
     final friendsPosts = <Map<String, dynamic>>[];
 
@@ -244,7 +279,7 @@ class FeedPostsService {
           },
           orderBy: 'created_at',
           ascending: false,
-          limit: 50, // Limit per friend to avoid too many results
+          limit: 50,
         );
 
         if (result != null && (result as List).isNotEmpty) {
@@ -278,13 +313,13 @@ class FeedPostsService {
     uniquePosts.sort((a, b) {
       final aTime = a['created_at']?.toString() ?? '';
       final bTime = b['created_at']?.toString() ?? '';
-      return bTime.compareTo(aTime); // Newest first
+      return bTime.compareTo(aTime);
     });
 
     return uniquePosts;
   }
 
-  /// 🔥 FIXED: Apply pagination safely with bounds checking
+  /// Apply pagination safely with bounds checking
   static List<Map<String, dynamic>> _applyPagination(
     List<Map<String, dynamic>> posts, {
     required int limit,
@@ -295,13 +330,12 @@ class FeedPostsService {
     final startIndex = offset.clamp(0, posts.length);
     final endIndex = (offset + limit).clamp(0, posts.length);
     
-    // ✅ FIXED: Ensure we don't go out of bounds
     if (startIndex >= posts.length) return [];
     
     return posts.sublist(startIndex, endIndex);
   }
 
-  /// 🔥 FIXED: Get only public posts (for unauthenticated users)
+  /// Get only public posts (for unauthenticated users)
   static Future<List<Map<String, dynamic>>> _getPublicPostsOnly({
     int limit = 20,
     int offset = 0,
@@ -312,10 +346,10 @@ class FeedPostsService {
       final result = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'feed_posts',
-        filters: {'visibility': 'public'}, // ✅ CRITICAL: Only public posts
+        filters: {'visibility': 'public'},
         orderBy: 'created_at',
         ascending: false,
-        limit: limit + offset + 10, // Fetch extra for pagination safety
+        limit: limit + offset + 10,
       );
 
       if (result == null || (result as List).isEmpty) {

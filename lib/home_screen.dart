@@ -30,6 +30,7 @@ import 'services/tracker_service.dart';
 import 'package:liver_wise/services/feed_posts_service.dart';
 import 'package:liver_wise/models/draft_recipe.dart';
 import 'package:liver_wise/services/draft_recipes_service.dart';
+import 'services/picture_service.dart';
 
 class Recipe {
   final String title;
@@ -282,6 +283,17 @@ class _HomePageState extends State<HomePage>
 
   String _defaultPostVisibility = 'public'; // Default visibility for new posts
 
+  // Feed pagination state
+  bool _isLoadingMorePosts = false;
+  bool _hasMorePosts = true;
+  int _currentFeedOffset = 0;
+  static const int _postsPerPage = 10;
+  
+  // Scroll controller for feed
+  final ScrollController _feedScrollController = ScrollController();
+
+
+
 
   late final PremiumGateController _premiumController;
 
@@ -321,6 +333,8 @@ class _HomePageState extends State<HomePage>
     _initializeAsync();
     _checkDay7Achievement();
     _loadFeed();
+    _feedScrollController.addListener(_onFeedScroll);
+
   }
 
   bool _didPrecache = false;
@@ -382,6 +396,7 @@ class _HomePageState extends State<HomePage>
     _interstitialAd?.dispose();
     _rewardedAd?.dispose();
     _searchController.dispose();
+    _feedScrollController.dispose(); // 🔥 NEW
     super.dispose();
   }
 
@@ -1616,43 +1631,372 @@ class _HomePageState extends State<HomePage>
           "Sodium: ${nutrition.sodium.toStringAsFixed(1)} mg/100g";
   }
 
-  Future<void> _loadFeed() async {
+  // 🔥 NEW: Show photo upload dialog with camera/gallery options
+  Future<void> _showPhotoUploadDialog() async {
+    final source = await showDialog<ImageSource>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.add_photo_alternate, color: Colors.orange),
+            SizedBox(width: 12),
+            Text('Add Photo'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Colors.blue.shade50,
+                child: Icon(Icons.camera_alt, color: Colors.blue.shade700),
+              ),
+              title: Text('Take Photo'),
+              subtitle: Text('Use camera', style: TextStyle(fontSize: 12)),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            SizedBox(height: 8),
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Colors.green.shade50,
+                child: Icon(Icons.photo_library, color: Colors.green.shade700),
+              ),
+              title: Text('Choose from Gallery'),
+              subtitle: Text('Pick existing photo', style: TextStyle(fontSize: 12)),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (source == null) return;
+
+    await _pickAndUploadPhoto(source);
+  }
+
+  // 🔥 NEW: Pick photo and show upload dialog
+  Future<void> _pickAndUploadPhoto(ImageSource source) async {
+    try {
+      final XFile? pickedFile = await _picker.pickImage(
+        source: source,
+        imageQuality: 80,
+        maxWidth: 1920,
+        maxHeight: 1920,
+      );
+
+      if (pickedFile == null) return;
+
+      final File imageFile = File(pickedFile.path);
+      
+      // Verify file exists and has content
+      if (!await imageFile.exists()) {
+        throw Exception('Image file not found');
+      }
+
+      final fileSize = await imageFile.length();
+      if (fileSize == 0) {
+        throw Exception('Image file is empty');
+      }
+
+      // Show upload dialog with preview
+      if (mounted) {
+        await _showPhotoPostDialog(imageFile);
+      }
+
+    } catch (e) {
+      if (mounted) {
+        await ErrorHandlingService.handleError(
+          context: context,
+          error: e,
+          category: ErrorHandlingService.imageError,
+          customMessage: 'Failed to pick photo',
+        );
+      }
+    }
+  }
+
+  // 🔥 NEW: Show dialog to create post with photo
+  Future<void> _showPhotoPostDialog(File imageFile) async {
+    final TextEditingController captionController = TextEditingController();
+    bool isPosting = false;
+    String selectedVisibility = _defaultPostVisibility;
+
+    final posted = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.add_photo_alternate, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('Share Photo'),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Photo preview
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.file(
+                      imageFile,
+                      width: double.infinity,
+                      height: 200,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  
+                  SizedBox(height: 16),
+                  
+                  // Caption field
+                  TextField(
+                    controller: captionController,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      hintText: "Add a caption...",
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.orange, width: 2),
+                      ),
+                    ),
+                  ),
+                  
+                  SizedBox(height: 16),
+                  
+                  // Visibility dropdown
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          selectedVisibility == 'public' ? Icons.public : Icons.people,
+                          size: 20,
+                          color: Colors.grey.shade700,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Visible to:',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: DropdownButton<String>(
+                            value: selectedVisibility,
+                            isExpanded: true,
+                            underline: SizedBox(),
+                            items: [
+                              DropdownMenuItem(
+                                value: 'public',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.public, size: 18, color: Colors.blue),
+                                    SizedBox(width: 8),
+                                    Text('Everyone (Public)'),
+                                  ],
+                                ),
+                              ),
+                              DropdownMenuItem(
+                                value: 'friends',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.people, size: 18, color: Colors.green),
+                                    SizedBox(width: 8),
+                                    Text('Friends Only'),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              if (value != null) {
+                                setState(() => selectedVisibility = value);
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  SizedBox(height: 8),
+                  
+                  // Visibility info
+                  Container(
+                    padding: EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: selectedVisibility == 'public' 
+                        ? Colors.blue.shade50 
+                        : Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: selectedVisibility == 'public' 
+                          ? Colors.blue.shade200 
+                          : Colors.green.shade200,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 16,
+                          color: selectedVisibility == 'public' 
+                            ? Colors.blue.shade700 
+                            : Colors.green.shade700,
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            selectedVisibility == 'public'
+                              ? 'Anyone can see this photo'
+                              : 'Only your friends can see this photo',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: selectedVisibility == 'public' 
+                                ? Colors.blue.shade900 
+                                : Colors.green.shade900,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isPosting ? null : () => Navigator.pop(context, false),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: isPosting
+                  ? null
+                  : () async {
+                      setState(() => isPosting = true);
+
+                      try {
+                        // 🔥 Upload to R2 storage using your existing PictureService
+                        AppConfig.debugPrint('📤 Uploading feed photo to R2...');
+                        final photoUrl = await PictureService.uploadFeedPhoto(imageFile);
+                        
+                        AppConfig.debugPrint('✅ Photo uploaded: $photoUrl');
+                        
+                        // Create photo post with R2 URL
+                        await FeedPostsService.createPhotoPost(
+                          caption: captionController.text.trim(),
+                          photoUrl: photoUrl,
+                          visibility: selectedVisibility,
+                        );
+
+                        _defaultPostVisibility = selectedVisibility;
+
+                        Navigator.pop(context, true);
+
+                      } catch (e) {
+                        setState(() => isPosting = false);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to upload photo: ${e.toString()}'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+              child: isPosting
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Text('Post'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (posted == true && mounted) {
+      await _loadFeed(isRefresh: true);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Photo posted successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
+  Future<void> _loadFeed({bool isRefresh = false}) async {
+    if (isRefresh) {
+      setState(() {
+        _currentFeedOffset = 0;
+        _hasMorePosts = true;
+        _feedPosts.clear();
+      });
+    }
+    
     setState(() => _isLoadingFeed = true);
 
     try {
-      AppConfig.debugPrint('🔄 Starting feed load...');
+      AppConfig.debugPrint('🔄 Starting feed load (offset: $_currentFeedOffset)...');
       
-      final posts = await FeedPostsService.getFeedPosts(limit: 20);
+      final posts = await FeedPostsService.getFeedPosts(
+        limit: _postsPerPage,
+        offset: _currentFeedOffset,
+      );
       
       AppConfig.debugPrint('📊 Feed loaded: ${posts.length} posts');
       
-      // 🔥 ADD THIS DEBUG BLOCK:
-      print('\n========== FEED DEBUG ==========');
-      print('Posts received: ${posts.length}');
-      print('Posts type: ${posts.runtimeType}');
-      if (posts.isNotEmpty) {
-        print('First post: ${posts[0]}');
-      }
-      print('================================\n');
-      
-      if (posts.isNotEmpty) {
-        AppConfig.debugPrint('📝 First post preview:');
-        AppConfig.debugPrint('  - ID: ${posts[0]['id']}');
-        AppConfig.debugPrint('  - User: ${posts[0]['username']}');
-        AppConfig.debugPrint('  - Visibility: ${posts[0]['visibility']}');
-        
-        // 🔥 FIX: Don't exceed the actual length of the content
-        final content = posts[0]['content']?.toString() ?? '';
-        final preview = content.length > 50 ? content.substring(0, 50) : content;
-        AppConfig.debugPrint('  - Content preview: $preview...');
-      }
       if (mounted) {
         setState(() {
-          _feedPosts = posts;
+          if (isRefresh) {
+            _feedPosts = posts;
+          } else {
+            _feedPosts.addAll(posts);
+          }
           _isLoadingFeed = false;
+          
+          // If we got fewer posts than requested, we've reached the end
+          if (posts.length < _postsPerPage) {
+            _hasMorePosts = false;
+            AppConfig.debugPrint('📍 Reached end of feed');
+          }
         });
         
-        AppConfig.debugPrint('✅ Feed state updated with ${_feedPosts.length} posts');
+        AppConfig.debugPrint('✅ Feed state updated with ${_feedPosts.length} total posts');
       }
     } catch (e) {
       if (mounted) {
@@ -1662,6 +2006,57 @@ class _HomePageState extends State<HomePage>
       print('Error loading feed: $e');
     }
   }
+
+  /// Listen for scroll to bottom and load more posts
+  void _onFeedScroll() {
+    if (_feedScrollController.position.pixels >=
+        _feedScrollController.position.maxScrollExtent - 200) {
+      // User is near bottom (200px threshold)
+      if (!_isLoadingMorePosts && _hasMorePosts) {
+        _loadMorePosts();
+      }
+    }
+  }
+
+  Future<void> _loadMorePosts() async {
+    if (_isLoadingMorePosts || !_hasMorePosts) return;
+
+    setState(() => _isLoadingMorePosts = true);
+
+    try {
+      AppConfig.debugPrint('📥 Loading more posts (offset: ${_currentFeedOffset + _postsPerPage})...');
+      
+      final newPosts = await FeedPostsService.getFeedPosts(
+        limit: _postsPerPage,
+        offset: _currentFeedOffset + _postsPerPage,
+      );
+      
+      AppConfig.debugPrint('📊 Loaded ${newPosts.length} more posts');
+      
+      if (mounted) {
+        setState(() {
+          _feedPosts.addAll(newPosts);
+          _currentFeedOffset += _postsPerPage;
+          _isLoadingMorePosts = false;
+          
+          // If we got fewer posts than requested, we've reached the end
+          if (newPosts.length < _postsPerPage) {
+            _hasMorePosts = false;
+            AppConfig.debugPrint('📍 Reached end of feed');
+          }
+        });
+        
+        AppConfig.debugPrint('✅ Total posts now: ${_feedPosts.length}');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingMorePosts = false);
+      }
+      AppConfig.debugPrint('❌ Error loading more posts: $e');
+    }
+  }
+
+
 
   // 🔥 NEW: Report harassment
   Future<void> _reportPost(Map<String, dynamic> post) async {
@@ -1763,7 +2158,7 @@ class _HomePageState extends State<HomePage>
   void _showPostDialog() {
     final TextEditingController postController = TextEditingController();
     bool isPosting = false;
-    String selectedVisibility = _defaultPostVisibility; // Use saved preference
+    String selectedVisibility = _defaultPostVisibility;
 
     showDialog(
       context: context,
@@ -1782,7 +2177,6 @@ class _HomePageState extends State<HomePage>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Post text field
                 TextField(
                   controller: postController,
                   maxLines: 8,
@@ -1801,7 +2195,6 @@ class _HomePageState extends State<HomePage>
                 
                 SizedBox(height: 16),
                 
-                // Visibility dropdown
                 Container(
                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
@@ -1868,7 +2261,6 @@ class _HomePageState extends State<HomePage>
                 
                 SizedBox(height: 8),
                 
-                // Visibility explanation
                 Container(
                   padding: EdgeInsets.all(10),
                   decoration: BoxDecoration(
@@ -1938,12 +2330,12 @@ class _HomePageState extends State<HomePage>
                           visibility: selectedVisibility,
                         );
 
-                        // Save preference for next time
                         _defaultPostVisibility = selectedVisibility;
 
                         Navigator.pop(context);
                         
-                        await _loadFeed();
+                        // 🔥 CHANGED: Refresh feed instead of just loading
+                        await _loadFeed(isRefresh: true);
 
                         if (mounted) {
                           final visibilityText = selectedVisibility == 'public' 
@@ -1988,7 +2380,6 @@ class _HomePageState extends State<HomePage>
       ),
     );
   }
-
   // 🔥 NEW: Show share recipe dialog
   void _showShareRecipeDialog() {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2088,14 +2479,7 @@ class _HomePageState extends State<HomePage>
                     icon: Icons.image,
                     label: 'Photo',
                     color: Colors.orange,
-                    onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Photo uploads coming soon!'),
-                          backgroundColor: Colors.orange,
-                        ),
-                      );
-                    },
+                    onTap: () => _showPhotoUploadDialog(), // ✅ Just this line
                   ),
                 ],
               ),
@@ -3088,20 +3472,69 @@ class _HomePageState extends State<HomePage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Caption text
                 if (post['content'] != null && post['content'].toString().isNotEmpty)
-                  Text(
-                    post['content'],
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey.shade700,
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      post['content'],
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ),
+                
+                // 🔥 NEW: Photo display
+                if (post['photo_url'] != null && post['photo_url'].toString().isNotEmpty)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(
+                      post['photo_url'],
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        return Container(
+                          height: 200,
+                          color: Colors.grey.shade200,
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              value: loadingProgress.expectedTotalBytes != null
+                                  ? loadingProgress.cumulativeBytesLoaded /
+                                      loadingProgress.expectedTotalBytes!
+                                  : null,
+                            ),
+                          ),
+                        );
+                      },
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          height: 200,
+                          color: Colors.grey.shade200,
+                          child: Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.broken_image, size: 48, color: Colors.grey.shade400),
+                                SizedBox(height: 8),
+                                Text(
+                                  'Failed to load image',
+                                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
               ],
             ),
           ),
-          
+
           const SizedBox(height: 12),
-          
+
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
@@ -3186,6 +3619,7 @@ class _HomePageState extends State<HomePage>
         ),
       ),
       child: SingleChildScrollView(
+        controller: _feedScrollController,
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
@@ -3348,7 +3782,7 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 30),
 
-            // 🔥 UPDATED: Feed Section with Post Composer
+            // 🔥 UPDATED: Feed Section with Infinite Scroll
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -3370,7 +3804,6 @@ class _HomePageState extends State<HomePage>
                         ),
                       ),
                       const Spacer(),
-                      // 🌍 Public indicator badge
                       Container(
                         padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
@@ -3402,7 +3835,8 @@ class _HomePageState extends State<HomePage>
                   _buildPostComposer(),
                   const SizedBox(height: 16),
                   
-                  if (_isLoadingFeed)
+                  // 🔥 NEW: Feed with infinite scroll
+                  if (_isLoadingFeed && _feedPosts.isEmpty)
                     const Center(
                       child: Padding(
                         padding: EdgeInsets.all(20),
@@ -3437,24 +3871,40 @@ class _HomePageState extends State<HomePage>
                       ),
                     )
                   else
-                    Column(
-                      children: _feedPosts.take(3).map((post) => _buildFeedPost(post)).toList(),
-                    ),
-                    
-                  if (_feedPosts.length > 3)
-                    Center(
-                      child: TextButton.icon(
-                        onPressed: () {
-                          // TODO: Navigate to full feed page
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Full feed page coming soon!'),
-                              backgroundColor: Colors.blue,
+                    // 🔥 Feed list with scroll controller
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: NeverScrollableScrollPhysics(), // Parent scrolls
+                      itemCount: _feedPosts.length + (_hasMorePosts ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        // Show loading indicator at bottom if loading more
+                        if (index == _feedPosts.length) {
+                          return Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: _isLoadingMorePosts
+                                  ? CircularProgressIndicator()
+                                  : SizedBox.shrink(),
                             ),
                           );
-                        },
-                        icon: Icon(Icons.arrow_forward),
-                        label: Text('View All Posts (${_feedPosts.length})'),
+                        }
+                        
+                        return _buildFeedPost(_feedPosts[index]);
+                      },
+                    ),
+                    
+                  // End of feed indicator
+                  if (!_hasMorePosts && _feedPosts.isNotEmpty)
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          '✨ You\'ve seen all posts',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 14,
+                          ),
+                        ),
                       ),
                     ),
                 ],
@@ -3502,7 +3952,6 @@ class _HomePageState extends State<HomePage>
       ),
     );
   }
-
   Widget _buildScanningView() {
     return Container(
       decoration: BoxDecoration(

@@ -1,5 +1,5 @@
 // lib/services/picture_service.dart
-// IMPROVED: Better error handling and debugging
+// COMPLETE VERSION WITH FEED PHOTO SUPPORT
 
 import 'dart:convert';
 import 'dart:io';
@@ -255,7 +255,7 @@ class PictureService {
       final existing = profile?['pictures'];
       if (existing != null) {
         try {
-          // 🔥 FIX: Handle PostgreSQL ARRAY type correctly
+          // Handle PostgreSQL ARRAY type correctly
           if (existing is List) {
             // Already a List from PostgreSQL array
             pictures = List<String>.from(existing);
@@ -280,14 +280,13 @@ class PictureService {
       pictures.add(publicUrl);
       AppConfig.debugPrint('💾 Saving ${pictures.length} pictures to database...');
 
-      // 🔥 CRITICAL FIX: Send as PostgreSQL array, not JSON string
-      // The Worker should handle this as an array type, not a string
+      // Send as PostgreSQL array, not JSON string
       await DatabaseServiceCore.workerQuery(
         action: 'update',
         table: 'user_profiles',
         filters: {'id': userId},
         data: {
-          'pictures': pictures,  // 🔥 Send as List directly, not jsonEncode()
+          'pictures': pictures,  // Send as List directly, not jsonEncode()
           'updated_at': DateTime.now().toUtc().toIso8601String(),
         },
       );
@@ -327,10 +326,94 @@ class PictureService {
       rethrow;
     }
   }
-  // ==================================================
-  // DELETE PICTURE (Gallery, Profile, OR Background)
-  // ==================================================
 
+  // ==================================================
+  // 🔥 NEW: UPLOAD FEED PHOTO
+  // ==================================================
+  static Future<String> uploadFeedPhoto(File imageFile) async {
+    final userId = DatabaseServiceCore.currentUserId;
+    if (userId == null) {
+      throw Exception('Please sign in to continue');
+    }
+
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final fileName = 'feed_$timestamp.jpg';
+    final filePath = '$userId/$fileName';
+
+    try {
+      // Validate file exists
+      if (!await imageFile.exists()) {
+        throw Exception('Image file not found');
+      }
+
+      // Validate size
+      final fileSize = await imageFile.length();
+      AppConfig.debugPrint('📊 Feed photo file size: ${(fileSize / 1024 / 1024).toStringAsFixed(2)}MB');
+      
+      if (fileSize > 10 * 1024 * 1024) {
+        throw Exception('Image too large (${(fileSize / 1024 / 1024).toStringAsFixed(1)}MB). Max 10MB.');
+      }
+
+      if (fileSize == 0) {
+        throw Exception('Image file is empty');
+      }
+
+      // Read and encode image
+      AppConfig.debugPrint('📖 Reading feed photo...');
+      final bytes = await imageFile.readAsBytes();
+      
+      if (bytes.isEmpty) {
+        throw Exception('Failed to read image data');
+      }
+
+      AppConfig.debugPrint('🔄 Encoding feed photo to base64...');
+      final base64Image = base64Encode(bytes);
+      
+      if (base64Image.isEmpty) {
+        throw Exception('Failed to encode image');
+      }
+
+      AppConfig.debugPrint('📤 Uploading feed photo to: feed-photos/$filePath');
+
+      // Upload to R2 via Worker
+      final publicUrl = await DatabaseServiceCore.workerStorageUpload(
+        bucket: 'feed-photos',
+        path: filePath,
+        base64Data: base64Image,
+        contentType: 'image/jpeg',
+      );
+
+      AppConfig.debugPrint('✅ Feed photo uploaded: $publicUrl');
+
+      return publicUrl;
+    } on FileSystemException catch (e) {
+      AppConfig.debugPrint('❌ File system error: $e');
+      throw Exception('Cannot access image file: ${e.message}');
+    } on FormatException catch (e) {
+      AppConfig.debugPrint('❌ Format error: $e');
+      throw Exception('Invalid image format: ${e.message}');
+    } catch (e) {
+      AppConfig.debugPrint('❌ uploadFeedPhoto error: $e');
+      
+      // Provide more helpful error messages
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('timeout')) {
+        throw Exception('Upload timeout. Please check your connection and try again.');
+      } else if (errorStr.contains('network') || errorStr.contains('socket')) {
+        throw Exception('Network error. Please check your internet connection.');
+      } else if (errorStr.contains('401') || errorStr.contains('authentication')) {
+        throw Exception('Session expired. Please sign out and sign back in.');
+      } else if (errorStr.contains('413') || errorStr.contains('too large')) {
+        throw Exception('Image too large. Please choose a smaller image.');
+      }
+      
+      rethrow;
+    }
+  }
+
+  // ==================================================
+  // DELETE PICTURE (Gallery, Profile, Background, OR Feed)
+  // ==================================================
   static Future<void> deletePicture(String pictureUrl) async {
     final userId = DatabaseServiceCore.currentUserId;
     if (userId == null) {
@@ -357,7 +440,7 @@ class PictureService {
         List<String> pictures = [];
         
         try {
-          // 🔥 FIX: Handle PostgreSQL ARRAY type correctly
+          // Handle PostgreSQL ARRAY type correctly
           if (picturesData is List) {
             pictures = List<String>.from(picturesData);
           } else if (picturesData is String && picturesData.isNotEmpty) {
@@ -380,7 +463,7 @@ class PictureService {
             table: 'user_profiles',
             filters: {'id': userId},
             data: {
-              'pictures': pictures,  // 🔥 Send as List directly, not jsonEncode()
+              'pictures': pictures,  // Send as List directly, not jsonEncode()
               'updated_at': DateTime.now().toUtc().toIso8601String(),
             },
           );
@@ -401,10 +484,10 @@ class PictureService {
       throw Exception('Failed to delete picture: $e');
     }
   }
+
   // ==================================================
   // SET A GALLERY PICTURE AS PROFILE PICTURE
   // ==================================================
-
   static Future<void> setPictureAsProfilePicture(String pictureUrl) async {
     final userId = DatabaseServiceCore.currentUserId;
     if (userId == null) {
@@ -439,7 +522,6 @@ class PictureService {
   // ==================================================
   // GETTERS
   // ==================================================
-
   static Future<List<String>> getUserPictures(String userId) async {
     try {
       final profile = await ProfileService.getUserProfile(userId);
@@ -452,7 +534,7 @@ class PictureService {
 
       List<String> pictures = [];
       
-      // 🔥 FIX: Handle PostgreSQL ARRAY type correctly
+      // Handle PostgreSQL ARRAY type correctly
       if (picturesData is List) {
         pictures = List<String>.from(picturesData);
         AppConfig.debugPrint('📦 Loaded ${pictures.length} pictures for user: $userId (from array)');
