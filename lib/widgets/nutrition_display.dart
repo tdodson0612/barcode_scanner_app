@@ -1,4 +1,4 @@
-// lib/widgets/nutrition_display.dart - UPDATED: Added Macros section
+// lib/widgets/nutrition_display.dart - UPDATED: Standardized macro/micro format
 import 'package:flutter/material.dart';
 import '../models/nutrition_info.dart';
 
@@ -57,11 +57,18 @@ class NutritionDisplay extends StatelessWidget {
     final calories = nutrition.calories ?? 0.0;
     final fat = nutrition.fat ?? 0.0;
     final saturatedFat = nutrition.saturatedFat ?? 0.0;
+    final monounsaturatedFat = nutrition.monounsaturatedFat;
+    final polyunsaturatedFat = nutrition.polyunsaturatedFat;
+    final transFat = nutrition.transFat;
     final carbs = nutrition.carbs ?? 0.0;
     final sugar = nutrition.sugar ?? 0.0;
     final fiber = nutrition.fiber ?? 0.0;
     final protein = nutrition.protein ?? 0.0;
     final sodium = nutrition.sodium ?? 0.0;
+    final iron = nutrition.iron;
+    final potassium = nutrition.potassium;
+    final cholesterol = nutrition.cholesterol;
+    final cobalt = nutrition.cobalt;
 
     return Card(
       elevation: 3,
@@ -82,26 +89,63 @@ class NutritionDisplay extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
+            const Divider(thickness: 2),
+            const SizedBox(height: 12),
 
-            // Main nutrition info
-            _buildNutritionRow('Energy', '${calories.toStringAsFixed(0)} kcal'),
-            const Divider(),
-            _buildNutritionRow('Fat', '${fat.toStringAsFixed(1)} g'),
-            _buildNutritionRow('  Saturated Fat', '${saturatedFat.toStringAsFixed(1)} g', indent: true),
-            const Divider(),
-            _buildNutritionRow('Carbs', '${carbs.toStringAsFixed(1)} g'),
-            _buildNutritionRow('  Sugars', '${sugar.toStringAsFixed(1)} g', indent: true),
-            const Divider(),
-            _buildNutritionRow('Fiber', '${fiber.toStringAsFixed(1)} g'),
-            _buildNutritionRow('Protein', '${protein.toStringAsFixed(1)} g'),
-            _buildNutritionRow('Sodium', '${sodium.toStringAsFixed(0)} mg'),
+            // MACRONUTRIENTS SECTION
+            _buildSectionHeader('MACRONUTRIENTS'),
+            const SizedBox(height: 8),
 
-            // 🔥 NEW: Macros Section
+            _buildNutrientRow('Calories', '${calories.toStringAsFixed(0)} kcal', 'MACRO', isBold: true),
+            _buildNutrientRow('Protein', '${protein.toStringAsFixed(1)} g', 'MACRO', isBold: true),
+            _buildNutrientRow('Total Fat', '${fat.toStringAsFixed(1)} g', 'MACRO', isBold: true),
+            _buildIndentedRow('Monounsaturated Fat', '${monounsaturatedFat?.toStringAsFixed(1) ?? 'N/A'} g', 'MACRO'),
+            _buildIndentedRow('Polyunsaturated Fat', '${polyunsaturatedFat?.toStringAsFixed(1) ?? 'N/A'} g', 'MACRO'),
+            _buildIndentedRow('Saturated Fat', '${saturatedFat.toStringAsFixed(1)} g', 'MACRO'),
+            _buildIndentedRow('Trans Fat', '${transFat?.toStringAsFixed(1) ?? 'N/A'} g', 'MACRO'),
+            _buildNutrientRow('Carbohydrates', '${carbs.toStringAsFixed(1)} g', 'MACRO', isBold: true),
+            _buildIndentedRow('Fiber', '${fiber.toStringAsFixed(1)} g', 'MACRO'),
+            _buildIndentedRow('Net Carbohydrates', '${nutrition.netCarbs.toStringAsFixed(1)} g', 'MACRO'),
+            _buildIndentedRow('Sugar', '${sugar.toStringAsFixed(1)} g', 'MACRO'),
+
+            const SizedBox(height: 16),
+            const Divider(thickness: 2),
+            const SizedBox(height: 12),
+
+            // MICRONUTRIENTS SECTION
+            _buildSectionHeader('MICRONUTRIENTS'),
+            const SizedBox(height: 8),
+
+            _buildNutrientRow('Iron', '${iron?.toStringAsFixed(1) ?? 'N/A'} mg', 'MICRO'),
+            _buildNutrientRow('Sodium', '${sodium.toStringAsFixed(0)} mg', 'MICRO'),
+            _buildNutrientRow('Potassium', '${potassium?.toStringAsFixed(0) ?? 'N/A'} mg', 'MICRO'),
+            _buildNutrientRow('Cholesterol', '${cholesterol?.toStringAsFixed(0) ?? 'N/A'} mg', 'MICRO'),
+            _buildNutrientRow('Cobalt', '${cobalt?.toStringAsFixed(1) ?? 'N/A'} mcg', 'MICRO'),
+
+            // OTHER NUTRIENTS (if present)
+            if (_hasOtherNutrients()) ...[
+              const SizedBox(height: 16),
+              const Divider(thickness: 2),
+              const SizedBox(height: 12),
+              _buildSectionHeader('OTHER NUTRIENTS'),
+              const SizedBox(height: 8),
+              
+              if (nutrition.vitaminA != null)
+                _buildNutrientRow('Vitamin A', '${nutrition.vitaminA!.toStringAsFixed(1)} mcg', 'MICRO'),
+              if (nutrition.vitaminC != null)
+                _buildNutrientRow('Vitamin C', '${nutrition.vitaminC!.toStringAsFixed(1)} mg', 'MICRO'),
+              if (nutrition.vitaminD != null)
+                _buildNutrientRow('Vitamin D', '${nutrition.vitaminD!.toStringAsFixed(1)} mcg', 'MICRO'),
+              if (nutrition.calcium != null)
+                _buildNutrientRow('Calcium', '${nutrition.calcium!.toStringAsFixed(0)} mg', 'MICRO'),
+            ],
+
+            // 🔥 Macros Section (kept from original)
             if (hasValidMacros) ...[
               const SizedBox(height: 20),
               const Divider(thickness: 2),
               const SizedBox(height: 12),
-
+              
               Row(
                 children: [
                   Icon(Icons.pie_chart, size: 20, color: Colors.green.shade700),
@@ -176,29 +220,117 @@ class NutritionDisplay extends StatelessWidget {
     );
   }
 
-  Widget _buildNutritionRow(String label, String value, {bool indent = false}) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: indent ? 16 : 0,
-        top: 4,
-        bottom: 4,
+  bool _hasOtherNutrients() {
+    return nutrition.vitaminA != null ||
+        nutrition.vitaminC != null ||
+        nutrition.vitaminD != null ||
+        nutrition.calcium != null;
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.green.shade100,
+        borderRadius: BorderRadius.circular(6),
       ),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          color: Colors.green.shade900,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNutrientRow(String label, String value, String type, {bool isBold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: indent ? FontWeight.normal : FontWeight.w600,
-              color: indent ? Colors.grey.shade700 : Colors.black87,
+          Expanded(
+            flex: 3,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
+                decoration: isBold ? TextDecoration.underline : null,
+              ),
             ),
           ),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
+          Expanded(
+            flex: 2,
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: type == 'MACRO' ? Colors.blue.shade100 : Colors.orange.shade100,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              type,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: type == 'MACRO' ? Colors.blue.shade900 : Colors.orange.shade900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIndentedRow(String label, String value, String type) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 20, top: 4, bottom: 4),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: type == 'MACRO' ? Colors.blue.shade50 : Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              type,
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                color: type == 'MACRO' ? Colors.blue.shade700 : Colors.orange.shade700,
+              ),
             ),
           ),
         ],

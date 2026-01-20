@@ -1,5 +1,5 @@
 // lib/widgets/nutrition_facts_label.dart - FDA-STYLE NUTRITION FACTS
-// Complete nutrition display with bold macros
+// Complete nutrition display with bold macros and macro/micro labels
 // iOS 14 Compatible | Production Ready
 
 import 'package:flutter/material.dart';
@@ -74,7 +74,7 @@ class NutritionFactsLabel extends StatelessWidget {
             const Divider(thickness: 4, color: Colors.black, height: 12),
             
             // ========================================
-            // OTHER NUTRIENTS
+            // MICRONUTRIENTS
             // ========================================
             _buildMicronutrientsSection(),
             
@@ -180,11 +180,16 @@ class NutritionFactsLabel extends StatelessWidget {
   Widget _buildMacroSection() {
     return Column(
       children: [
+        // Section header
+        _buildSectionHeader('MACRONUTRIENTS'),
+        const SizedBox(height: 8),
+
         // Total Fat (BOLD)
         _buildBoldNutrient(
           'Total Fat',
           '${nutrition.fat.toStringAsFixed(1)}g',
           _calculateDV(nutrition.fat, 78), // Based on 78g DV
+          'MACRO',
         ),
         
         // Saturated Fat (indented)
@@ -194,6 +199,7 @@ class NutritionFactsLabel extends StatelessWidget {
           nutrition.saturatedFat != null 
             ? _calculateDV(nutrition.saturatedFat!, 20) 
             : null,
+          'MACRO',
         ),
         
         // Monounsaturated Fat (indented)
@@ -201,6 +207,15 @@ class NutritionFactsLabel extends StatelessWidget {
           'Monounsaturated Fat',
           '${nutrition.monounsaturatedFat?.toStringAsFixed(1) ?? '0'}g',
           null, // No DV for monounsaturated
+          'MACRO',
+        ),
+
+        // Polyunsaturated Fat (indented)
+        _buildIndentedNutrient(
+          'Polyunsaturated Fat',
+          '${nutrition.polyunsaturatedFat?.toStringAsFixed(1) ?? '0'}g',
+          null, // No DV for polyunsaturated
+          'MACRO',
         ),
         
         // Trans Fat (indented)
@@ -208,6 +223,7 @@ class NutritionFactsLabel extends StatelessWidget {
           'Trans Fat',
           '${nutrition.transFat?.toStringAsFixed(1) ?? '0'}g',
           null, // No DV for trans fat
+          'MACRO',
         ),
         
         const Divider(thickness: 1, color: Colors.grey, height: 8),
@@ -219,6 +235,7 @@ class NutritionFactsLabel extends StatelessWidget {
           nutrition.cholesterol != null 
             ? _calculateDV(nutrition.cholesterol!, 300) 
             : null,
+          'MICRO',
         ),
         
         const Divider(thickness: 1, color: Colors.grey, height: 8),
@@ -228,6 +245,7 @@ class NutritionFactsLabel extends StatelessWidget {
           'Sodium',
           '${nutrition.sodium.toStringAsFixed(0)}mg',
           _calculateDV(nutrition.sodium, 2300),
+          'MICRO',
         ),
         
         const Divider(thickness: 1, color: Colors.grey, height: 8),
@@ -237,6 +255,7 @@ class NutritionFactsLabel extends StatelessWidget {
           'Total Carbohydrates',
           '${nutrition.carbs.toStringAsFixed(1)}g',
           _calculateDV(nutrition.carbs, 275),
+          'MACRO',
         ),
         
         // Fiber (indented)
@@ -246,6 +265,7 @@ class NutritionFactsLabel extends StatelessWidget {
           nutrition.fiber != null 
             ? _calculateDV(nutrition.fiber!, 28) 
             : null,
+          'MACRO',
         ),
         
         // Total Sugars (indented)
@@ -253,6 +273,7 @@ class NutritionFactsLabel extends StatelessWidget {
           'Total Sugars',
           '${nutrition.sugar.toStringAsFixed(1)}g',
           null, // No DV for total sugars
+          'MACRO',
         ),
         
         // Net Carbs (indented, calculated)
@@ -260,6 +281,7 @@ class NutritionFactsLabel extends StatelessWidget {
           'Net Carbohydrates',
           '${nutrition.netCarbs.toStringAsFixed(1)}g',
           null,
+          'MACRO',
           isCalculated: true,
         ),
         
@@ -270,6 +292,7 @@ class NutritionFactsLabel extends StatelessWidget {
           'Protein',
           '${nutrition.protein.toStringAsFixed(1)}g',
           _calculateDV(nutrition.protein, 50),
+          'MACRO',
         ),
       ],
     );
@@ -278,6 +301,10 @@ class NutritionFactsLabel extends StatelessWidget {
   Widget _buildMicronutrientsSection() {
     return Column(
       children: [
+        // Section header
+        _buildSectionHeader('MICRONUTRIENTS'),
+        const SizedBox(height: 8),
+
         // Potassium
         _buildRegularNutrient(
           'Potassium',
@@ -285,6 +312,7 @@ class NutritionFactsLabel extends StatelessWidget {
           nutrition.potassium != null 
             ? _calculateDV(nutrition.potassium!, 4700) 
             : null,
+          'MICRO',
         ),
         
         const Divider(thickness: 1, color: Colors.grey, height: 8),
@@ -296,6 +324,7 @@ class NutritionFactsLabel extends StatelessWidget {
           nutrition.iron != null 
             ? _calculateDV(nutrition.iron!, 18) 
             : null,
+          'MICRO',
         ),
         
         const Divider(thickness: 1, color: Colors.grey, height: 8),
@@ -305,7 +334,55 @@ class NutritionFactsLabel extends StatelessWidget {
           'Cobalt',
           '${nutrition.cobalt?.toStringAsFixed(1) ?? '0'}mcg',
           null, // No established DV for cobalt
+          'MICRO',
         ),
+
+        // OTHER NUTRIENTS (if present)
+        if (_hasOtherNutrients()) ...[
+          const SizedBox(height: 12),
+          const Divider(thickness: 2, color: Colors.grey, height: 12),
+          const SizedBox(height: 8),
+          _buildSectionHeader('OTHER NUTRIENTS'),
+          const SizedBox(height: 8),
+          
+          if (nutrition.vitaminA != null) ...[
+            _buildRegularNutrient(
+              'Vitamin A',
+              '${nutrition.vitaminA!.toStringAsFixed(1)} mcg',
+              null,
+              'MICRO',
+            ),
+            const Divider(thickness: 1, color: Colors.grey, height: 8),
+          ],
+          
+          if (nutrition.vitaminC != null) ...[
+            _buildRegularNutrient(
+              'Vitamin C',
+              '${nutrition.vitaminC!.toStringAsFixed(1)} mg',
+              null,
+              'MICRO',
+            ),
+            const Divider(thickness: 1, color: Colors.grey, height: 8),
+          ],
+          
+          if (nutrition.vitaminD != null) ...[
+            _buildRegularNutrient(
+              'Vitamin D',
+              '${nutrition.vitaminD!.toStringAsFixed(1)} mcg',
+              null,
+              'MICRO',
+            ),
+            const Divider(thickness: 1, color: Colors.grey, height: 8),
+          ],
+          
+          if (nutrition.calcium != null)
+            _buildRegularNutrient(
+              'Calcium',
+              '${nutrition.calcium!.toStringAsFixed(0)} mg',
+              null,
+              'MICRO',
+            ),
+        ],
       ],
     );
   }
@@ -353,17 +430,45 @@ class NutritionFactsLabel extends StatelessWidget {
     );
   }
 
+  bool _hasOtherNutrients() {
+    return nutrition.vitaminA != null ||
+        nutrition.vitaminC != null ||
+        nutrition.vitaminD != null ||
+        nutrition.calcium != null;
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.green.shade100,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.green.shade300, width: 1.5),
+      ),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.bold,
+          color: Colors.green.shade900,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+
   // ========================================
   // NUTRIENT ROW BUILDERS
   // ========================================
 
-  Widget _buildBoldNutrient(String label, String amount, int? dv) {
+  Widget _buildBoldNutrient(String label, String amount, int? dv, String type) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Expanded(
+            flex: 3,
             child: Row(
               children: [
                 Text(
@@ -371,6 +476,7 @@ class NutritionFactsLabel extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w900, // BOLD for macros
+                    decoration: TextDecoration.underline,
                   ),
                 ),
                 const SizedBox(width: 4),
@@ -384,26 +490,47 @@ class NutritionFactsLabel extends StatelessWidget {
               ],
             ),
           ),
-          if (dv != null)
-            Text(
-              '$dv%',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w900, // BOLD for macros
+          Row(
+            children: [
+              if (dv != null)
+                Text(
+                  '$dv%',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900, // BOLD for macros
+                  ),
+                ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: type == 'MACRO' ? Colors.blue.shade100 : Colors.orange.shade100,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  type,
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: type == 'MACRO' ? Colors.blue.shade900 : Colors.orange.shade900,
+                  ),
+                ),
               ),
-            ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildIndentedNutrient(String label, String amount, int? dv, {bool isCalculated = false}) {
+  Widget _buildIndentedNutrient(String label, String amount, int? dv, String type, {bool isCalculated = false}) {
     return Padding(
       padding: const EdgeInsets.only(left: 16, top: 2, bottom: 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Expanded(
+            flex: 3,
             child: Row(
               children: [
                 Text(
@@ -426,26 +553,47 @@ class NutritionFactsLabel extends StatelessWidget {
               ],
             ),
           ),
-          if (dv != null)
-            Text(
-              '$dv%',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
+          Row(
+            children: [
+              if (dv != null)
+                Text(
+                  '$dv%',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: type == 'MACRO' ? Colors.blue.shade50 : Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  type,
+                  style: TextStyle(
+                    fontSize: 8,
+                    fontWeight: FontWeight.bold,
+                    color: type == 'MACRO' ? Colors.blue.shade700 : Colors.orange.shade700,
+                  ),
+                ),
               ),
-            ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildRegularNutrient(String label, String amount, int? dv) {
+  Widget _buildRegularNutrient(String label, String amount, int? dv, String type) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Expanded(
+            flex: 3,
             child: Row(
               children: [
                 Text(
@@ -466,14 +614,34 @@ class NutritionFactsLabel extends StatelessWidget {
               ],
             ),
           ),
-          if (dv != null)
-            Text(
-              '$dv%',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+          Row(
+            children: [
+              if (dv != null)
+                Text(
+                  '$dv%',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: type == 'MACRO' ? Colors.blue.shade100 : Colors.orange.shade100,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  type,
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: type == 'MACRO' ? Colors.blue.shade900 : Colors.orange.shade900,
+                  ),
+                ),
               ),
-            ),
+            ],
+          ),
         ],
       ),
     );
