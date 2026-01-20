@@ -1640,9 +1640,12 @@ class _HomePageState extends State<HomePage>
         AppConfig.debugPrint('  - ID: ${posts[0]['id']}');
         AppConfig.debugPrint('  - User: ${posts[0]['username']}');
         AppConfig.debugPrint('  - Visibility: ${posts[0]['visibility']}');
-        AppConfig.debugPrint('  - Content preview: ${posts[0]['content']?.toString().substring(0, 50)}...');
+        
+        // 🔥 FIX: Don't exceed the actual length of the content
+        final content = posts[0]['content']?.toString() ?? '';
+        final preview = content.length > 50 ? content.substring(0, 50) : content;
+        AppConfig.debugPrint('  - Content preview: $preview...');
       }
-      
       if (mounted) {
         setState(() {
           _feedPosts = posts;

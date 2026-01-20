@@ -1,4 +1,4 @@
-// lib/services/feed_posts_service.dart - COMPLETELY REWRITTEN WITH OPTIMIZED QUERIES
+// lib/services/feed_posts_service.dart - FULLY FIXED VERSION
 import 'database_service_core.dart';
 import 'auth_service.dart';
 import '../config/app_config.dart';
@@ -107,7 +107,7 @@ class FeedPostsService {
     return buffer.toString();
   }
 
-  /// 🔥 NEW: Optimized feed loading with separate queries for public/friends posts
+  /// 🔥 FIXED: Optimized feed loading with proper pagination
   /// Get feed posts based on current user's friend status
   /// Shows: Public posts + Friends-only posts from friends
   static Future<List<Map<String, dynamic>>> getFeedPosts({
@@ -132,7 +132,7 @@ class FeedPostsService {
 
       // Step 2: Get public posts
       AppConfig.debugPrint('📡 Querying PUBLIC posts...');
-      final publicPosts = await _getPublicPosts(limit: limit * 2);
+      final publicPosts = await _getPublicPosts(limit: 100); // ✅ Fetch enough for pagination
       AppConfig.debugPrint('✅ Found ${publicPosts.length} public posts');
 
       // Step 3: Get friends-only posts
@@ -140,7 +140,7 @@ class FeedPostsService {
       
       if (friendIds.length > 1) { // More than just self
         AppConfig.debugPrint('📡 Querying FRIENDS-ONLY posts...');
-        friendsPosts = await _getFriendsOnlyPosts(friendIds, limit: 50);
+        friendsPosts = await _getFriendsOnlyPosts(friendIds, limit: 100); // ✅ Fetch enough
         AppConfig.debugPrint('✅ Found ${friendsPosts.length} friends-only posts');
       }
 
@@ -148,7 +148,7 @@ class FeedPostsService {
       final allPosts = [...publicPosts, ...friendsPosts];
       final uniquePosts = _deduplicateAndSort(allPosts);
 
-      // Step 5: Apply pagination
+      // Step 5: Apply pagination safely
       final paginatedPosts = _applyPagination(uniquePosts, limit: limit, offset: offset);
 
       AppConfig.debugPrint('✅ Returning ${paginatedPosts.length} posts (total: ${uniquePosts.length})');
@@ -196,41 +196,44 @@ class FeedPostsService {
     return friendIds;
   }
 
-  /// Get public posts (visible to everyone)
+  /// 🔥 CRITICAL FIX: Get public posts ONLY (filter by visibility)
   static Future<List<Map<String, dynamic>>> _getPublicPosts({
-    int limit = 40,
+    int limit = 100, // ✅ Fetch more to account for pagination
   }) async {
     try {
       final result = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'feed_posts',
+        filters: {'visibility': 'public'}, // ✅ CRITICAL: Only public posts
         orderBy: 'created_at',
         ascending: false,
         limit: limit,
       );
 
       if (result == null || (result as List).isEmpty) {
+        AppConfig.debugPrint('⚠️ No public posts found in database');
         return [];
       }
 
-      return List<Map<String, dynamic>>.from(result as List);
+      final posts = List<Map<String, dynamic>>.from(result as List);
+      AppConfig.debugPrint('✅ Fetched ${posts.length} public posts from database');
+      
+      return posts;
     } catch (e) {
       AppConfig.debugPrint('❌ Error fetching public posts: $e');
       return [];
     }
   }
 
-  /// Get friends-only posts from friend list
+  /// 🔥 FIXED: Get friends-only posts from friend list
   static Future<List<Map<String, dynamic>>> _getFriendsOnlyPosts(
     Set<String> friendIds, {
-    int limit = 50,
+    int limit = 100, // ✅ Fetch more to account for pagination
   }) async {
     final friendsPosts = <Map<String, dynamic>>[];
 
     try {
       // Query friends-only posts for each friend
-      // Note: We query each friend separately because Supabase REST API 
-      // via worker doesn't support SQL IN operator easily
       for (final friendId in friendIds) {
         final result = await DatabaseServiceCore.workerQuery(
           action: 'select',
@@ -241,13 +244,16 @@ class FeedPostsService {
           },
           orderBy: 'created_at',
           ascending: false,
-          limit: 20, // Limit per friend to avoid too many results
+          limit: 50, // Limit per friend to avoid too many results
         );
 
         if (result != null && (result as List).isNotEmpty) {
           friendsPosts.addAll(List<Map<String, dynamic>>.from(result as List));
         }
       }
+      
+      AppConfig.debugPrint('✅ Found ${friendsPosts.length} friends-only posts total');
+      
     } catch (e) {
       AppConfig.debugPrint('❌ Error fetching friends-only posts: $e');
     }
@@ -278,19 +284,24 @@ class FeedPostsService {
     return uniquePosts;
   }
 
-  /// Apply pagination to post list
+  /// 🔥 FIXED: Apply pagination safely with bounds checking
   static List<Map<String, dynamic>> _applyPagination(
     List<Map<String, dynamic>> posts, {
     required int limit,
     required int offset,
   }) {
+    if (posts.isEmpty) return [];
+    
     final startIndex = offset.clamp(0, posts.length);
     final endIndex = (offset + limit).clamp(0, posts.length);
+    
+    // ✅ FIXED: Ensure we don't go out of bounds
+    if (startIndex >= posts.length) return [];
     
     return posts.sublist(startIndex, endIndex);
   }
 
-  /// Get only public posts (for unauthenticated users)
+  /// 🔥 FIXED: Get only public posts (for unauthenticated users)
   static Future<List<Map<String, dynamic>>> _getPublicPostsOnly({
     int limit = 20,
     int offset = 0,
@@ -301,10 +312,10 @@ class FeedPostsService {
       final result = await DatabaseServiceCore.workerQuery(
         action: 'select',
         table: 'feed_posts',
-        filters: {'visibility': 'public'},
+        filters: {'visibility': 'public'}, // ✅ CRITICAL: Only public posts
         orderBy: 'created_at',
         ascending: false,
-        limit: limit + offset, // Get extra to account for offset
+        limit: limit + offset + 10, // Fetch extra for pagination safety
       );
 
       if (result == null || (result as List).isEmpty) {
@@ -315,7 +326,7 @@ class FeedPostsService {
       final allPosts = List<Map<String, dynamic>>.from(result as List);
       final paginatedPosts = _applyPagination(allPosts, limit: limit, offset: offset);
 
-      AppConfig.debugPrint('✅ Found ${paginatedPosts.length} public posts');
+      AppConfig.debugPrint('✅ Found ${paginatedPosts.length} public posts (total: ${allPosts.length})');
       return paginatedPosts;
     } catch (e) {
       AppConfig.debugPrint('❌ Error loading public posts: $e');
