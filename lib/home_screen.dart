@@ -3362,7 +3362,12 @@ class _HomePageState extends State<HomePage>
                 CircleAvatar(
                   radius: 20,
                   backgroundColor: Colors.green.shade100,
-                  child: Icon(Icons.person, color: Colors.green.shade700),
+                  backgroundImage: post['avatar_url'] != null && post['avatar_url'].toString().isNotEmpty
+                      ? NetworkImage(post['avatar_url'])
+                      : null,
+                  child: (post['avatar_url'] == null || post['avatar_url'].toString().isEmpty)
+                      ? Icon(Icons.person, color: Colors.green.shade700)
+                      : null,
                 ),
                 const SizedBox(width: 12),
                 Expanded(

@@ -19,27 +19,36 @@ class IngredientRow {
   String quantity;
   String measurement;
   String name;
+  String? customMeasurement;
 
   IngredientRow({
     this.quantity = '',
     this.measurement = 'cup',
     this.name = '',
+    this.customMeasurement,
   });
 
   Map<String, dynamic> toJson() => {
     'quantity': quantity,
     'measurement': measurement,
     'name': name,
+    if (customMeasurement != null) 'customMeasurement': customMeasurement,
   };
 
   factory IngredientRow.fromJson(Map<String, dynamic> json) => IngredientRow(
     quantity: json['quantity'] ?? '',
     measurement: json['measurement'] ?? 'cup',
     name: json['name'] ?? '',
+    customMeasurement: json['customMeasurement'],
   );
 
   bool get isEmpty => quantity.isEmpty && name.isEmpty;
   bool get isValid => quantity.isNotEmpty && name.isNotEmpty;
+  
+  String get displayMeasurement => 
+    measurement == 'other' && customMeasurement != null 
+      ? customMeasurement! 
+      : measurement;
 }
 
 class SubmitRecipePage extends StatefulWidget {
@@ -66,6 +75,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
   final List<String> _measurements = [
     'cup', 'cups', 'tbsp', 'tsp', 'oz', 'lb', 'g', 'kg',
     'ml', 'l', 'piece', 'pieces', 'pinch', 'dash', 'to taste',
+    'other',
   ];
 
   bool isSubmitting = false;
@@ -1245,19 +1255,48 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
           const SizedBox(width: 8),
           Expanded(
             flex: 2,
-            child: DropdownButtonFormField<String>(
-              value: ingredient.measurement,
-              decoration: InputDecoration(
-                labelText: 'Unit',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                isDense: true,
-              ),
-              items: _measurements.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
-              onChanged: (value) {
-                if (value != null) setState(() => ingredient.measurement = value);
-              },
-            ),
+            child: ingredient.measurement == 'other'
+                ? TextFormField(
+                    initialValue: ingredient.customMeasurement ?? '',
+                    decoration: InputDecoration(
+                      labelText: 'Custom Unit',
+                      hintText: 'e.g., handful',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      isDense: true,
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.close, size: 16),
+                        onPressed: () {
+                          setState(() {
+                            ingredient.measurement = 'cup';
+                            ingredient.customMeasurement = null;
+                          });
+                        },
+                        tooltip: 'Back to dropdown',
+                      ),
+                    ),
+                    onChanged: (value) {
+                      setState(() => ingredient.customMeasurement = value);
+                    },
+                  )
+                : DropdownButtonFormField<String>(
+                    value: ingredient.measurement,
+                    decoration: InputDecoration(
+                      labelText: 'Unit',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      isDense: true,
+                    ),
+                    items: _measurements.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        ingredient.measurement = value!;
+                        if (value != 'other') {
+                          ingredient.customMeasurement = null;
+                        }
+                      });
+                    },
+                  ),
           ),
           const SizedBox(width: 8),
           Expanded(
