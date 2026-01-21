@@ -34,6 +34,7 @@ import 'package:liver_wise/pages/nutrition_search_screen.dart';
 import 'package:liver_wise/pages/saved_ingredients_screen.dart';
 import './pages/submission_status_page.dart';
 import './pages/my_cookbook_page.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 
 /// 🔥 Background FCM handler (required for messages when app is terminated)
@@ -48,6 +49,8 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  MobileAds.instance.initialize();
+
 
   try {
     // Load environment variables FIRST
