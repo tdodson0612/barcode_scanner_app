@@ -4,7 +4,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 # App version - increment for each App Store submission
 # Format: MAJOR.MINOR.PATCH+BUILD_NUMBER
-version: 1.0.5+82
+version: 1.0.5+83
 
 
 # Flutter SDK constraints
@@ -100,8 +100,9 @@ flutter:
     - assets/icon/liverlogo.png
     
     # Additional assets (add as needed)
-    # - assets/images/
-    # - assets/fonts/
+    - assets/leviliver.png
+
+  
 
 # App launcher icons configuration
 flutter_launcher_icons:

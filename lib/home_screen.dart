@@ -31,6 +31,8 @@ import 'package:liver_wise/services/feed_posts_service.dart';
 import 'package:liver_wise/models/draft_recipe.dart';
 import 'package:liver_wise/services/draft_recipes_service.dart';
 import 'services/picture_service.dart';
+import 'package:liver_wise/widgets/tutorial_overlay.dart';
+
 
 class Recipe {
   final String title;
@@ -280,6 +282,7 @@ class _HomePageState extends State<HomePage>
   List<FavoriteRecipe> _favoriteRecipes = [];
   bool _showInitialView = true;
   NutritionInfo? _currentNutrition;
+  bool _showTutorial = false;
 
   String _defaultPostVisibility = 'public'; // Default visibility for new posts
 
@@ -321,6 +324,12 @@ class _HomePageState extends State<HomePage>
 
   int _currentRecipeIndex = 0;
   static const int _recipesPerPage = 2;
+
+  // NEW: GlobalKeys for tutorial highlights
+  final GlobalKey _autoButtonKey = GlobalKey();
+  final GlobalKey _scanButtonKey = GlobalKey();
+  final GlobalKey _manualButtonKey = GlobalKey();
+  final GlobalKey _lookupButtonKey = GlobalKey();
 
   // NEW: Feed state
   List<Map<String, dynamic>> _feedPosts = [];
@@ -3204,8 +3213,10 @@ class _HomePageState extends State<HomePage>
     required String label,
     required Color color,
     required VoidCallback? onPressed,
+    GlobalKey? key,
   }) {
     return Column(
+      key: key,  // ADD THIS
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
@@ -3868,24 +3879,28 @@ class _HomePageState extends State<HomePage>
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       _buildActionButton(
+                        key: _autoButtonKey,  
                         icon: Icons.qr_code_scanner,
                         label: 'Auto',
                         color: Colors.purple.shade600,
                         onPressed: _isScanning ? null : _autoScanBarcode,
                       ),
                       _buildActionButton(
+                        key: _scanButtonKey,
                         icon: Icons.camera_alt,
                         label: 'Scan',
                         color: Colors.green.shade600,
                         onPressed: _isScanning ? null : _takePhoto,
                       ),
                       _buildActionButton(
+                        key: _manualButtonKey,
                         icon: Icons.edit_outlined,
                         label: 'Code',
                         color: Colors.blue.shade600,
                         onPressed: () => Navigator.pushNamed(context, '/manual-barcode-entry'),
                       ),
                       _buildActionButton(
+                        key: _lookupButtonKey,
                         icon: Icons.search,
                         label: 'Search',
                         color: Colors.orange.shade800,
@@ -3896,7 +3911,23 @@ class _HomePageState extends State<HomePage>
                 ],
               ),
             ),
-
+            const SizedBox(height: 16),
+  
+            ElevatedButton.icon(
+              onPressed: () {
+                setState(() => _showTutorial = true);
+              },
+              icon: const Icon(Icons.help_outline),
+              label: const Text('Tutorial'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue.shade700,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(25),
+                ),
+              ),
+            ),
             const SizedBox(height: 30),
 
             // 🔥 UPDATED: Feed Section with Infinite Scroll
@@ -4618,26 +4649,43 @@ class _HomePageState extends State<HomePage>
   Widget build(BuildContext context) {
     super.build(context);
 
-    return Scaffold(
-      drawerEnableOpenDragGesture: false,
-      appBar: AppBar(
-        leading: Builder(
-          builder: (context) => IconButton(
-            icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),
-            onPressed: () => Scaffold.of(context).openDrawer(),
+    return Stack(
+      children: [
+        Scaffold(
+          drawerEnableOpenDragGesture: false,
+          appBar: AppBar(
+            leading: Builder(
+              builder: (context) => IconButton(
+                icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),
+                onPressed: () => Scaffold.of(context).openDrawer(),
+              ),
+            ),
+            title: const Text('Home'),
+            backgroundColor: Colors.green,
+            foregroundColor: Colors.white,
           ),
+          drawer: AppDrawer(
+            key: AppDrawer.globalKey,
+            currentPage: 'home',
+          ),
+          body: _showInitialView ? _buildInitialView() : _buildScanningView(),
         ),
-        title: const Text('Home'),
-        backgroundColor: Colors.green,
-        foregroundColor: Colors.white,
-      ),
-      drawer: AppDrawer(
-        key: AppDrawer.globalKey,
-        currentPage: 'home',
-      ),
-      body: _showInitialView ? _buildInitialView() : _buildScanningView(),
+        
+        // Tutorial overlay
+        if (_showTutorial)
+          TutorialOverlay(
+            autoButtonKey: _autoButtonKey,
+            scanButtonKey: _scanButtonKey,
+            manualButtonKey: _manualButtonKey,
+            lookupButtonKey: _lookupButtonKey,
+            onComplete: () {
+              setState(() => _showTutorial = false);
+            },
+          ),
+      ],
     );
   }
+
   Future<void> _saveRecipeAsTemplate(Recipe recipe) async {
     try {
       final userId = AuthService.currentUserId;
