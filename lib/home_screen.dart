@@ -288,10 +288,13 @@ class _HomePageState extends State<HomePage>
   bool _hasMorePosts = true;
   int _currentFeedOffset = 0;
   static const int _postsPerPage = 10;
-  
+
   // Scroll controller for feed
   final ScrollController _feedScrollController = ScrollController();
 
+  // Like state tracking
+  Map<String, bool> _postLikeStatus = {}; // postId -> isLiked
+  Map<String, int> _postLikeCounts = {}; // postId -> count
 
 
 
@@ -1995,7 +1998,8 @@ class _HomePageState extends State<HomePage>
             AppConfig.debugPrint('📍 Reached end of feed');
           }
         });
-        
+        // Load like data for new posts
+        await _loadLikeDataForPosts(posts);  // <-- ADD THIS LINE
         AppConfig.debugPrint('✅ Feed state updated with ${_feedPosts.length} total posts');
       }
     } catch (e) {
@@ -2017,6 +2021,84 @@ class _HomePageState extends State<HomePage>
       }
     }
   }
+
+  /// Load like status and counts for a list of posts
+  Future<void> _loadLikeDataForPosts(List<Map<String, dynamic>> posts) async {
+    try {
+      for (final post in posts) {
+        final postId = post['id']?.toString();
+        if (postId == null) continue;
+
+        // Load like status and count in parallel
+        final results = await Future.wait([
+          FeedPostsService.hasUserLikedPost(postId),
+          FeedPostsService.getPostLikeCount(postId),
+        ]);
+
+        if (mounted) {
+          setState(() {
+            _postLikeStatus[postId] = results[0] as bool;
+            _postLikeCounts[postId] = results[1] as int;
+          });
+        }
+      }
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error loading like data: $e');
+    }
+  }
+
+  /// Toggle like/unlike for a post
+  Future<void> _toggleLike(String postId) async {
+    try {
+      final isCurrentlyLiked = _postLikeStatus[postId] ?? false;
+      final currentCount = _postLikeCounts[postId] ?? 0;
+
+      // Optimistic update
+      setState(() {
+        _postLikeStatus[postId] = !isCurrentlyLiked;
+        _postLikeCounts[postId] = isCurrentlyLiked 
+          ? (currentCount - 1).clamp(0, 999999) 
+          : currentCount + 1;
+      });
+
+      // Perform the actual like/unlike
+      if (isCurrentlyLiked) {
+        await FeedPostsService.unlikePost(postId);
+      } else {
+        await FeedPostsService.likePost(postId);
+      }
+
+      // Refresh the actual count from server
+      final actualCount = await FeedPostsService.getPostLikeCount(postId);
+      if (mounted) {
+        setState(() {
+          _postLikeCounts[postId] = actualCount;
+        });
+      }
+
+    } catch (e) {
+      // Revert optimistic update on error
+      final isCurrentlyLiked = _postLikeStatus[postId] ?? false;
+      final currentCount = _postLikeCounts[postId] ?? 0;
+      
+      setState(() {
+        _postLikeStatus[postId] = !isCurrentlyLiked;
+        _postLikeCounts[postId] = isCurrentlyLiked 
+          ? currentCount + 1 
+          : (currentCount - 1).clamp(0, 999999);
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update like: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
 
   Future<void> _loadMorePosts() async {
     if (_isLoadingMorePosts || !_hasMorePosts) return;
@@ -2045,7 +2127,8 @@ class _HomePageState extends State<HomePage>
             AppConfig.debugPrint('📍 Reached end of feed');
           }
         });
-        
+        // Load like status and counts for new posts
+        await _loadLikeDataForPosts(newPosts);  // <-- ADD THIS LINE
         AppConfig.debugPrint('✅ Total posts now: ${_feedPosts.length}');
       }
     } catch (e) {
@@ -3544,11 +3627,7 @@ class _HomePageState extends State<HomePage>
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
-                _buildFeedActionButton(
-                  icon: Icons.favorite_border,
-                  label: 'Like',
-                  onPressed: () {},
-                ),
+                _buildFeedLikeButton(post),  // <-- Changed from _buildFeedActionButton
                 const SizedBox(width: 16),
                 _buildFeedActionButton(
                   icon: Icons.comment_outlined,
@@ -3592,6 +3671,39 @@ class _HomePageState extends State<HomePage>
       ),
     );
   }
+
+  Widget _buildFeedLikeButton(Map<String, dynamic> post) {
+    final postId = post['id']?.toString();
+    if (postId == null) {
+      return SizedBox.shrink();
+    }
+
+    final isLiked = _postLikeStatus[postId] ?? false;
+    final likeCount = _postLikeCounts[postId] ?? 0;
+
+    return InkWell(
+      onTap: () => _toggleLike(postId),
+      child: Row(
+        children: [
+          Icon(
+            isLiked ? Icons.favorite : Icons.favorite_border,
+            size: 20,
+            color: isLiked ? Colors.green : Colors.grey.shade700,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            likeCount > 0 ? likeCount.toString() : '',
+            style: TextStyle(
+              fontSize: 12,
+              color: isLiked ? Colors.green : Colors.grey.shade700,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   String _formatPostTime(dynamic timestamp) {
     try {
