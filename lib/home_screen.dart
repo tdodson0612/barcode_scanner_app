@@ -4649,40 +4649,41 @@ class _HomePageState extends State<HomePage>
   Widget build(BuildContext context) {
     super.build(context);
 
-    return Stack(
-      children: [
-        Scaffold(
-          drawerEnableOpenDragGesture: false,
-          appBar: AppBar(
-            leading: Builder(
-              builder: (context) => IconButton(
-                icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),
-                onPressed: () => Scaffold.of(context).openDrawer(),
-              ),
-            ),
-            title: const Text('Home'),
-            backgroundColor: Colors.green,
-            foregroundColor: Colors.white,
+    return Scaffold(
+      drawerEnableOpenDragGesture: false,
+      appBar: AppBar(
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),
+            onPressed: () => Scaffold.of(context).openDrawer(),
           ),
-          drawer: AppDrawer(
-            key: AppDrawer.globalKey,
-            currentPage: 'home',
-          ),
-          body: _showInitialView ? _buildInitialView() : _buildScanningView(),
         ),
-        
-        // Tutorial overlay
-        if (_showTutorial)
-          TutorialOverlay(
-            autoButtonKey: _autoButtonKey,
-            scanButtonKey: _scanButtonKey,
-            manualButtonKey: _manualButtonKey,
-            lookupButtonKey: _lookupButtonKey,
-            onComplete: () {
-              setState(() => _showTutorial = false);
-            },
-          ),
-      ],
+        title: const Text('Home'),
+        backgroundColor: Colors.green,
+        foregroundColor: Colors.white,
+      ),
+      drawer: AppDrawer(
+        key: AppDrawer.globalKey,
+        currentPage: 'home',
+      ),
+      body: Stack(
+        children: [
+          // Main content
+          _showInitialView ? _buildInitialView() : _buildScanningView(),
+          
+          // Tutorial overlay - now INSIDE the body Stack
+          if (_showTutorial)
+            TutorialOverlay(
+              autoButtonKey: _autoButtonKey,
+              scanButtonKey: _scanButtonKey,
+              manualButtonKey: _manualButtonKey,
+              lookupButtonKey: _lookupButtonKey,
+              onComplete: () {
+                setState(() => _showTutorial = false);
+              },
+            ),
+        ],
+      ),
     );
   }
 
