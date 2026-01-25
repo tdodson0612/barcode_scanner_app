@@ -3460,8 +3460,11 @@ class _HomePageState extends State<HomePage>
     required String label,
     required Color color,
     required VoidCallback? onPressed,
+    BorderRadius? borderRadius,
     GlobalKey? key,
   }) {
+    final effectiveRadius = borderRadius ?? BorderRadius.circular(12);
+
     return Column(
       key: key,
       mainAxisSize: MainAxisSize.min,
@@ -3471,7 +3474,7 @@ class _HomePageState extends State<HomePage>
           height: 56,
           decoration: BoxDecoration(
             color: onPressed == null ? Colors.grey : color,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: effectiveRadius,
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.1),
@@ -3483,7 +3486,7 @@ class _HomePageState extends State<HomePage>
           child: Material(
             color: Colors.transparent,
             child: InkWell(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: effectiveRadius,
               onTap: onPressed,
               child: Center(
                 child: Icon(icon, color: Colors.white, size: 28),
@@ -3647,11 +3650,29 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _deletePost(Map<String, dynamic> post) async {
+    final postId = post['id']?.toString();
+    
+    if (postId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Invalid post ID'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Post'),
-        content: const Text('Are you sure you want to delete this post?'),
+        title: Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange),
+            SizedBox(width: 12),
+            Text('Delete Post'),
+          ],
+        ),
+        content: Text('Are you sure you want to delete this post? This action cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -3669,15 +3690,81 @@ class _HomePageState extends State<HomePage>
     if (confirmed != true) return;
 
     try {
-      await FeedPostsService.deletePost(post['id']);
-      setState(() {
-        // Trigger rebuild to refresh feed
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to delete post')),
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: Container(
+            padding: EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Deleting post...'),
+              ],
+            ),
+          ),
+        ),
       );
+
+      // Delete the post
+      await FeedPostsService.deletePost(postId);
+
+      // Close loading dialog
+      if (mounted) Navigator.pop(context);
+
+      // Remove post from local list
+      setState(() {
+        _feedPosts.removeWhere((p) => p['id']?.toString() == postId);
+      });
+
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 12),
+                Text('Post deleted successfully'),
+              ],
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      // Close loading dialog if still open
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.error, color: Colors.white),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Failed to delete post: ${e.toString().replaceFirst("Exception: ", "")}',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
     }
   }
 
@@ -4181,39 +4268,82 @@ class _HomePageState extends State<HomePage>
                         ),
                       ),
 
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _buildActionButton(
-                          key: _autoButtonKey,  
-                          icon: Icons.qr_code_scanner,
-                          label: 'Auto',
-                          color: Colors.purple.shade600,
-                          onPressed: _isScanning ? null : _autoScanBarcode,
+                      SingleChildScrollView(
+                        controller: _feedScrollController,
+                        child: Column(
+                          children: [
+                            // Your 4 buttons row
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              children: [
+                                _buildActionButton(
+                                  key: _autoButtonKey,
+                                  icon: Icons.qr_code_scanner,
+                                  label: 'Auto',
+                                  color: Colors.purple.shade600,
+                                  onPressed: _isScanning ? null : _autoScanBarcode,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                _buildActionButton(
+                                  key: _scanButtonKey,
+                                  icon: Icons.camera_alt,
+                                  label: 'Scan',
+                                  color: Colors.green.shade600,
+                                  onPressed: _isScanning ? null : _takePhoto,
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                _buildActionButton(
+                                  key: _manualButtonKey,
+                                  icon: Icons.edit_outlined,
+                                  label: 'Code',
+                                  color: Colors.blue.shade600,
+                                  onPressed: () => Navigator.pushNamed(context, '/manual-barcode-entry'),
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                _buildActionButton(
+                                  key: _lookupButtonKey,
+                                  icon: Icons.search,
+                                  label: 'Search',
+                                  color: Colors.orange.shade800,
+                                  onPressed: () => Navigator.pushNamed(context, '/nutrition-search'),
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ],
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            // Tutorial button
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                print('🎓 Tutorial button pressed');
+                                // Scroll to top before showing tutorial
+                                _feedScrollController.animateTo(
+                                  0,
+                                  duration: const Duration(milliseconds: 300),
+                                  curve: Curves.easeInOut,
+                                );
+                                setState(() {
+                                  _showTutorial = true;
+                                });
+                              },
+                              icon: const Icon(Icons.help_outline),
+                              label: const Text('Tutorial'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue.shade700,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(25),
+                                ),
+                              ),
+                            ),
+
+                            // ... rest of your homepage content
+                          ],
                         ),
-                        _buildActionButton(
-                          key: _scanButtonKey,
-                          icon: Icons.camera_alt,
-                          label: 'Scan',
-                          color: Colors.green.shade600,
-                          onPressed: _isScanning ? null : _takePhoto,
-                        ),
-                        _buildActionButton(
-                          key: _manualButtonKey,
-                          icon: Icons.edit_outlined,
-                          label: 'Code',
-                          color: Colors.blue.shade600,
-                          onPressed: () => Navigator.pushNamed(context, '/manual-barcode-entry'),
-                        ),
-                        _buildActionButton(
-                          key: _lookupButtonKey,
-                          icon: Icons.search,
-                          label: 'Search',
-                          color: Colors.orange.shade800,
-                          onPressed: () => Navigator.pushNamed(context, '/nutrition-search'),
-                        ),
-                      ],
-                    ),
+                      )
+
                   ],
                 ),
               ),
@@ -4956,34 +5086,29 @@ class _HomePageState extends State<HomePage>
       }
     }
   }
-
+  @override
   @override
   Widget build(BuildContext context) {
-    super.build(context);
-
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
+    
     return Scaffold(
-      drawerEnableOpenDragGesture: false,
       appBar: AppBar(
+        title: const Text('LiverWise'),
+        backgroundColor: Colors.green,
         leading: Builder(
           builder: (context) => IconButton(
             icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        title: const Text('Home'),
-        backgroundColor: Colors.green,
-        foregroundColor: Colors.white,
       ),
-      drawer: AppDrawer(
-        key: AppDrawer.globalKey,
-        currentPage: 'home',
-      ),
+      drawer: const AppDrawer(currentPage: 'home'),
       body: Stack(
         children: [
-          // Main content
+          // Main content - show initial view or scanning view
           _showInitialView ? _buildInitialView() : _buildScanningView(),
-          
-          // Tutorial overlay - now INSIDE the body Stack
+
+          // Tutorial overlay on top when active
           if (_showTutorial)
             TutorialOverlay(
               autoButtonKey: _autoButtonKey,
@@ -4991,7 +5116,9 @@ class _HomePageState extends State<HomePage>
               manualButtonKey: _manualButtonKey,
               lookupButtonKey: _lookupButtonKey,
               onComplete: () {
-                setState(() => _showTutorial = false);
+                setState(() {
+                  _showTutorial = false;
+                });
               },
             ),
         ],

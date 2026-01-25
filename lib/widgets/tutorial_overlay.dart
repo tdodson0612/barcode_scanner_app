@@ -67,34 +67,42 @@ class _TutorialOverlayState extends State<TutorialOverlay>
     super.dispose();
   }
   
-  void _nextStep() {
+void _nextStep() {
+    print('🎓 _nextStep called - current: $_currentStep');
     _playLeviHop();
     setState(() {
       switch (_currentStep) {
         case TutorialStep.TUTORIAL_INTRO:
-          _currentStep = TutorialStep.TUTORIAL_SCAN;
-          _updateHighlight(widget.scanButtonKey);
-          break;
-        case TutorialStep.TUTORIAL_SCAN:
+          print('🎓 Moving to AUTO step');
           _currentStep = TutorialStep.TUTORIAL_AUTO;
           _updateHighlight(widget.autoButtonKey);
           break;
         case TutorialStep.TUTORIAL_AUTO:
+          print('🎓 Moving to SCAN step');
+          _currentStep = TutorialStep.TUTORIAL_SCAN;
+          _updateHighlight(widget.scanButtonKey);
+          break;
+        case TutorialStep.TUTORIAL_SCAN:
+          print('🎓 Moving to MANUAL step');
           _currentStep = TutorialStep.TUTORIAL_MANUAL;
           _updateHighlight(widget.manualButtonKey);
           break;
         case TutorialStep.TUTORIAL_MANUAL:
+          print('🎓 Moving to LOOKUP step');
           _currentStep = TutorialStep.TUTORIAL_LOOKUP;
           _updateHighlight(widget.lookupButtonKey);
           break;
         case TutorialStep.TUTORIAL_LOOKUP:
+          print('🎓 Moving to UNIFIED_RESULT step');
           _currentStep = TutorialStep.TUTORIAL_UNIFIED_RESULT;
           _removeHighlight();
           break;
         case TutorialStep.TUTORIAL_UNIFIED_RESULT:
+          print('🎓 Moving to CLOSE step');
           _currentStep = TutorialStep.TUTORIAL_CLOSE;
           break;
         case TutorialStep.TUTORIAL_CLOSE:
+          print('🎓 Tutorial complete, calling onComplete');
           widget.onComplete();
           break;
       }
@@ -113,15 +121,33 @@ class _TutorialOverlayState extends State<TutorialOverlay>
   }
   
   void _updateHighlight(GlobalKey newKey) async {
+    print('🎯 Updating highlight to new key');
+    
     // Fade out previous highlight
     setState(() => _showHighlight = false);
+    await Future.delayed(const Duration(milliseconds: 200));
+    
+    // Wait for layout to complete
     await Future.delayed(const Duration(milliseconds: 100));
     
     // Fade in new highlight
-    setState(() {
-      _currentHighlightKey = newKey;
-      _showHighlight = true;
-    });
+    if (mounted) {
+      setState(() {
+        _currentHighlightKey = newKey;
+        _showHighlight = true;
+      });
+      
+      // Debug: Check if the key has a valid context
+      final context = newKey.currentContext;
+      if (context == null) {
+        print('⚠️ WARNING: New highlight key has no context yet');
+      } else {
+        final renderBox = context.findRenderObject() as RenderBox?;
+        if (renderBox != null) {
+          print('✅ Highlight updated - size: ${renderBox.size}');
+        }
+      }
+    }
   }
   
   void _removeHighlight() async {
@@ -130,14 +156,14 @@ class _TutorialOverlayState extends State<TutorialOverlay>
     setState(() => _currentHighlightKey = null);
   }
   
-  String _getTalkBubbleText() {
+String _getTalkBubbleText() {
     switch (_currentStep) {
       case TutorialStep.TUTORIAL_INTRO:
         return "Hi there, friend. I am Levi, the liver. Let me walk you through this app and the way we use it to enrich our health and our lives.";
-      case TutorialStep.TUTORIAL_SCAN:
-        return "Let's start with Scan. Tap this when you want to scan a barcode yourself. You'll take a picture, tap Analyze, and we'll show you the nutrition facts and helpful recipe ideas.";
       case TutorialStep.TUTORIAL_AUTO:
-        return "This one is Auto. It works just like Scan, but faster. Just point your camera at the barcode, and it recognizes it automatically.";
+        return "Let's start with Auto. It works fast - just point your camera at the barcode, and it recognizes it automatically.";
+      case TutorialStep.TUTORIAL_SCAN:
+        return "This is Scan. Tap this when you want to scan a barcode yourself. You'll take a picture, tap Analyze, and we'll show you the nutrition facts and helpful recipe ideas.";
       case TutorialStep.TUTORIAL_MANUAL:
         return "Use Manual when a barcode won't scan or is damaged. You can type in the numbers from the bottom of the barcode instead.";
       case TutorialStep.TUTORIAL_LOOKUP:
@@ -150,173 +176,208 @@ class _TutorialOverlayState extends State<TutorialOverlay>
   }
   
   Widget _buildHighlight() {
-    if (_currentHighlightKey == null) return const SizedBox.shrink();
-    
-    final RenderBox? renderBox = _currentHighlightKey!.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) return const SizedBox.shrink();
-    
-    final position = renderBox.localToGlobal(Offset.zero);
-    final size = renderBox.size;
-    
-    return AnimatedOpacity(
-      opacity: _showHighlight ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 200),
-      child: Positioned(
-        left: position.dx - 8,
-        top: position.dy - 8,
-        child: Container(
-          width: size.width + 16,
-          height: size.height + 16,
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: Colors.yellow,
-              width: 3,
+    if (_currentHighlightKey == null || !_showHighlight) {
+      return const SizedBox.shrink();
+    }
+
+    final targetBox =
+        _currentHighlightKey!.currentContext?.findRenderObject() as RenderBox?;
+    final overlayBox = context.findRenderObject() as RenderBox?;
+
+    if (targetBox == null || overlayBox == null) {
+      return const SizedBox.shrink();
+    }
+
+    final position = overlayBox.globalToLocal(
+      targetBox.localToGlobal(Offset.zero),
+    );
+    final size = targetBox.size;
+
+    return Positioned(
+      left: position.dx - 4,
+      top: position.dy - 4,
+      child: AnimatedOpacity(
+        opacity: _showHighlight ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 250),
+        child: IgnorePointer(
+          child: Container(
+            width: size.width + 8,
+            height: size.height + 8,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.yellow, width: 4),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.yellow.withOpacity(0.35),
+                  blurRadius: 12,
+                  spreadRadius: 2,
+                ),
+              ],
             ),
-            borderRadius: BorderRadius.circular(16),
           ),
         ),
       ),
     );
   }
-  
+
+    
   @override
   Widget build(BuildContext context) {
+    print('🎓 TutorialOverlay building - step: $_currentStep');
+    
     return Material(
-      color: Colors.black.withOpacity(0.7),
-      child: GestureDetector(
-        onTap: _nextStep,
-        behavior: HitTestBehavior.opaque,
-        child: Stack(
-          children: [
-            // Yellow highlight
-            _buildHighlight(),
-            
-            Positioned(
-              right: 16,
-              bottom: 140 + _leviOffset,
-              child: SlideTransition(
-                position: _leviSlideAnimation,
+      type: MaterialType.transparency,
+      child: Container(
+        width: double.infinity,
+        height: double.infinity,
+        color: Colors.black.withOpacity(0.7),
+        child: GestureDetector(
+          onTap: () {
+            print('🎓 Tutorial tapped - current step: $_currentStep');
+            _nextStep();
+          },
+          behavior: HitTestBehavior.opaque,
+          child: Stack(
+            children: [
+              // Yellow highlight
+              _buildHighlight(),
+              
+              Positioned(
+                right: 16,
+                bottom: 140 + _leviOffset,
+                child: SlideTransition(
+                  position: _leviSlideAnimation,
+                  child: Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade700,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Image.asset(
+                        'assets/leviliver.png',
+                        width: 120,
+                        height: 120,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          print('❌ Error loading leviliver.png: $error');
+                          // Fallback to a liver emoji/icon
+                          return Container(
+                            width: 120,
+                            height: 120,
+                            decoration: BoxDecoration(
+                              color: Colors.green.shade700,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '🫀',
+                                style: TextStyle(fontSize: 60),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              
+              // Talk bubble
+              Positioned(
+                left: 16,
+                right: 152,
+                bottom: 180,
                 child: Container(
-                  width: 120,
-                  height: 120,
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
+                    color: Colors.white,
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.3),
+                        color: Colors.black.withOpacity(0.2),
                         blurRadius: 8,
                         offset: const Offset(0, 4),
                       ),
                     ],
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Image.asset(
-                      'assets/leviliver.png',
-                      width: 120,
-                      height: 120,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        print('❌ Error loading leviliver.png: $error');
-                        return Container(
-                          width: 120,
-                          height: 120,
-                          color: Colors.green.shade700,
-                          child: Icon(
-                            Icons.favorite,
-                            size: 60,
-                            color: Colors.white,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            
-            // Talk bubble
-            Positioned(
-              left: 16,
-              right: 152,
-              bottom: 180,
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Text(
-                  _getTalkBubbleText(),
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.black87,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-            ),
-            
-            // Tap to continue
-            Positioned(
-              bottom: 40,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text(
-                    'Tap to continue',
-                    style: TextStyle(
-                      fontSize: 12,
+                  child: Text(
+                    _getTalkBubbleText(),
+                    style: const TextStyle(
+                      fontSize: 14,
                       color: Colors.black87,
-                      fontWeight: FontWeight.w600,
+                      height: 1.4,
                     ),
                   ),
                 ),
               ),
-            ),
-            
-            // X button (top-right)
-            Positioned(
-              top: 48,
-              right: 16,
-              child: GestureDetector(
-                onTap: widget.onComplete,
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
+              
+              // Tap to continue
+              Positioned(
+                bottom: 40,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      'Tap to continue',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black87,
+                        fontWeight: FontWeight.w600,
                       ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.close,
-                    color: Colors.black87,
-                    size: 24,
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+              
+              // X button (top-right)
+              Positioned(
+                top: 48,
+                right: 16,
+                child: GestureDetector(
+                  onTap: () {
+                    print('🎓 X button tapped - closing tutorial');
+                    widget.onComplete();
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.2),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.close,
+                      color: Colors.black87,
+                      size: 24,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

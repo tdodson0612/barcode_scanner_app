@@ -428,27 +428,55 @@ class FeedPostsService {
     try {
       final userId = AuthService.currentUserId;
       
+      AppConfig.debugPrint('🗑️ Attempting to delete post: $postId');
+      AppConfig.debugPrint('👤 Current user ID: $userId');
+      
       if (userId == null) {
         throw Exception('User not authenticated');
       }
 
-      // Delete post (only if user_id matches - enforced by filters)
-      await DatabaseServiceCore.workerQuery(
+      // First, verify the post exists and belongs to the user
+      final postCheck = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'feed_posts',
+        filters: {'id': postId},
+        limit: 1,
+      );
+
+      if (postCheck == null || (postCheck as List).isEmpty) {
+        throw Exception('Post not found');
+      }
+
+      final post = (postCheck as List).first;
+      final postOwnerId = post['user_id']?.toString();
+      
+      AppConfig.debugPrint('📝 Post owner ID: $postOwnerId');
+      AppConfig.debugPrint('🆔 Post ID type: ${post['id'].runtimeType}');
+      AppConfig.debugPrint('👤 User ID type: ${userId.runtimeType}');
+      
+      if (postOwnerId != userId) {
+        throw Exception('You can only delete your own posts');
+      }
+
+      // Delete the post - make sure we're passing the ID correctly
+      // If the database expects UUID, pass it as a string
+      final result = await DatabaseServiceCore.workerQuery(
         action: 'delete',
         table: 'feed_posts',
         filters: {
-          'id': postId,
-          'user_id': userId, // Security: only delete your own posts
+          'id': postId.toString(), // Ensure it's a string
+          'user_id': userId.toString(), // Ensure it's a string
         },
       );
 
-      AppConfig.debugPrint('✅ Post deleted: $postId');
-    } catch (e) {
+      AppConfig.debugPrint('✅ Post deleted successfully: $postId');
+      AppConfig.debugPrint('📊 Delete result: $result');
+    } catch (e, stackTrace) {
       AppConfig.debugPrint('❌ Error deleting post: $e');
+      AppConfig.debugPrint('Stack trace: $stackTrace');
       throw Exception('Failed to delete post: $e');
     }
   }
-
   /// Like a post
   static Future<void> likePost(String postId) async {
     try {
