@@ -360,6 +360,27 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
             
             ListTile(
               leading: Icon(
+                Icons.bookmark,
+                color: widget.currentPage == 'saved_posts' ? Colors.green : null,
+              ),
+              title: Text(
+                'Saved Posts',
+                style: TextStyle(
+                  fontWeight: widget.currentPage == 'saved_posts' ? FontWeight.bold : FontWeight.normal,
+                  color: widget.currentPage == 'saved_posts' ? Colors.green : null,
+                ),
+              ),
+              selected: widget.currentPage == 'saved_posts',
+              onTap: () {
+                Navigator.pop(context);
+                if (widget.currentPage != 'saved_posts') {
+                  Navigator.pushNamed(context, '/saved-posts');
+                }
+              },
+            ),
+
+            ListTile(
+              leading: Icon(
                 Icons.person_search,
                 color: widget.currentPage == 'find_friends' ? Colors.green : null,
               ),

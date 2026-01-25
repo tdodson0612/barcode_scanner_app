@@ -296,8 +296,12 @@ class _HomePageState extends State<HomePage>
   final ScrollController _feedScrollController = ScrollController();
 
   // Like state tracking
-  Map<String, bool> _postLikeStatus = {}; // postId -> isLiked
-  Map<String, int> _postLikeCounts = {}; // postId -> count
+  Map<String, bool> _postLikeStatus = {};
+  Map<String, int> _postLikeCounts = {};
+  Map<String, bool> _expandedComments = {};
+  Map<String, List<Map<String, dynamic>>> _postComments = {};
+  Map<String, bool> _savedPosts = {};
+  final Map<String, TextEditingController> _commentControllers = {};
 
 
 
@@ -2108,6 +2112,249 @@ class _HomePageState extends State<HomePage>
     }
   }
 
+  Future<void> _toggleComments(String postId) async {
+    final isCurrentlyExpanded = _expandedComments[postId] ?? false;
+    
+    if (!isCurrentlyExpanded) {
+      await _loadComments(postId);
+    }
+    
+    setState(() {
+      _expandedComments[postId] = !isCurrentlyExpanded;
+    });
+  }
+
+  Future<void> _loadComments(String postId) async {
+    try {
+      final comments = await FeedPostsService.getPostComments(postId);
+      
+      if (mounted) {
+        setState(() {
+          _postComments[postId] = comments;
+        });
+      }
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error loading comments: $e');
+    }
+  }
+
+  Future<void> _postComment(String postId) async {
+    final controller = _commentControllers[postId];
+    if (controller == null || controller.text.trim().isEmpty) return;
+
+    try {
+      await FeedPostsService.addComment(
+        postId: postId,
+        content: controller.text.trim(),
+      );
+
+      controller.clear();
+      await _loadComments(postId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Comment posted!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to post comment: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleSavePost(String postId) async {
+    try {
+      final isCurrentlySaved = _savedPosts[postId] ?? false;
+
+      setState(() {
+        _savedPosts[postId] = !isCurrentlySaved;
+      });
+
+      if (isCurrentlySaved) {
+        await FeedPostsService.unsavePost(postId);
+      } else {
+        await FeedPostsService.savePost(postId);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(isCurrentlySaved ? 'Post unsaved' : 'Post saved!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      final isCurrentlySaved = _savedPosts[postId] ?? false;
+      
+      setState(() {
+        _savedPosts[postId] = !isCurrentlySaved;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save post: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _buildCommentsSection(String postId) {
+    final comments = _postComments[postId] ?? [];
+    _commentControllers.putIfAbsent(postId, () => TextEditingController());
+    final controller = _commentControllers[postId]!;
+
+    return Container(
+      color: Colors.grey.shade50,
+      padding: EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (comments.isEmpty)
+            Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: Text(
+                  'No comments yet. Be the first!',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                ),
+              ),
+            )
+          else
+            ...comments.map((comment) => _buildCommentItem(comment, postId)),
+          
+          Divider(),
+          
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  decoration: InputDecoration(
+                    hintText: 'Write a comment...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                  maxLines: null,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _postComment(postId),
+                ),
+              ),
+              SizedBox(width: 8),
+              IconButton(
+                icon: Icon(Icons.send, color: Colors.green),
+                onPressed: () => _postComment(postId),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCommentItem(Map<String, dynamic> comment, String postId) {
+    final currentUserId = AuthService.currentUserId;
+    final isOwnComment = comment['user_id'] == currentUserId;
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 14,
+                backgroundColor: Colors.green.shade100,
+                child: Icon(Icons.person, size: 16, color: Colors.green.shade700),
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      comment['username'] ?? 'Anonymous',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    Text(
+                      _formatPostTime(comment['created_at']),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isOwnComment)
+                IconButton(
+                  icon: Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                  onPressed: () => _deleteComment(postId, comment['id'].toString()),
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(),
+                ),
+            ],
+          ),
+          SizedBox(height: 6),
+          Text(
+            comment['content'] ?? '',
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade800),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteComment(String postId, String commentId) async {
+    try {
+      await FeedPostsService.deleteComment(commentId);
+      await _loadComments(postId);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Comment deleted'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete comment'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
 
   Future<void> _loadMorePosts() async {
     if (_isLoadingMorePosts || !_hasMorePosts) return;
@@ -3216,7 +3463,7 @@ class _HomePageState extends State<HomePage>
     GlobalKey? key,
   }) {
     return Column(
-      key: key,  // ADD THIS
+      key: key,
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
@@ -3233,9 +3480,15 @@ class _HomePageState extends State<HomePage>
               ),
             ],
           ),
-          child: IconButton(
-            icon: Icon(icon, color: Colors.white, size: 28),
-            onPressed: onPressed,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: onPressed,
+              child: Center(
+                child: Icon(icon, color: Colors.white, size: 28),
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 8),
@@ -3432,6 +3685,12 @@ class _HomePageState extends State<HomePage>
     final currentUserId = AuthService.currentUserId;
     final isOwnPost = post['user_id'] == currentUserId;
     final visibility = post['visibility']?.toString() ?? 'public';
+    final postId = post['id']?.toString();
+    final isLiked = _postLikeStatus[postId] ?? false;
+    final likeCount = _postLikeCounts[postId] ?? 0;
+    final isExpanded = _expandedComments[postId] ?? false;
+    final comments = _postComments[postId] ?? [];
+    final isSaved = _savedPosts[postId] ?? false;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -3478,7 +3737,6 @@ class _HomePageState extends State<HomePage>
                             ),
                           ),
                           SizedBox(width: 8),
-                          // Visibility badge
                           Container(
                             padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
@@ -3571,7 +3829,6 @@ class _HomePageState extends State<HomePage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Caption text
                 if (post['content'] != null && post['content'].toString().isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
@@ -3584,7 +3841,6 @@ class _HomePageState extends State<HomePage>
                     ),
                   ),
                 
-                // 🔥 NEW: Photo display
                 if (post['photo_url'] != null && post['photo_url'].toString().isNotEmpty)
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
@@ -3638,22 +3894,72 @@ class _HomePageState extends State<HomePage>
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
-                _buildFeedLikeButton(post),  // <-- Changed from _buildFeedActionButton
-                const SizedBox(width: 16),
-                _buildFeedActionButton(
-                  icon: Icons.comment_outlined,
-                  label: 'Comment',
-                  onPressed: () {},
+                InkWell(
+                  onTap: () => _toggleLike(postId!),
+                  child: Row(
+                    children: [
+                      Icon(
+                        isLiked ? Icons.favorite : Icons.favorite_border,
+                        size: 20,
+                        color: isLiked ? Colors.green : Colors.grey.shade700,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        likeCount > 0 ? likeCount.toString() : '',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isLiked ? Colors.green : Colors.grey.shade700,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(width: 16),
-                _buildFeedActionButton(
-                  icon: Icons.bookmark_border,
-                  label: 'Save',
-                  onPressed: () {},
+                InkWell(
+                  onTap: () => _toggleComments(postId!),
+                  child: Row(
+                    children: [
+                      Icon(Icons.comment_outlined, size: 20, color: Colors.grey.shade700),
+                      const SizedBox(width: 4),
+                      Text(
+                        comments.isNotEmpty ? '${comments.length}' : 'Comment',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade700,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                InkWell(
+                  onTap: () => _toggleSavePost(postId!),
+                  child: Row(
+                    children: [
+                      Icon(
+                        isSaved ? Icons.bookmark : Icons.bookmark_border,
+                        size: 20,
+                        color: isSaved ? Colors.blue : Colors.grey.shade700,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Save',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isSaved ? Colors.blue : Colors.grey.shade700,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
+          
+          if (isExpanded) _buildCommentsSection(postId!),
         ],
       ),
     );

@@ -638,4 +638,206 @@ class FeedPostsService {
       throw Exception('Failed to delete comment: $e');
     }
   }
+  /// Save a post for later viewing
+  static Future<void> savePost(String postId) async {
+    try {
+      final userId = AuthService.currentUserId;
+      
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+
+      await DatabaseServiceCore.workerQuery(
+        action: 'insert',
+        table: 'feed_post_saves',
+        data: {
+          'post_id': postId,
+          'user_id': userId,
+          'created_at': DateTime.now().toIso8601String(),
+        },
+      );
+
+      AppConfig.debugPrint('✅ Post saved: $postId');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error saving post: $e');
+      
+      // Check if error is duplicate (user already saved)
+      if (e.toString().toLowerCase().contains('duplicate')) {
+        throw Exception('You have already saved this post');
+      }
+      
+      throw Exception('Failed to save post: $e');
+    }
+  }
+
+  /// Unsave a post
+  static Future<void> unsavePost(String postId) async {
+    try {
+      final userId = AuthService.currentUserId;
+      
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+
+      await DatabaseServiceCore.workerQuery(
+        action: 'delete',
+        table: 'feed_post_saves',
+        filters: {
+          'post_id': postId,
+          'user_id': userId,
+        },
+      );
+
+      AppConfig.debugPrint('✅ Post unsaved: $postId');
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error unsaving post: $e');
+      throw Exception('Failed to unsave post: $e');
+    }
+  }
+
+  /// Check if current user has saved a post
+  static Future<bool> hasUserSavedPost(String postId) async {
+    try {
+      final userId = AuthService.currentUserId;
+      
+      if (userId == null) {
+        return false;
+      }
+
+      final result = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'feed_post_saves',
+        filters: {
+          'post_id': postId,
+          'user_id': userId,
+        },
+        limit: 1,
+      );
+
+      return result != null && (result as List).isNotEmpty;
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error checking save status: $e');
+      return false;
+    }
+  }
+
+  /// Get all saved posts for current user
+  static Future<List<Map<String, dynamic>>> getSavedPosts({
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    try {
+      final userId = AuthService.currentUserId;
+      
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // Get saved post IDs
+      final savedResult = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'feed_post_saves',
+        filters: {'user_id': userId},
+        orderBy: 'created_at',
+        ascending: false,
+      );
+
+      if (savedResult == null || (savedResult as List).isEmpty) {
+        return [];
+      }
+
+      final savedPostIds = (savedResult as List)
+          .map((save) => save['post_id']?.toString())
+          .where((id) => id != null)
+          .toSet();
+
+      if (savedPostIds.isEmpty) {
+        return [];
+      }
+
+      // Get actual posts
+      final posts = <Map<String, dynamic>>[];
+      
+      for (final postId in savedPostIds) {
+        final postResult = await DatabaseServiceCore.workerQuery(
+          action: 'select',
+          table: 'feed_posts',
+          filters: {'id': postId},
+          limit: 1,
+        );
+
+        if (postResult != null && (postResult as List).isNotEmpty) {
+          posts.add((postResult as List).first);
+        }
+      }
+
+      // Sort by created_at descending
+      posts.sort((a, b) {
+        final aTime = a['created_at']?.toString() ?? '';
+        final bTime = b['created_at']?.toString() ?? '';
+        return bTime.compareTo(aTime);
+      });
+
+      // Apply pagination
+      return _applyPagination(posts, limit: limit, offset: offset);
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error getting saved posts: $e');
+      return [];
+    }
+  }
+
+  /// Get all posts created by current user
+  static Future<List<Map<String, dynamic>>> getUserPosts({
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    try {
+      final userId = AuthService.currentUserId;
+      
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+
+      final result = await DatabaseServiceCore.workerQuery(
+        action: 'select',
+        table: 'feed_posts',
+        filters: {'user_id': userId},
+        orderBy: 'created_at',
+        ascending: false,
+      );
+
+      if (result == null || (result as List).isEmpty) {
+        return [];
+      }
+
+      final allPosts = List<Map<String, dynamic>>.from(result as List);
+      
+      // Apply pagination
+      return _applyPagination(allPosts, limit: limit, offset: offset);
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error getting user posts: $e');
+      return [];
+    }
+  }
+
+  /// Get post stats (likes, comments, shares) for a specific post
+  static Future<Map<String, int>> getPostStats(String postId) async {
+    try {
+      // Get like count
+      final likeCount = await getPostLikeCount(postId);
+
+      // Get comment count
+      final comments = await getPostComments(postId);
+      final commentCount = comments.length;
+
+      return {
+        'likes': likeCount,
+        'comments': commentCount,
+        'shares': 0, // Not implemented yet
+      };
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error getting post stats: $e');
+      return {'likes': 0, 'comments': 0, 'shares': 0};
+    }
+  }
 }

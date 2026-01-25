@@ -19,21 +19,34 @@ class AppConfig {
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imptbnd5emVhcm5uZGhsaXRydXl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ0MTc4MTMsImV4cCI6MjA2OTk5MzgxM30.i1_79Ew1co2wIsZTyai_t6KucM-fH_NuKBIhqEuY-44';
 
   // ============================================================
-  // CLOUDFLARE WORKER CONFIGURATION (Database + Storage)
+  // CLOUDFLARE WORKER CONFIGURATION (Dual Workers)
   // ============================================================
   
-  /// Base Cloudflare Worker URL (no trailing slash)
+  /// Primary Cloudflare Worker URL (original worker)
   static String get cloudflareWorkerUrl => 
       dotenv.env['CLOUDFLARE_WORKER_URL'] ?? 
       'https://shrill-paper-a8ce.terryd0612.workers.dev';
   
-  /// Database query endpoint
+  /// Secondary Cloudflare Worker URL (LiverWise worker for feed features)
+  static String get liverwiseWorkerUrl => 
+      dotenv.env['LIVERWISE_WORKER_URL'] ?? 
+      'https://liverwise-worker.terryd0612.workers.dev';
+  
+  /// Database query endpoint (primary worker)
   static String get cloudflareWorkerQueryEndpoint => 
       '$cloudflareWorkerUrl/query';
   
-  /// Storage endpoint for file uploads/downloads
+  /// Database query endpoint (LiverWise worker - for feed operations)
+  static String get liverwiseWorkerQueryEndpoint => 
+      '$liverwiseWorkerUrl/query';
+  
+  /// Storage endpoint for file uploads/downloads (primary worker)
   static String get cloudflareWorkerStorageEndpoint => 
       '$cloudflareWorkerUrl/storage';
+  
+  /// Storage endpoint (LiverWise worker)
+  static String get liverwiseWorkerStorageEndpoint => 
+      '$liverwiseWorkerUrl/storage';
 
   // ============================================================
   // GENERAL APP SETTINGS
@@ -162,20 +175,28 @@ class AppConfig {
   /// Check if app is in development mode
   static bool get isDevelopment => !isProduction;
   
-  /// Get full storage URL for a file path
+  /// Get full storage URL for a file path (primary worker)
   static String getStorageUrl(String path) {
     return '$cloudflareWorkerStorageEndpoint/$path';
+  }
+  
+  /// Get full storage URL for a file path (LiverWise worker)
+  static String getLiverwiseStorageUrl(String path) {
+    return '$liverwiseWorkerStorageEndpoint/$path';
   }
   
   /// Validate configuration on app startup
   static void validateConfig() {
     assert(supabaseUrl.isNotEmpty, 'Supabase URL is required');
     assert(supabaseAnonKey.isNotEmpty, 'Supabase anon key is required');
-    assert(cloudflareWorkerUrl.isNotEmpty, 'Cloudflare Worker URL is required');
+    assert(cloudflareWorkerUrl.isNotEmpty, 'Primary Cloudflare Worker URL is required');
+    assert(liverwiseWorkerUrl.isNotEmpty, 'LiverWise Worker URL is required');
     
     if (enableDebugPrints) {
       debugPrint('✅ AppConfig validated successfully');
       debugPrint('🔧 Environment: ${isProduction ? "PRODUCTION" : "DEVELOPMENT"}');
+      debugPrint('🔧 Primary Worker: $cloudflareWorkerUrl');
+      debugPrint('🔧 LiverWise Worker: $liverwiseWorkerUrl');
       debugPrint('🏥 Disease tracking: ${enableDiseaseTracking ? "ENABLED" : "DISABLED"}');
       debugPrint('⚖️ Weight tracking: ${enableWeightTracking ? "ENABLED" : "DISABLED"}');
     }

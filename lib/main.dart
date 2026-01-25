@@ -35,6 +35,7 @@ import 'package:liver_wise/pages/saved_ingredients_screen.dart';
 import './pages/submission_status_page.dart';
 import './pages/my_cookbook_page.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import './pages/saved_posts_page.dart';
 
 
 /// 🔥 Background FCM handler (required for messages when app is terminated)
@@ -460,6 +461,7 @@ class _MyAppState extends State<MyApp> {
         '/submission-status': (context) => const SubmissionStatusPage(),
         '/tracker': (context) => const TrackerPage(),
         '/my-cookbook': (context) => const MyCookbookPage(),
+        '/saved-posts': (context) => const SavedPostsPage(),
         '/reset-password': (context) {
           final session = ModalRoute.of(context)?.settings.arguments as Session?;
           return ResetPasswordPage(session: session);

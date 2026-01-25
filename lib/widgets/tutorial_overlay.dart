@@ -39,12 +39,12 @@ class _TutorialOverlayState extends State<TutorialOverlay>
   
   bool _showHighlight = false;
   GlobalKey? _currentHighlightKey;
+  double _leviOffset = 0.0;
   
   @override
   void initState() {
     super.initState();
     
-    // Levi slide-in animation
     _leviController = AnimationController(
       duration: const Duration(milliseconds: 500),
       vsync: this,
@@ -58,7 +58,6 @@ class _TutorialOverlayState extends State<TutorialOverlay>
       curve: Curves.easeOut,
     ));
     
-    // Start Levi's entrance
     _leviController.forward();
   }
   
@@ -69,6 +68,7 @@ class _TutorialOverlayState extends State<TutorialOverlay>
   }
   
   void _nextStep() {
+    _playLeviHop();
     setState(() {
       switch (_currentStep) {
         case TutorialStep.TUTORIAL_INTRO:
@@ -99,6 +99,17 @@ class _TutorialOverlayState extends State<TutorialOverlay>
           break;
       }
     });
+  }
+
+  void _playLeviHop() async {
+    if (!mounted) return;
+    
+    for (int i = 0; i < 3; i++) {
+      setState(() => _leviOffset = -20.0);
+      await Future.delayed(Duration(milliseconds: 150));
+      setState(() => _leviOffset = 0.0);
+      await Future.delayed(Duration(milliseconds: 150));
+    }
   }
   
   void _updateHighlight(GlobalKey newKey) async {
@@ -180,10 +191,9 @@ class _TutorialOverlayState extends State<TutorialOverlay>
             // Yellow highlight
             _buildHighlight(),
             
-            // Levi character (bottom-right)
             Positioned(
               right: 16,
-              bottom: 140,
+              bottom: 140 + _leviOffset,
               child: SlideTransition(
                 position: _leviSlideAnimation,
                 child: Container(
