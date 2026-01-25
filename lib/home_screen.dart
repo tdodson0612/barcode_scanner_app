@@ -2719,21 +2719,283 @@ class _HomePageState extends State<HomePage>
       ),
     );
   }
-  // 🔥 NEW: Show share recipe dialog
-  void _showShareRecipeDialog() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Share a recipe from your Favorites or Cookbook!'),
-        backgroundColor: Colors.blue,
-        action: SnackBarAction(
-          label: 'Go to Favorites',
-          textColor: Colors.white,
-          onPressed: () {
-            Navigator.pushNamed(context, '/favorite-recipes');
-          },
+  // 🔥 FIXED: Show recipe selection dialog with highlight and share
+  Future<void> _showShareRecipeDialog() async {
+    // Load favorite recipes
+    final recipes = await FavoriteRecipesService.getFavoriteRecipes();
+    
+    if (recipes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No favorite recipes yet. Add some recipes first!'),
+          backgroundColor: Colors.orange,
+          action: SnackBarAction(
+            label: 'Go to Favorites',
+            textColor: Colors.white,
+            onPressed: () {
+              Navigator.pushNamed(context, '/favorite-recipes');
+            },
+          ),
+        ),
+      );
+      return;
+    }
+
+    FavoriteRecipe? selectedRecipe;
+    String selectedVisibility = _defaultPostVisibility;
+    TextEditingController captionController = TextEditingController();
+    bool isPosting = false;
+
+    final posted = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.restaurant, color: Colors.green),
+              SizedBox(width: 8),
+              Text('Share Recipe'),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Select a recipe:',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  SizedBox(height: 12),
+                  
+                  // Recipe list
+                  Container(
+                    constraints: BoxConstraints(maxHeight: 200),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: recipes.length,
+                      itemBuilder: (context, index) {
+                        final recipe = recipes[index];
+                        final isSelected = selectedRecipe?.id == recipe.id;
+                        
+                        return InkWell(
+                          onTap: () {
+                            setState(() {
+                              selectedRecipe = recipe;
+                            });
+                          },
+                          child: Container(
+                            padding: EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isSelected 
+                                ? Colors.green.shade50 
+                                : Colors.transparent,
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: Colors.grey.shade200,
+                                  width: 1,
+                                ),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  isSelected 
+                                    ? Icons.check_circle 
+                                    : Icons.circle_outlined,
+                                  color: isSelected 
+                                    ? Colors.green 
+                                    : Colors.grey.shade400,
+                                  size: 20,
+                                ),
+                                SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    recipe.recipeName,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: isSelected 
+                                        ? FontWeight.bold 
+                                        : FontWeight.normal,
+                                      color: isSelected 
+                                        ? Colors.green.shade900 
+                                        : Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  
+                  // Caption field (only shows when recipe selected)
+                  if (selectedRecipe != null) ...[
+                    SizedBox(height: 16),
+                    TextField(
+                      controller: captionController,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        hintText: "Add a caption (optional)...",
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.green, width: 2),
+                        ),
+                      ),
+                    ),
+                  ],
+                  
+                  SizedBox(height: 16),
+                  
+                  // Visibility dropdown
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          selectedVisibility == 'public' ? Icons.public : Icons.people,
+                          size: 20,
+                          color: Colors.grey.shade700,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Visible to:',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: DropdownButton<String>(
+                            value: selectedVisibility,
+                            isExpanded: true,
+                            underline: SizedBox(),
+                            items: [
+                              DropdownMenuItem(
+                                value: 'public',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.public, size: 18, color: Colors.blue),
+                                    SizedBox(width: 8),
+                                    Text('Everyone (Public)'),
+                                  ],
+                                ),
+                              ),
+                              DropdownMenuItem(
+                                value: 'friends',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.people, size: 18, color: Colors.green),
+                                    SizedBox(width: 8),
+                                    Text('Friends Only'),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              if (value != null) {
+                                setState(() => selectedVisibility = value);
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isPosting ? null : () => Navigator.pop(context, false),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: (selectedRecipe == null || isPosting)
+                  ? null
+                  : () async {
+                      setState(() => isPosting = true);
+
+                      try {
+                        await FeedPostsService.shareRecipeToFeed(
+                          recipeName: selectedRecipe!.recipeName,
+                          description: captionController.text.trim(),
+                          ingredients: selectedRecipe!.ingredients,
+                          directions: selectedRecipe!.directions,
+                          visibility: selectedVisibility,
+                        );
+
+                        _defaultPostVisibility = selectedVisibility;
+
+                        Navigator.pop(context, true);
+
+                      } catch (e) {
+                        setState(() => isPosting = false);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to share recipe: ${e.toString()}'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: selectedRecipe == null 
+                  ? Colors.grey 
+                  : Colors.green,
+                foregroundColor: Colors.white,
+              ),
+              child: isPosting
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Text('Share'),
+            ),
+          ],
         ),
       ),
     );
+
+    if (posted == true && mounted) {
+      await _loadFeed(isRefresh: true);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Recipe shared successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 
   // 🔥 NEW: Post Composer Widget
