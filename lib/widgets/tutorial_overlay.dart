@@ -216,6 +216,19 @@ class _TutorialOverlayState extends State<TutorialOverlay>
                       width: 120,
                       height: 120,
                       fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        print('❌ Error loading leviliver.png: $error');
+                        return Container(
+                          width: 120,
+                          height: 120,
+                          color: Colors.green.shade700,
+                          child: Icon(
+                            Icons.favorite,
+                            size: 60,
+                            color: Colors.white,
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),

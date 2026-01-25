@@ -4221,7 +4221,12 @@ class _HomePageState extends State<HomePage>
     
               ElevatedButton.icon(
                 onPressed: () {
-                  setState(() => _showTutorial = true);
+                  print('🎓 Tutorial button pressed');
+                  print('📍 Current _showTutorial state: $_showTutorial');
+                  setState(() {
+                    _showTutorial = true;
+                  });
+                  print('✅ Tutorial state set to: $_showTutorial');
                 },
                 icon: const Icon(Icons.help_outline),
                 label: const Text('Tutorial'),
