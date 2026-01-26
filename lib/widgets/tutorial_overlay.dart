@@ -3,8 +3,9 @@ import 'package:flutter/material.dart';
 
 enum TutorialStep {
   TUTORIAL_INTRO,
-  TUTORIAL_SCAN,
+  TUTORIAL_ALL_BUTTONS, // NEW: Show all 4 buttons together
   TUTORIAL_AUTO,
+  TUTORIAL_SCAN,
   TUTORIAL_MANUAL,
   TUTORIAL_LOOKUP,
   TUTORIAL_UNIFIED_RESULT,
@@ -41,6 +42,9 @@ class _TutorialOverlayState extends State<TutorialOverlay>
   GlobalKey? _currentHighlightKey;
   double _leviOffset = 0.0;
   
+  // NEW: For highlighting all buttons together
+  bool _highlightAllButtons = false;
+  
   @override
   void initState() {
     super.initState();
@@ -67,14 +71,22 @@ class _TutorialOverlayState extends State<TutorialOverlay>
     super.dispose();
   }
   
-void _nextStep() {
+  void _nextStep() {
     print('🎓 _nextStep called - current: $_currentStep');
     _playLeviHop();
     setState(() {
       switch (_currentStep) {
         case TutorialStep.TUTORIAL_INTRO:
+          print('🎓 Moving to ALL_BUTTONS step');
+          _currentStep = TutorialStep.TUTORIAL_ALL_BUTTONS;
+          _highlightAllButtons = true;
+          _showHighlight = false;
+          _currentHighlightKey = null;
+          break;
+        case TutorialStep.TUTORIAL_ALL_BUTTONS:
           print('🎓 Moving to AUTO step');
           _currentStep = TutorialStep.TUTORIAL_AUTO;
+          _highlightAllButtons = false;
           _updateHighlight(widget.autoButtonKey);
           break;
         case TutorialStep.TUTORIAL_AUTO:
@@ -124,7 +136,10 @@ void _nextStep() {
     print('🎯 Updating highlight to new key');
     
     // Fade out previous highlight
-    setState(() => _showHighlight = false);
+    setState(() {
+      _showHighlight = false;
+      _highlightAllButtons = false; // Also turn off all-buttons highlight
+    });
     await Future.delayed(const Duration(milliseconds: 200));
     
     // Wait for layout to complete
@@ -151,28 +166,102 @@ void _nextStep() {
   }
   
   void _removeHighlight() async {
-    setState(() => _showHighlight = false);
+    setState(() {
+      _showHighlight = false;
+      _highlightAllButtons = false;
+    });
     await Future.delayed(const Duration(milliseconds: 100));
     setState(() => _currentHighlightKey = null);
   }
   
-String _getTalkBubbleText() {
+  String _getTalkBubbleText() {
     switch (_currentStep) {
       case TutorialStep.TUTORIAL_INTRO:
         return "Hi there, friend. I am Levi, the liver. Let me walk you through this app and the way we use it to enrich our health and our lives.";
+      case TutorialStep.TUTORIAL_ALL_BUTTONS:
+        return "These buttons are the 4 different ways you can see the nutrition facts and suggested liver friendly recipes for any food you like! Let's walk through them together!";
       case TutorialStep.TUTORIAL_AUTO:
         return "Let's start with Auto. It works fast - just point your camera at the barcode, and it recognizes it automatically.";
       case TutorialStep.TUTORIAL_SCAN:
         return "This is Scan. Tap this when you want to scan a barcode yourself. You'll take a picture, tap Analyze, and we'll show you the nutrition facts and helpful recipe ideas.";
       case TutorialStep.TUTORIAL_MANUAL:
-        return "Use Manual when a barcode won't scan or is damaged. You can type in the numbers from the bottom of the barcode instead.";
+        return "Use Code when a barcode won't scan or is damaged. You can type in the numbers from the bottom of the barcode instead.";
       case TutorialStep.TUTORIAL_LOOKUP:
-        return "And this is Lookup. Tap here to search by name if you don't have a barcode at all.";
+        return "And this is Search. Tap here to search by name if you don't have a barcode at all.";
       case TutorialStep.TUTORIAL_UNIFIED_RESULT:
         return "No matter which option you choose, you'll see nutrition facts and recipe suggestions for that item. Pick what works best for you.";
       case TutorialStep.TUTORIAL_CLOSE:
         return "That's it! I'll be here if you need help. Let's take care of your health together.";
     }
+  }
+  
+  // NEW: Build highlight for all 4 buttons together
+  Widget _buildAllButtonsHighlight() {
+    if (!_highlightAllButtons) {
+      return const SizedBox.shrink();
+    }
+
+    // Get positions of all 4 buttons
+    final autoBox = widget.autoButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    final scanBox = widget.scanButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    final manualBox = widget.manualButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    final lookupBox = widget.lookupButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    final overlayBox = context.findRenderObject() as RenderBox?;
+
+    if (autoBox == null || scanBox == null || manualBox == null || lookupBox == null || overlayBox == null) {
+      return const SizedBox.shrink();
+    }
+
+    // Get global positions
+    final autoPos = overlayBox.globalToLocal(autoBox.localToGlobal(Offset.zero));
+    final scanPos = overlayBox.globalToLocal(scanBox.localToGlobal(Offset.zero));
+    final manualPos = overlayBox.globalToLocal(manualBox.localToGlobal(Offset.zero));
+    final lookupPos = overlayBox.globalToLocal(lookupBox.localToGlobal(Offset.zero));
+
+    // Calculate bounding box that contains all 4 buttons
+    final left = [autoPos.dx, scanPos.dx, manualPos.dx, lookupPos.dx].reduce((a, b) => a < b ? a : b);
+    final top = [autoPos.dy, scanPos.dy, manualPos.dy, lookupPos.dy].reduce((a, b) => a < b ? a : b);
+    final right = [
+      autoPos.dx + autoBox.size.width,
+      scanPos.dx + scanBox.size.width,
+      manualPos.dx + manualBox.size.width,
+      lookupPos.dx + lookupBox.size.width,
+    ].reduce((a, b) => a > b ? a : b);
+    final bottom = [
+      autoPos.dy + autoBox.size.height,
+      scanPos.dy + scanBox.size.height,
+      manualPos.dy + manualBox.size.height,
+      lookupPos.dy + lookupBox.size.height,
+    ].reduce((a, b) => a > b ? a : b);
+
+    final width = right - left;
+    final height = bottom - top;
+
+    return Positioned(
+      left: left - 8,
+      top: top - 8,
+      child: AnimatedOpacity(
+        opacity: 1.0,
+        duration: const Duration(milliseconds: 250),
+        child: IgnorePointer(
+          child: Container(
+            width: width + 16,
+            height: height + 16,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.yellow, width: 4),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.yellow.withOpacity(0.35),
+                  blurRadius: 12,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
   
   Widget _buildHighlight() {
@@ -239,7 +328,10 @@ String _getTalkBubbleText() {
           behavior: HitTestBehavior.opaque,
           child: Stack(
             children: [
-              // Yellow highlight
+              // Yellow highlight for all buttons
+              _buildAllButtonsHighlight(),
+              
+              // Yellow highlight for individual button
               _buildHighlight(),
               
               Positioned(

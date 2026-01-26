@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../logger.dart';
+import '../widgets/levi_error_overlay.dart';
 
 /// Centralized error handling service for the entire app
 /// Apple-compliant: No technical jargon, user-friendly messages, retry options
@@ -74,32 +75,30 @@ class ErrorHandlingService {
     }
   }
 
-  /// Categorize error with user-friendly, Apple-compliant messages
-  /// NO technical jargon, NO raw error messages, YES helpful guidance
   static ErrorInfo _categorizeError(dynamic error, String? category) {
     final errorString = error.toString().toLowerCase();
-    
+
     // Network/Connection issues
     if (_isNetworkError(errorString) || category == networkError) {
       return ErrorInfo(
         category: networkError,
-        title: 'Connection Issue',
-        message: 'Please check your internet connection and try again.',
-        userMessage: 'Make sure WiFi or cellular data is enabled.',
+        title: 'Oopsie! Lost connection',
+        message: 'Looks like the internet got shy! Can you check your WiFi?',
+        userMessage: 'I need the internet to help you stay healthy! 🌐',
         icon: Icons.wifi_off_rounded,
         color: Colors.orange,
         canRetry: true,
         isUserFacingError: true,
       );
     }
-    
-    // Authentication - user needs to log in
+
+    // Authentication
     if (_isAuthError(errorString) || category == authError) {
       return ErrorInfo(
         category: authError,
-        title: 'Please Log In',
-        message: 'You need to log in to use this feature.',
-        userMessage: 'Your session may have expired. Please sign in again.',
+        title: 'Hmm, who are you?',
+        message: 'I don\'t recognize you! Let\'s log in again so I know it\'s really you.',
+        userMessage: 'Your login might have timed out - happens to the best of us! 😊',
         icon: Icons.lock_outline_rounded,
         color: Colors.blue,
         canRetry: false,
@@ -107,14 +106,14 @@ class ErrorHandlingService {
         isUserFacingError: true,
       );
     }
-    
+
     // Premium features
     if (_isPremiumError(errorString) || category == premiumError) {
       return ErrorInfo(
         category: premiumError,
-        title: 'Premium Feature',
-        message: 'Upgrade to Premium to unlock this feature.',
-        userMessage: 'Get unlimited scans and access to all recipes!',
+        title: 'This is a VIP feature!',
+        message: 'Want unlimited scans? Upgrade to Premium and I\'ll be your personal health buddy! ⭐',
+        userMessage: 'Premium unlocks ALL my best features!',
         icon: Icons.star_rounded,
         color: Colors.amber,
         canRetry: false,
@@ -122,53 +121,52 @@ class ErrorHandlingService {
         isUserFacingError: true,
       );
     }
-    
+
     // Database/sync issues
     if (_isDatabaseError(errorString) || category == databaseError) {
       return ErrorInfo(
         category: databaseError,
-        title: 'Sync Issue',
-        message: 'Unable to load data right now.',
-        userMessage: 'Please try again in a moment.',
+        title: 'Uh oh, sync hiccup!',
+        message: 'I tried to grab your data but got a little mixed up. Let\'s try that again!',
+        userMessage: 'Sometimes I need a second to catch my breath! 💨',
         icon: Icons.sync_problem_rounded,
         color: Colors.red.shade400,
         canRetry: true,
         isUserFacingError: true,
       );
     }
-    
+
     // Barcode scanning issues
     if (_isScanError(errorString) || category == scanError) {
       return ErrorInfo(
         category: scanError,
-        title: 'Scan Failed',
-        message: 'Unable to read the barcode.',
-        userMessage: 'Make sure the barcode is clearly visible and well-lit.',
+        title: 'Couldn\'t read that!',
+        message: 'That barcode was a bit blurry for me! Try again with better lighting?',
+        userMessage: 'Make sure the barcode is nice and clear - I\'m trying my best! 🔍',
         icon: Icons.qr_code_scanner_rounded,
         color: Colors.purple,
         canRetry: true,
         isUserFacingError: true,
       );
     }
-    
+
     // Camera/image issues
     if (_isImageError(errorString) || category == imageError) {
       return ErrorInfo(
         category: imageError,
-        title: 'Camera Access Needed',
-        message: 'Unable to access your camera.',
-        userMessage: 'Please allow camera access in Settings to scan products.',
+        title: 'Camera shy?',
+        message: 'I need to use your camera, but it\'s blocked! Can you let me in through Settings?',
+        userMessage: 'Pretty please? I promise to only take healthy pics! 📸',
         icon: Icons.camera_alt_rounded,
         color: Colors.indigo,
         canRetry: true,
-        redirectRoute: null, // User should go to Settings app
+        redirectRoute: null,
         isUserFacingError: true,
       );
     }
-    
-    // Ad loading (not critical, don't block user)
+
+    // Ad loading (silent)
     if (_isAdError(errorString) || category == adError) {
-      // Silent fail - ads are not critical
       return ErrorInfo(
         category: adError,
         title: 'Ad Unavailable',
@@ -177,45 +175,45 @@ class ErrorHandlingService {
         icon: Icons.ad_units_rounded,
         color: Colors.grey,
         canRetry: false,
-        isUserFacingError: false, // Don't bother user with ad errors
+        isUserFacingError: false,
       );
     }
-    
+
     // Input validation
     if (_isValidationError(errorString) || category == validationError) {
       return ErrorInfo(
         category: validationError,
-        title: 'Invalid Input',
-        message: 'Please check your information and try again.',
-        userMessage: 'Some fields may be empty or incorrectly filled.',
+        title: 'Whoopsie!',
+        message: 'Some of that info doesn\'t look quite right. Double check and try again?',
+        userMessage: 'I\'m picky about details - helps me keep you healthy! 📝',
         icon: Icons.error_outline_rounded,
         color: Colors.orange,
         canRetry: false,
         isUserFacingError: true,
       );
     }
-    
-    // App initialization/startup
+
+    // App initialization
     if (_isInitializationError(errorString) || category == initializationError) {
       return ErrorInfo(
         category: initializationError,
-        title: 'Startup Issue',
-        message: 'The app needs to restart.',
-        userMessage: 'Please close and reopen the app.',
+        title: 'Starting up...',
+        message: 'I got a little dizzy on startup! Mind if we restart?',
+        userMessage: 'Just close me and open me back up - I\'ll be ready! 🔄',
         icon: Icons.refresh_rounded,
         color: Colors.blue,
         canRetry: true,
         isUserFacingError: true,
       );
     }
-    
-    // Navigation (page not found, routing issues)
+
+    // Navigation
     if (_isNavigationError(errorString) || category == navigationError) {
       return ErrorInfo(
         category: navigationError,
-        title: 'Page Not Available',
-        message: 'The requested page could not be opened.',
-        userMessage: "Let's get you back to the home screen.",
+        title: 'Lost my way!',
+        message: 'That page wandered off somewhere! Let me take you back home.',
+        userMessage: 'Home is where the health is! 🏠',
         icon: Icons.home_rounded,
         color: Colors.teal,
         canRetry: false,
@@ -223,13 +221,13 @@ class ErrorHandlingService {
         isUserFacingError: true,
       );
     }
-    
-    // Unknown/unexpected errors - keep it vague and friendly
+
+    // Unknown/unexpected errors
     return ErrorInfo(
       category: unknownError,
-      title: 'Something Went Wrong',
-      message: 'An unexpected issue occurred.',
-      userMessage: 'Please try again. If the problem continues, try restarting the app.',
+      title: 'Well, that\'s awkward...',
+      message: 'Something weird just happened and I\'m not quite sure what! Wanna try again?',
+      userMessage: 'If this keeps happening, try giving me a restart! 🤔',
       icon: Icons.error_outline_rounded,
       color: Colors.red.shade400,
       canRetry: true,
@@ -327,7 +325,6 @@ class ErrorHandlingService {
            error.contains('could not find');
   }
 
-  /// Show error dialog - iPad optimized, user-friendly
   static void _showErrorDialog({
     required BuildContext context,
     required ErrorInfo errorInfo,
@@ -337,7 +334,7 @@ class ErrorHandlingService {
   }) {
     if (!context.mounted) return;
 
-    // Don't show dialog for non-user-facing errors (like ads)
+    // Don't show dialog for non-user-facing errors
     if (!errorInfo.isUserFacingError) {
       if (kDebugMode) {
         debugPrint('Silent error: ${errorInfo.category}');
@@ -345,176 +342,47 @@ class ErrorHandlingService {
       return;
     }
 
+    // Determine action button text and callback
+    String? actionButtonText;
+    VoidCallback? actionCallback;
+    
+    if (errorInfo.canRetry && onRetry != null) {
+      actionButtonText = 'Try again!';
+      actionCallback = onRetry;
+    } else if (errorInfo.redirectRoute != null) {
+      if (errorInfo.redirectRoute == '/login') {
+        actionButtonText = 'Log in';
+      } else if (errorInfo.redirectRoute == '/purchase') {
+        actionButtonText = 'Upgrade';
+      } else if (errorInfo.redirectRoute == '/home') {
+        actionButtonText = 'Go home';
+      } else {
+        actionButtonText = 'Continue';
+      }
+      actionCallback = () => Navigator.pushNamed(context, errorInfo.redirectRoute!);
+    } else {
+      actionButtonText = 'Got it!';
+      actionCallback = null;
+    }
+
+    // Show Levi error overlay
     showDialog(
       context: context,
-      barrierDismissible: errorInfo.canRetry, // Allow dismiss if retry available
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: errorInfo.color.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  errorInfo.icon,
-                  color: errorInfo.color,
-                  size: 40,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                errorInfo.title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                customMessage ?? errorInfo.message,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 16,
-                  height: 1.4,
-                ),
-              ),
-              if (errorInfo.userMessage != null) ...[
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.lightbulb_outline_rounded,
-                        color: errorInfo.color,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          errorInfo.userMessage!,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey.shade700,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            // Cancel/Dismiss button
-            if (errorInfo.canRetry || onCancel != null)
-              TextButton(
-                onPressed: () {
-                  Navigator.of(dialogContext).pop();
-                  onCancel?.call();
-                },
-                child: Text(
-                  'Cancel',
-                  style: TextStyle(
-                    color: Colors.grey.shade600,
-                    fontSize: 16,
-                  ),
-                ),
-              ),
-            
-            // Primary action button
-            if (errorInfo.canRetry && onRetry != null)
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.of(dialogContext).pop();
-                  onRetry();
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: errorInfo.color,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text(
-                  'Try Again',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              )
-            else if (errorInfo.redirectRoute != null)
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.of(dialogContext).pop();
-                  Navigator.pushNamed(context, errorInfo.redirectRoute!);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: errorInfo.color,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: Text(
-                  errorInfo.redirectRoute == '/login' ? 'Log In' :
-                  errorInfo.redirectRoute == '/purchase' ? 'Upgrade' :
-                  errorInfo.redirectRoute == '/home' ? 'Go Home' : 'Continue',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              )
-            else
-              ElevatedButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: errorInfo.color,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text(
-                  'OK',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
+      barrierDismissible: false, // Must tap button to dismiss
+      builder: (dialogContext) => LeviErrorOverlay(
+        title: errorInfo.title,
+        message: customMessage ?? errorInfo.message,
+        helpText: errorInfo.userMessage,
+        icon: errorInfo.icon,
+        color: errorInfo.color,
+        onRetry: errorInfo.canRetry && onRetry != null ? onRetry : null,
+        onNavigate: errorInfo.redirectRoute != null ? actionCallback : null,
+        onDismiss: () {
+          Navigator.of(dialogContext).pop();
+          onCancel?.call();
+        },
+        actionButtonText: actionButtonText,
+      ),
     );
   }
 
@@ -687,14 +555,14 @@ class ErrorHandlingService {
   /// Simple error message (non-blocking)
   static void showSimpleError(BuildContext context, String message) {
     if (!context.mounted) return;
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
           children: [
             const Icon(Icons.error_outline, color: Colors.white, size: 20),
             const SizedBox(width: 12),
-            Expanded(child: Text(message)),
+            Expanded(child: Text('🫀 $message')), // Levi heart emoji
           ],
         ),
         backgroundColor: Colors.red.shade400,
@@ -710,7 +578,7 @@ class ErrorHandlingService {
   /// Success message (positive feedback)
   static void showSuccess(BuildContext context, String message) {
     if (!context.mounted) return;
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -719,7 +587,7 @@ class ErrorHandlingService {
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                message,
+                '🫀 $message', // Levi heart emoji
                 style: const TextStyle(fontSize: 15),
               ),
             ),
