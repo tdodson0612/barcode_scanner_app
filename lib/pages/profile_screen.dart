@@ -317,11 +317,8 @@ class _ProfileScreenState extends State<ProfileScreen>
       final status = await Permission.camera.request();
       
       if (!status.isGranted) {
-        if (status.isPermanentlyDenied) {
-          if (mounted) {
-            _showPermissionError('Camera');
-          }
-          await openAppSettings();
+        if (status.isPermanentlyDenied && mounted) {
+          _showPermissionError('Camera');
         }
         return false;
       }
@@ -341,12 +338,9 @@ class _ProfileScreenState extends State<ProfileScreen>
         if (status.isGranted) return true;
       }
       
-      // If permanently denied, show error and open settings
-      if (status.isPermanentlyDenied) {
-        if (mounted) {
-          _showPermissionError('Photos');
-        }
-        await openAppSettings();
+      // If permanently denied, show error dialog (user clicks button to open settings)
+      if (status.isPermanentlyDenied && mounted) {
+        _showPermissionError('Photos');
       }
       
       return status.isGranted;
@@ -356,11 +350,8 @@ class _ProfileScreenState extends State<ProfileScreen>
     final status = await Permission.photos.request();
     
     if (!status.isGranted) {
-      if (status.isPermanentlyDenied) {
-        if (mounted) {
-          _showPermissionError('Photos');
-        }
-        await openAppSettings();
+      if (status.isPermanentlyDenied && mounted) {
+        _showPermissionError('Photos');
       }
       return false;
     }
