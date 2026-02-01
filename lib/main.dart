@@ -13,6 +13,8 @@ import 'pages/tracker_page.dart';
 // 🔥 Firebase imports
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'firebase_options.dart';
+
 
 // 🔔 Stream controller for profile refresh events
 import 'services/profile_events.dart';
@@ -42,9 +44,10 @@ import './pages/saved_posts_page.dart';
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // Initialize Firebase if not already initialized
-  if (!kIsWeb && Platform.isAndroid) {
-    await Firebase.initializeApp();
-  }
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
   debugPrint("🔥 Background message received: ${message.messageId}");
 }
 
