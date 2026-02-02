@@ -4502,34 +4502,77 @@ class _HomePageState extends State<HomePage>
                                 : Colors.blue.shade200,
                           ),
                         ),
-                        child: Row(
+                        child: Column(
                           children: [
-                            Icon(
-                              _hasUsedAllFreeScans
-                                  ? Icons.warning_rounded
-                                  : Icons.info_outline,
-                              color: _hasUsedAllFreeScans
-                                  ? Colors.red.shade700
-                                  : Colors.blue.shade700,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                _hasUsedAllFreeScans
-                                    ? 'Daily free scans used. Upgrade for unlimited!'
-                                    : '$_remainingScans free scan${_remainingScans == 1 ? '' : 's'} remaining today',
-                                style: TextStyle(
+                            Row(
+                              children: [
+                                Icon(
+                                  _hasUsedAllFreeScans
+                                      ? Icons.warning_rounded
+                                      : Icons.info_outline,
                                   color: _hasUsedAllFreeScans
-                                      ? Colors.red.shade900
-                                      : Colors.blue.shade900,
-                                  fontWeight: FontWeight.w600,
+                                      ? Colors.red.shade700
+                                      : Colors.blue.shade700,
                                 ),
-                              ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    _hasUsedAllFreeScans
+                                        ? 'Daily free scans used.'
+                                        : '$_remainingScans free scan${_remainingScans == 1 ? '' : 's'} remaining today',
+                                    style: TextStyle(
+                                      color: _hasUsedAllFreeScans
+                                          ? Colors.red.shade900
+                                          : Colors.blue.shade900,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
+                            
+                            // 🔥 NEW: Rewarded ad button when out of scans
+                            if (_hasUsedAllFreeScans) ...[
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: _showRewardedAdForFreeScan,
+                                      icon: Icon(Icons.play_circle_outline, size: 20),
+                                      label: Text(
+                                        'Watch Ad for Free Scan',
+                                        style: TextStyle(fontSize: 13),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.orange.shade600,
+                                        foregroundColor: Colors.white,
+                                        padding: EdgeInsets.symmetric(vertical: 10),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: () => Navigator.pushNamed(context, '/purchase'),
+                                      icon: Icon(Icons.star, size: 20),
+                                      label: Text(
+                                        'Go Premium',
+                                        style: TextStyle(fontSize: 13),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.green.shade600,
+                                        foregroundColor: Colors.white,
+                                        padding: EdgeInsets.symmetric(vertical: 10),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
                       ),
-
                       SingleChildScrollView(
                         controller: _feedScrollController,
                         child: Column(
@@ -5617,5 +5660,127 @@ class _HomePageState extends State<HomePage>
       'unit': unit,
       'name': name.trim(),
     };
+  }
+  /// Show rewarded ad to grant user a bonus free scan
+  Future<void> _showRewardedAdForFreeScan() async {
+    // Check if premium (shouldn't happen, but safety check)
+    if (_premiumController.isPremium) {
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('🚫 Premium user tried to watch ad - blocking');
+      }
+      return;
+    }
+
+    // Check if ad is ready
+    if (!_isRewardedAdReady || _rewardedAd == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.white),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text('Ad not ready yet. Please try again in a moment.'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      
+      // Try to load ad again
+      _loadRewardedAd();
+      return;
+    }
+
+    if (AppConfig.enableDebugPrints) {
+      AppConfig.debugPrint('📺 Showing rewarded ad for free scan');
+    }
+
+    // Set up ad callbacks
+    _rewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
+      onAdShowedFullScreenContent: (ad) {
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('📺 Rewarded ad displayed');
+        }
+      },
+      onAdDismissedFullScreenContent: (ad) {
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('📺 Rewarded ad dismissed');
+        }
+        ad.dispose();
+        
+        // Load next rewarded ad
+        if (!_premiumController.isPremium) {
+          _loadRewardedAd();
+        }
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('❌ Rewarded ad failed to show: $error');
+        }
+        ad.dispose();
+        
+        // Load next rewarded ad
+        if (!_premiumController.isPremium) {
+          _loadRewardedAd();
+        }
+        
+        // Show error to user
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to load ad. Please try again.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      },
+    );
+
+    // Show the ad
+    _rewardedAd!.show(
+      onUserEarnedReward: (ad, reward) async {
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('🎁 User earned reward: ${reward.amount} ${reward.type}');
+        }
+
+        // Grant the bonus scan
+        await _premiumController.grantBonusScan();
+        
+        // Update UI
+        if (mounted && !_isDisposed) {
+          setState(() {
+            _remainingScans = _premiumController.remainingScans;
+            _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
+          });
+          
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '✨ You earned 1 free scan! You now have $_remainingScans scan${_remainingScans == 1 ? '' : 's'} remaining.',
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      },
+    );
+    
+    // Mark ad as not ready
+    _isRewardedAdReady = false;
   }
 }

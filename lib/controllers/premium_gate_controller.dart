@@ -1,10 +1,13 @@
 // lib/controllers/premium_gate_controller.dart
 // FIXED: Proper scan counting with no negative numbers, shows "unlimited" for premium
+// ADDED: grantBonusScan() method for rewarded ads
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../services/premium_service.dart';
 import '../services/auth_service.dart';
 import '../logger.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../config/app_config.dart';
 
 class PremiumGateController extends ChangeNotifier {
   static final PremiumGateController _instance = PremiumGateController._internal();
@@ -309,6 +312,52 @@ class PremiumGateController extends ChangeNotifier {
     } catch (e, stackTrace) {
       logger.e("Error adding bonus scans", error: e, stackTrace: stackTrace);
     }
+  }
+
+  // 🎁 NEW: Grant a bonus scan from watching a rewarded ad
+  Future<void> grantBonusScan() async {
+    if (_isDisposed || _isPremium) {
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('⚠️ Cannot grant bonus scan: disposed=$_isDisposed, premium=$_isPremium');
+      }
+      return;
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final today = _getTodayKey();
+      
+      // Get current scan count from database
+      final currentScans = prefs.getInt('scan_count_$today') ?? 0;
+      
+      // Reduce scan count by 1 (giving back a scan)
+      final newCount = (currentScans - 1).clamp(0, 999);
+      await prefs.setInt('scan_count_$today', newCount);
+      
+      // Update state
+      _remainingScans = AppConfig.freeScanLimit - newCount;
+      _totalScansUsed = newCount;
+      
+      if (!_isDisposed) {
+        notifyListeners();
+      }
+      
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('✨ Bonus scan granted! Scan count: $newCount → Remaining: $_remainingScans');
+      }
+    } catch (e, stackTrace) {
+      logger.e("Error granting bonus scan", error: e, stackTrace: stackTrace);
+      
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('❌ Failed to grant bonus scan: $e');
+      }
+    }
+  }
+
+  // 🔑 Helper: Get today's key for scan tracking
+  String _getTodayKey() {
+    final now = DateTime.now();
+    return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   }
 
   // ⭐ FIXED: Better status messages with no negative numbers

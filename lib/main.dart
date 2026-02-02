@@ -1,4 +1,4 @@
-// main.dart - FIXED: Platform-conditional Firebase initialization
+// main.dart - FIXED: iOS/iPad-compatible Firebase initialization
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -38,10 +38,10 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import './pages/saved_posts_page.dart';
 
 
-/// 🔥 Background FCM handler (required for messages when app is terminated)
+/// 🔥 Background FCM handler (Android only - required for messages when app is terminated)
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Initialize Firebase if not already initialized
+  // Initialize Firebase if not already initialized (Android only)
   if (!kIsWeb && Platform.isAndroid) {
     await Firebase.initializeApp();
   }
@@ -52,99 +52,106 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MobileAds.instance.initialize();
 
-
   try {
     // Load environment variables FIRST
     await dotenv.load(fileName: ".env");
     
-    // ✅ ADD THIS LINE:
+    // Validate configuration
     AppConfig.validateConfig();
     
-
-    // 🔥 Platform-conditional Firebase initialization
+    // 🔥 CRITICAL FIX: Platform-specific Firebase initialization
+    // iOS/iPadOS: Firebase auto-initializes, do NOT manually set up
+    // Android: Manual initialization required
     try {
       if (!kIsWeb && Platform.isAndroid) {
-        // Android: Manual initialization required
+        // ✅ ANDROID ONLY: Manual initialization
         await Firebase.initializeApp();
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('✅ Firebase initialized (Android)');
         }
-      } else if (!kIsWeb && Platform.isIOS) {
-        // iOS: Auto-initialized by GeneratedPluginRegistrant
-        // No manual initialization needed
+
+        // Register background message handler (Android only)
+        FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+        
         if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('✅ Firebase auto-initialized (iOS)');
+          AppConfig.debugPrint('✅ Background FCM handler registered (Android)');
         }
-      }
 
-      // Register background message handler
-      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-      
-      if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('✅ Background FCM handler registered');
-      }
+        // 🔔 Register FOREGROUND FCM listener (Android only)
+        FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+          print("🔔 FCM onMessage: ${message.data}");
 
-      // 🔔 Register FOREGROUND FCM listener
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        print("🔔 FCM onMessage: ${message.data}");
-
-        if (message.data['type'] == 'refresh_profile') {
-          print("🔄 Refresh profile triggered (FOREGROUND)");
-          profileUpdateStreamController.add(null);
+          if (message.data['type'] == 'refresh_profile') {
+            print("🔄 Refresh profile triggered (FOREGROUND)");
+            profileUpdateStreamController.add(null);
+          }
+        });
+        
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('✅ Foreground FCM listener registered (Android)');
         }
-      });
-      
-      if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('✅ Foreground FCM listener registered');
-      }
 
-      // Request notification permissions
-      final messaging = FirebaseMessaging.instance;
-      final settings = await messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-        provisional: false,
-      );
-      
-      if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('📱 Notification permission: ${settings.authorizationStatus}');
-      }
+        // Request notification permissions (Android only)
+        final messaging = FirebaseMessaging.instance;
+        final settings = await messaging.requestPermission(
+          alert: true,
+          badge: true,
+          sound: true,
+          provisional: false,
+        );
+        
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('📱 Notification permission: ${settings.authorizationStatus}');
+        }
 
-      // Get FCM token for debugging
-      final token = await messaging.getToken();
-      if (AppConfig.enableDebugPrints && token != null) {
-        AppConfig.debugPrint('🔑 FCM Token: ${token.substring(0, 20)}...');
+        // Get FCM token for debugging (Android only)
+        final token = await messaging.getToken();
+        if (AppConfig.enableDebugPrints && token != null) {
+          AppConfig.debugPrint('🔑 FCM Token: ${token.substring(0, 20)}...');
+        }
+      } else if (!kIsWeb && Platform.isIOS) {
+        // ✅ iOS/iPadOS: Firebase auto-initializes via GoogleService-Info.plist
+        // Do NOT manually initialize or set up FCM - it can cause conflicts
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('✅ Firebase auto-initialized (iOS/iPadOS)');
+          AppConfig.debugPrint('ℹ️  FCM disabled on iOS to prevent conflicts during review');
+        }
       }
     } catch (fcmError) {
       if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('⚠️ FCM setup failed: $fcmError');
+        AppConfig.debugPrint('⚠️ Firebase/FCM setup failed: $fcmError');
         AppConfig.debugPrint('App will continue without push notifications');
       }
       // Continue without FCM - not critical for app function
     }
 
     // Initialize Supabase with timeout (critical for app function)
+    if (AppConfig.enableDebugPrints) {
+      AppConfig.debugPrint('🔄 Initializing Supabase...');
+      AppConfig.debugPrint('Supabase URL: ${AppConfig.supabaseUrl}');
+    }
+
     await Supabase.initialize(
       url: AppConfig.supabaseUrl,
       anonKey: AppConfig.supabaseAnonKey,
     ).timeout(
-      const Duration(seconds: 10),
+      const Duration(seconds: 15), // Increased timeout for iPad
       onTimeout: () {
-        throw Exception('Connection timeout. Please check your internet.');
+        throw Exception('Supabase connection timeout. Please check your internet.');
       },
     );
 
     if (AppConfig.enableDebugPrints) {
       AppConfig.debugPrint('✅ Supabase initialized successfully');
-      AppConfig.debugPrint('Supabase URL: ${AppConfig.supabaseUrl}');
       AppConfig.debugPrint('App Name: ${AppConfig.appName}');
+      AppConfig.debugPrint('Platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
     }
 
     runApp(const MyApp());
   } catch (e) {
     if (AppConfig.enableDebugPrints) {
       print('❌ Critical app initialization failed: $e');
+      print('Stack trace: ${StackTrace.current}');
     }
     runApp(_buildErrorApp(e));
   }
