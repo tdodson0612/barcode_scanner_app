@@ -1,5 +1,10 @@
-// lib/services/auth_service.dart - COMPLETE FIXED VERSION
+// lib/services/auth_service.dart - FIXED FOR iOS APP REVIEW
+// ✅ iOS-specific FCM handling (skips FCM on iOS completely)
+// ✅ Increased timeout from 15s → 30s for iPad compatibility
+// ✅ Optimized database calls during login
 
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/app_config.dart';
 
@@ -44,7 +49,7 @@ class AuthService {
       final profile = await ProfileDataAccess.getUserProfile(currentUserId!);
       return profile?['username'] as String?;
     } catch (e) {
-      print('Error fetching username: $e');
+      AppConfig.debugPrint('Error fetching username: $e');
       return null;
     }
   }
@@ -58,18 +63,26 @@ class AuthService {
   }
 
   // --------------------------------------------------------
-  // 🔥 STORE / UPDATE FCM TOKEN (NON-BLOCKING)
+  // 🔥 iOS-AWARE FCM TOKEN HANDLER (NON-BLOCKING)
   // --------------------------------------------------------
-  static Future<void> _saveFcmToken(String userId) async {
+  /// Only runs on Android - iOS FCM is disabled in main.dart
+  static Future<void> _saveFcmTokenIfAndroid(String userId) async {
+    // ✅ CRITICAL FIX: Skip FCM entirely on iOS to match main.dart
+    if (kIsWeb || Platform.isIOS) {
+      AppConfig.debugPrint("ℹ️ Skipping FCM on iOS (disabled in main.dart)");
+      return;
+    }
+
+    // Android only from here
     try {
       final token = await FirebaseMessaging.instance.getToken();
 
       if (token == null) {
-        AppConfig.debugPrint("⚠️ FCM token is null, skipping save.");
+        AppConfig.debugPrint("⚠️ FCM token is null (Android), skipping save.");
         return;
       }
 
-      AppConfig.debugPrint("📱 Saving FCM token: ${token.substring(0, 20)}...");
+      AppConfig.debugPrint("📱 Saving FCM token (Android): ${token.substring(0, 20)}...");
 
       await DatabaseServiceCore.workerQuery(
         action: 'update',
@@ -81,18 +94,25 @@ class AuthService {
         },
       );
       
-      AppConfig.debugPrint("✅ FCM token saved successfully");
+      AppConfig.debugPrint("✅ FCM token saved successfully (Android)");
     } catch (e) {
-      // ✅ CRITICAL FIX: Don't throw - just log and continue
+      // ✅ CRITICAL: Don't throw - just log and continue
       AppConfig.debugPrint("⚠️ Failed to save FCM token (non-critical): $e");
       // App continues to work without push notifications
     }
   }
 
-  static void _listenForFcmTokenRefresh(String userId) {
+  /// Listen for FCM token refresh (Android only)
+  static void _listenForFcmTokenRefreshIfAndroid(String userId) {
+    // ✅ CRITICAL FIX: Skip FCM entirely on iOS
+    if (kIsWeb || Platform.isIOS) {
+      return;
+    }
+
+    // Android only from here
     try {
       FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-        AppConfig.debugPrint("🔄 FCM token refreshed: ${newToken.substring(0, 20)}...");
+        AppConfig.debugPrint("🔄 FCM token refreshed (Android): ${newToken.substring(0, 20)}...");
 
         try {
           await DatabaseServiceCore.workerQuery(
@@ -104,7 +124,7 @@ class AuthService {
               'updated_at': DateTime.now().toIso8601String(),
             },
           );
-          AppConfig.debugPrint("✅ Refreshed FCM token saved");
+          AppConfig.debugPrint("✅ Refreshed FCM token saved (Android)");
         } catch (e) {
           AppConfig.debugPrint("⚠️ Failed to save refreshed FCM token: $e");
         }
@@ -149,13 +169,13 @@ class AuthService {
               'Signup succeeded but profile setup failed. Please sign in.');
         }
 
-        // 🔥 Save FCM token after profile creation (NON-BLOCKING)
-        _saveFcmToken(userId).catchError((error) {
+        // 🔥 Save FCM token after profile creation (Android only, NON-BLOCKING)
+        _saveFcmTokenIfAndroid(userId).catchError((error) {
           AppConfig.debugPrint("⚠️ FCM token save failed (continuing anyway): $error");
         });
 
-        // 🔄 Listen for token refresh (also non-blocking)
-        _listenForFcmTokenRefresh(userId);
+        // 🔄 Listen for token refresh (Android only, also non-blocking)
+        _listenForFcmTokenRefreshIfAndroid(userId);
       }
 
       return response;
@@ -165,13 +185,13 @@ class AuthService {
   }
 
   // --------------------------------------------------------
-  // 🔥 SIGN IN (FIXED: Non-blocking FCM + Smart retry)
+  // 🔥 SIGN IN (FIXED: iOS-compatible, better timeout, optimized)
   // --------------------------------------------------------
   static Future<AuthResponse> signIn({
     required String email,
     required String password,
   }) async {
-    const maxRetries = 3; // iOS sometimes needs 2-3 attempts
+    const maxRetries = 3;
     int attempt = 0;
 
     while (attempt < maxRetries) {
@@ -192,14 +212,14 @@ class AuthService {
           AppConfig.debugPrint('⚠️ Session clear failed (continuing): $clearError');
         }
 
-        // Attempt login
+        // ✅ FIX: Increased timeout from 15s → 30s for iPad compatibility
         final response = await _supabase.auth.signInWithPassword(
           email: email,
           password: password,
         ).timeout(
-          const Duration(seconds: 15),
+          const Duration(seconds: 30), // ← INCREASED FROM 15s
           onTimeout: () {
-            throw Exception('Connection timed out. Please try again.');
+            throw Exception('Connection timed out. Please check your internet and try again.');
           },
         );
 
@@ -210,29 +230,20 @@ class AuthService {
 
           AppConfig.debugPrint('✅ Login successful (attempt $attempt): $userId');
 
-          // Ensure profile exists
+          // ✅ OPTIMIZED: Single combined profile check + setup
           try {
-            await _ensureUserProfileExists(userId, email);
+            await _ensureUserProfileExistsOptimized(userId, email, normalizedEmail);
           } catch (profileError) {
-            AppConfig.debugPrint('⚠️ Profile check failed: $profileError');
+            AppConfig.debugPrint('⚠️ Profile setup failed (non-critical): $profileError');
+            // Continue anyway - user can still use the app
           }
 
-          // Set premium if applicable
-          if (_isDefaultPremiumEmail(normalizedEmail)) {
-            try {
-              await ProfileDataAccess.setPremium(userId, true);
-              AppConfig.debugPrint('✅ Premium status set');
-            } catch (premiumError) {
-              AppConfig.debugPrint('⚠️ Premium setup failed: $premiumError');
-            }
-          }
-
-          // Save FCM token (non-blocking)
-          _saveFcmToken(userId).catchError((error) {
+          // ✅ Save FCM token (Android only, non-blocking)
+          _saveFcmTokenIfAndroid(userId).catchError((error) {
             AppConfig.debugPrint("⚠️ FCM token save failed: $error");
           });
 
-          _listenForFcmTokenRefresh(userId);
+          _listenForFcmTokenRefreshIfAndroid(userId);
 
           return response; // ✅ SUCCESS - Return immediately
         }
@@ -275,7 +286,7 @@ class AuthService {
         // If we've exhausted retries, throw the error
         if (attempt >= maxRetries) {
           AppConfig.debugPrint('❌ All $maxRetries login attempts failed');
-          throw Exception('Sign in failed after $maxRetries attempts. Please try again later.');
+          throw Exception('Unable to sign in right now. Please try again.\nYour login might have timed out - happens to the best of us!');
         }
 
         // For other errors on early attempts, retry
@@ -290,7 +301,7 @@ class AuthService {
   }
 
   // --------------------------------------------------------
-  // 🍎 NEW: Force clear all session data (for iOS troubleshooting)
+  // 🍎 FORCE RESET SESSION (for iOS troubleshooting)
   // --------------------------------------------------------
   static Future<void> forceResetSession() async {
     try {
@@ -311,28 +322,42 @@ class AuthService {
       throw Exception('Failed to reset session: $e');
     }
   }
+
   // --------------------------------------------------------
-  // Ensure user profile exists
+  // ✅ OPTIMIZED: Combined profile check + premium setup
   // --------------------------------------------------------
-  static Future<void> _ensureUserProfileExists(
-      String userId, String email) async {
+  static Future<void> _ensureUserProfileExistsOptimized(
+      String userId, String email, String normalizedEmail) async {
     try {
       final profile = await ProfileDataAccess.getUserProfile(userId);
 
       if (profile == null) {
         AppConfig.debugPrint('📝 Profile missing → creating');
+        
+        // Create profile with premium status in one go
+        final isPremium = _isDefaultPremiumEmail(normalizedEmail);
         await ProfileDataAccess.createUserProfile(
           userId,
           email,
-          isPremium: false,
+          isPremium: isPremium,
         );
-        AppConfig.debugPrint('✅ Profile created on login');
+        
+        AppConfig.debugPrint('✅ Profile created on login with premium=$isPremium');
       } else {
+        // Profile exists - check if premium needs updating
+        final isPremium = _isDefaultPremiumEmail(normalizedEmail);
+        final currentPremium = profile['is_premium'] as bool? ?? false;
+        
+        if (isPremium && !currentPremium) {
+          AppConfig.debugPrint('⭐ Upgrading to premium');
+          await ProfileDataAccess.setPremium(userId, true);
+        }
+        
         AppConfig.debugPrint('✅ Profile exists for user: $userId');
       }
     } catch (e) {
-      AppConfig.debugPrint('❌ Ensure profile failed: $e');
-      rethrow;
+      AppConfig.debugPrint('❌ Profile setup failed: $e');
+      // Don't rethrow - allow login to continue
     }
   }
 
@@ -413,18 +438,17 @@ class AuthService {
   }
 
   // --------------------------------------------------------
-  // ⭐ PUBLIC METHOD TO SET PREMIUM (Used by PremiumPage + PremiumService)
+  // ⭐ PUBLIC METHOD TO SET PREMIUM
   // --------------------------------------------------------
   static Future<void> markUserAsPremium(String userId) async {
     try {
-      // Update premium flag in DB
       await ProfileDataAccess.setPremium(userId, true);
 
       AppConfig.debugPrint("🌟 User upgraded to premium: $userId");
 
-      // Refresh FCM token for this user (optional but helpful)
+      // Refresh FCM token for this user (Android only, optional)
       if (currentUserId == userId) {
-        _saveFcmToken(userId).catchError((error) {
+        _saveFcmTokenIfAndroid(userId).catchError((error) {
           AppConfig.debugPrint("⚠️ FCM token save failed: $error");
         });
       }
