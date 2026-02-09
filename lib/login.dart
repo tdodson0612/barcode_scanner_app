@@ -1,6 +1,4 @@
-// lib/login.dart - COMPLETE UPDATED FILE
-// Replace your entire login.dart with this version
-
+// lib/login.dart - FIXED: No competing navigation, proper iOS auth flow
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -24,7 +22,7 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   
-  StreamSubscription? _authSub;
+  // ✅ REMOVED: No more auth listener competing with manual navigation
   
   String _email = '';
   String _password = '';
@@ -38,13 +36,11 @@ class _LoginPageState extends State<LoginPage> {
   @override
   void initState() {
     super.initState();
-    _setupAuthListener();
     _loadSavedCredentials();
   }
 
   @override
   void dispose() {
-    _authSub?.cancel();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
@@ -160,9 +156,15 @@ class _LoginPageState extends State<LoginPage> {
         await _saveCredentials();
       }
 
+      // ✅ CRITICAL: Increased timeout for iOS
       final response = await AuthService.signIn(
         email: trimmedEmail,
         password: _password,
+      ).timeout(
+        const Duration(seconds: 20), // Increased from default
+        onTimeout: () {
+          throw Exception('Login timed out. Please check your connection and try again.');
+        },
       );
 
       // ✅ CRITICAL: Verify we actually got authenticated
@@ -172,15 +174,27 @@ class _LoginPageState extends State<LoginPage> {
 
       AppConfig.debugPrint('✅ Login successful: ${response.user?.email}');
       
-      // ✅ Wait for auth state to settle
-      await Future.delayed(const Duration(milliseconds: 800));
+      // ✅ INCREASED: Longer wait for iOS auth state to settle
+      await Future.delayed(const Duration(milliseconds: 1500));
       
       if (!mounted) return;
 
       // ✅ Show success message
-      ErrorHandlingService.showSuccess(context, 'Welcome back!');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: const [
+              Icon(Icons.check_circle, color: Colors.white),
+              SizedBox(width: 12),
+              Text('Welcome back!'),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
       
-      // ✅ Short delay before navigation
+      // ✅ Short delay to let snackbar show
       await Future.delayed(const Duration(milliseconds: 300));
       
       if (!mounted) return;
@@ -220,7 +234,7 @@ class _LoginPageState extends State<LoginPage> {
         email: trimmedEmail,
         password: _password,
       ).timeout(
-        const Duration(seconds: 15),
+        const Duration(seconds: 20),
         onTimeout: () {
           throw Exception('Connection timed out. Please try again.');
         },
@@ -235,9 +249,14 @@ class _LoginPageState extends State<LoginPage> {
 
         if (mounted) {
           if (response.session == null) {
-            ErrorHandlingService.showSuccess(
-              context,
-              'Account created! Please check your email to confirm your account.'
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  'Account created! Please check your email to confirm your account.'
+                ),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 4),
+              ),
             );
             
             await Future.delayed(const Duration(seconds: 2));
@@ -249,8 +268,14 @@ class _LoginPageState extends State<LoginPage> {
               });
             }
           } else {
-            ErrorHandlingService.showSuccess(context, 'Welcome to Liver Food Scanner!');
-            await Future.delayed(const Duration(milliseconds: 500));
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('Welcome to LiverWise!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+            
+            await Future.delayed(const Duration(milliseconds: 1500));
             
             if (mounted) {
               Navigator.pushReplacementNamed(context, '/home');
@@ -278,9 +303,11 @@ class _LoginPageState extends State<LoginPage> {
       await AuthService.forceResetSession();
       
       if (mounted) {
-        ErrorHandlingService.showSuccess(
-          context,
-          'Session cleared! Please try logging in again.',
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Session cleared! Please try logging in again.'),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     } catch (e) {
@@ -323,9 +350,14 @@ class _LoginPageState extends State<LoginPage> {
       );
 
       if (mounted) {
-        ErrorHandlingService.showSuccess(
-          context,
-          'Password reset link sent! Check your email and spam folder.'
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Password reset link sent! Check your email and spam folder.'
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
+          ),
         );
       }
     } catch (e) {
@@ -399,31 +431,6 @@ class _LoginPageState extends State<LoginPage> {
         ],
       ),
     );
-  }
-
-  void _setupAuthListener() {
-    _authSub = AuthService.authStateChanges.listen((data) {
-      final event = data.event;
-      final session = data.session;
-
-      if (!mounted) return;
-
-      // ✅ CRITICAL: Only log, don't navigate from here
-      // Navigation is handled by _handleLogin() and _handleSignUp()
-      switch (event) {
-        case AuthChangeEvent.signedIn:
-          AppConfig.debugPrint('🔐 Auth state: User signed in: ${session?.user.email}');
-          break;
-        case AuthChangeEvent.signedOut:
-          AppConfig.debugPrint('🔓 Auth state: User signed out');
-          break;
-        case AuthChangeEvent.passwordRecovery:
-          AppConfig.debugPrint('🔑 Auth state: Password recovery initiated');
-          break;
-        default:
-          break;
-      }
-    });
   }
 
   void _toggleMode() {
@@ -746,21 +753,19 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                               ),
                               
-                              // ✅ NEW: Clear Session Button (Debug Only)
-                              if (AppConfig.enableDebugPrints) ...[
-                                const SizedBox(height: 8),
-                                TextButton.icon(
-                                  onPressed: _isLoading ? null : _forceResetSession,
-                                  icon: const Icon(Icons.refresh, size: 16, color: Colors.orange),
-                                  label: Text(
-                                    "Clear Session (iOS Debug)",
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.orange.shade700,
-                                    ),
+                              // ✅ Clear Session Button (Always visible on iOS for debugging)
+                              const SizedBox(height: 8),
+                              TextButton.icon(
+                                onPressed: _isLoading ? null : _forceResetSession,
+                                icon: const Icon(Icons.refresh, size: 16, color: Colors.orange),
+                                label: Text(
+                                  "Having login issues? Clear session",
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.orange.shade700,
                                   ),
                                 ),
-                              ],
+                              ),
                             ],
                             
                             SizedBox(height: isTablet ? 32 : 24),
