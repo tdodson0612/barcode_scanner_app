@@ -1280,7 +1280,7 @@ class _SubmitRecipePageState extends State<SubmitRecipePage> {
                     },
                   )
                 : DropdownButtonFormField<String>(
-                    value: ingredient.measurement,
+                    initialValue: ingredient.measurement,
                     decoration: InputDecoration(
                       labelText: 'Unit',
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),

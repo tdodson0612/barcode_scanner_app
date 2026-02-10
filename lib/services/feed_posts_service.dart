@@ -210,7 +210,7 @@ class FeedPostsService {
       );
 
       if (friendsResult != null && (friendsResult as List).isNotEmpty) {
-        AppConfig.debugPrint('👥 Found ${(friendsResult as List).length} accepted friendships');
+        AppConfig.debugPrint('👥 Found ${(friendsResult).length} accepted friendships');
         
         for (final friendship in friendsResult) {
           final sender = friendship['sender']?.toString();
@@ -251,7 +251,7 @@ class FeedPostsService {
         return [];
       }
 
-      final posts = List<Map<String, dynamic>>.from(result as List);
+      final posts = List<Map<String, dynamic>>.from(result);
       AppConfig.debugPrint('✅ Fetched ${posts.length} public posts from database');
       
       return posts;
@@ -284,7 +284,7 @@ class FeedPostsService {
         );
 
         if (result != null && (result as List).isNotEmpty) {
-          friendsPosts.addAll(List<Map<String, dynamic>>.from(result as List));
+          friendsPosts.addAll(List<Map<String, dynamic>>.from(result));
         }
       }
       
@@ -358,7 +358,7 @@ class FeedPostsService {
         return [];
       }
 
-      final allPosts = List<Map<String, dynamic>>.from(result as List);
+      final allPosts = List<Map<String, dynamic>>.from(result);
       final paginatedPosts = _applyPagination(allPosts, limit: limit, offset: offset);
 
       AppConfig.debugPrint('✅ Found ${paginatedPosts.length} public posts (total: ${allPosts.length})');
@@ -448,7 +448,7 @@ class FeedPostsService {
         throw Exception('Post not found');
       }
 
-      final post = (postCheck as List).first;
+      final post = (postCheck).first;
       final postOwnerId = post['user_id']?.toString();
       
       AppConfig.debugPrint('📝 Post owner ID: $postOwnerId');
@@ -574,7 +574,7 @@ class FeedPostsService {
         return 0;
       }
 
-      return (result as List).length;
+      return (result).length;
     } catch (e) {
       AppConfig.debugPrint('❌ Error getting like count: $e');
       return 0;
@@ -600,7 +600,7 @@ class FeedPostsService {
         return [];
       }
 
-      return List<Map<String, dynamic>>.from(result as List);
+      return List<Map<String, dynamic>>.from(result);
     } catch (e) {
       AppConfig.debugPrint('❌ Error getting comments: $e');
       return [];
@@ -775,7 +775,7 @@ class FeedPostsService {
         return [];
       }
 
-      final savedPostIds = (savedResult as List)
+      final savedPostIds = (savedResult)
           .map((save) => save['post_id']?.toString())
           .where((id) => id != null)
           .toSet();
@@ -796,7 +796,7 @@ class FeedPostsService {
         );
 
         if (postResult != null && (postResult as List).isNotEmpty) {
-          posts.add((postResult as List).first);
+          posts.add((postResult).first);
         }
       }
 
@@ -839,7 +839,7 @@ class FeedPostsService {
         return [];
       }
 
-      final allPosts = List<Map<String, dynamic>>.from(result as List);
+      final allPosts = List<Map<String, dynamic>>.from(result);
       
       // Apply pagination
       return _applyPagination(allPosts, limit: limit, offset: offset);

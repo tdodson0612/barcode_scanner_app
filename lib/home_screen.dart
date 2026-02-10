@@ -296,11 +296,11 @@ class _HomePageState extends State<HomePage>
   final ScrollController _feedScrollController = ScrollController();
 
   // Like state tracking
-  Map<String, bool> _postLikeStatus = {};
-  Map<String, int> _postLikeCounts = {};
-  Map<String, bool> _expandedComments = {};
-  Map<String, List<Map<String, dynamic>>> _postComments = {};
-  Map<String, bool> _savedPosts = {};
+  final Map<String, bool> _postLikeStatus = {};
+  final Map<String, int> _postLikeCounts = {};
+  final Map<String, bool> _expandedComments = {};
+  final Map<String, List<Map<String, dynamic>>> _postComments = {};
+  final Map<String, bool> _savedPosts = {};
   final Map<String, TextEditingController> _commentControllers = {};
 
 
@@ -1556,10 +1556,10 @@ class _HomePageState extends State<HomePage>
                           Navigator.pop(context);
                           _resetToHome();
                         },
-                        child: Text('Cancel'),
                         style: TextButton.styleFrom(
                           padding: EdgeInsets.symmetric(vertical: 14),
                         ),
+                        child: Text('Cancel'),
                       ),
                     ),
                   ],

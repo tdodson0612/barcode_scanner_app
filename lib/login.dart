@@ -1,5 +1,4 @@
 // lib/login.dart - FIXED: No competing navigation, proper iOS auth flow
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';

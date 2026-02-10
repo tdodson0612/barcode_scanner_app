@@ -1,6 +1,5 @@
 // lib/widgets/levi_error_overlay.dart
 import 'package:flutter/material.dart';
-import 'dart:async';
 
 /// Levi the liver character showing error messages in a cute way
 class LeviErrorOverlay extends StatefulWidget {

@@ -285,9 +285,7 @@ class NutritionApiService {
       }
 
       // If no specific substitute, search for "low fat", "reduced sodium", or "organic" versions
-      if (substituteQuery == null) {
-        substituteQuery = 'organic $product OR low fat $product OR reduced sodium $product';
-      }
+      substituteQuery ??= 'organic $product OR low fat $product OR reduced sodium $product';
 
       if (AppConfig.enableDebugPrints) {
         print('🔄 Substitute query: $substituteQuery');

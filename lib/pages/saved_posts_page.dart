@@ -21,10 +21,10 @@ class _SavedPostsPageState extends State<SavedPostsPage> with SingleTickerProvid
   bool _isLoadingSaved = false;
   bool _isLoadingMy = false;
   
-  Map<String, bool> _expandedComments = {};
-  Map<String, List<Map<String, dynamic>>> _postComments = {};
+  final Map<String, bool> _expandedComments = {};
+  final Map<String, List<Map<String, dynamic>>> _postComments = {};
   final Map<String, TextEditingController> _commentControllers = {};
-  Map<String, Map<String, int>> _postStats = {}; // postId -> {likes, comments, saves}
+  final Map<String, Map<String, int>> _postStats = {}; // postId -> {likes, comments, saves}
 
   @override
   void initState() {

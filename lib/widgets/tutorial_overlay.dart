@@ -20,13 +20,13 @@ class TutorialOverlay extends StatefulWidget {
   final GlobalKey lookupButtonKey;
 
   const TutorialOverlay({
-    Key? key,
+    super.key,
     required this.onComplete,
     required this.autoButtonKey,
     required this.scanButtonKey,
     required this.manualButtonKey,
     required this.lookupButtonKey,
-  }) : super(key: key);
+  });
 
   @override
   State<TutorialOverlay> createState() => _TutorialOverlayState();

@@ -794,7 +794,7 @@ class _TrackerPageState extends State<TrackerPage> {
                 SizedBox(
                   width: 80,
                   child: DropdownButtonFormField<String>(
-                    value: _weightUnit,
+                    initialValue: _weightUnit,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                     ),
@@ -1008,7 +1008,7 @@ class _TrackerPageState extends State<TrackerPage> {
                 SizedBox(
                   width: 80,
                   child: DropdownButtonFormField<String>(
-                    value: _exerciseUnit,
+                    initialValue: _exerciseUnit,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                     ),
@@ -1072,7 +1072,7 @@ class _TrackerPageState extends State<TrackerPage> {
                 SizedBox(
                   width: 90,
                   child: DropdownButtonFormField<String>(
-                    value: _waterUnit,
+                    initialValue: _waterUnit,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
                     ),
