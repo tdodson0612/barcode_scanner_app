@@ -32,6 +32,7 @@ import 'package:liver_wise/models/draft_recipe.dart';
 import 'package:liver_wise/services/draft_recipes_service.dart';
 import 'services/picture_service.dart';
 import 'package:liver_wise/widgets/tutorial_overlay.dart';
+import '../models/tracker_entry.dart';   
 
 
 class Recipe {
@@ -1586,7 +1587,6 @@ class _HomePageState extends State<HomePage>
 
       if (mounted && !_isDisposed) {
         setState(() {
-          _nutritionText = _buildNutritionDisplay(nutrition!);
           _liverHealthScore = score;
           _showLiverBar = true;
           _isLoading = false;
@@ -1637,14 +1637,6 @@ class _HomePageState extends State<HomePage>
         );
       }
     }
-  }
-
-  String _buildNutritionDisplay(NutritionInfo nutrition) {
-    return "Product: ${nutrition.productName}\n"
-          "Energy: ${nutrition.calories.toStringAsFixed(1)} kcal/100g\n"
-          "Fat: ${nutrition.fat.toStringAsFixed(1)} g/100g\n"
-          "Sugar: ${nutrition.sugar.toStringAsFixed(1)} g/100g\n"
-          "Sodium: ${nutrition.sodium.toStringAsFixed(1)} mg/100g";
   }
 
   // 🔥 NEW: Show photo upload dialog with camera/gallery options
@@ -4389,464 +4381,698 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-    Widget _buildInitialView() {
-      return Container(
+  Widget _buildAppFeatureChip(IconData icon, String label) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
         decoration: BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage(
-              MediaQuery.of(context).size.width > 600
-                  ? 'assets/backgrounds/ipad_background.png'
-                  : 'assets/backgrounds/home_background.png',
-            ),
-            fit: BoxFit.cover,
-          ),
+          color: Colors.green.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.green.shade200),
         ),
-        child: SingleChildScrollView(
-          controller: _feedScrollController,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 14, color: Colors.green.shade700),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.green.shade800,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNutritionSnapshot() {
+    // Load today's tracker entry nutrition totals from cache if available
+    // This is a lightweight display — full detail is in the Tracker page
+    final userId = AuthService.currentUserId;
+    if (userId == null) return const SizedBox.shrink();
+
+    return FutureBuilder<TrackerEntry?>(
+      future: TrackerService.getEntryForDate(
+        userId,
+        DateTime.now().toString().split(' ')[0],
+      ),
+      builder: (context, snapshot) {
+        final entry = snapshot.data;
+        if (entry == null || entry.meals.isEmpty) return const SizedBox.shrink();
+
+        final totals = TrackerService.calculateNutritionTotals(entry.meals);
+        final status = TrackerService.getNutritionStatus(entry.meals);
+        final targets = TrackerService.dailyTargets;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
           padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Container(
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.9),
-                  borderRadius: BorderRadius.circular(25),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: 'Search users...',
-                    hintStyle: TextStyle(color: Colors.grey.shade600),
-                    prefixIcon: Icon(Icons.person_search, color: Colors.green),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.search, color: Colors.green),
-                      onPressed: () => _searchUsers(_searchController.text),
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(25),
-                      borderSide: BorderSide.none,
-                    ),
-                    filled: true,
-                    fillColor: Colors.transparent,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                  ),
-                  onSubmitted: (value) => _searchUsers(value),
-                ),
+          decoration: BoxDecoration(
+            color: Colors.white.withAlpha((0.95 * 255).toInt()),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
               ),
-
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withAlpha((0.9 * 255).toInt()),
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: Column(
-                  children: [
-                    const Text(
-                      'Welcome to Liverwise',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Scan products, look up foods, and get nutrition insights!',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey.shade600,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white.withAlpha((0.95 * 255).toInt()),
-                  borderRadius: BorderRadius.circular(15),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    if (!_isPremium)
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: _hasUsedAllFreeScans
-                              ? Colors.red.shade50
-                              : Colors.blue.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: _hasUsedAllFreeScans
-                                ? Colors.red.shade200
-                                : Colors.blue.shade200,
-                          ),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                Icon(
-                                  _hasUsedAllFreeScans
-                                      ? Icons.warning_rounded
-                                      : Icons.info_outline,
-                                  color: _hasUsedAllFreeScans
-                                      ? Colors.red.shade700
-                                      : Colors.blue.shade700,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    _hasUsedAllFreeScans
-                                        ? 'Daily free scans used.'
-                                        : '$_remainingScans free scan${_remainingScans == 1 ? '' : 's'} remaining today',
-                                    style: TextStyle(
-                                      color: _hasUsedAllFreeScans
-                                          ? Colors.red.shade900
-                                          : Colors.blue.shade900,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            
-                            // 🔥 NEW: Rewarded ad button when out of scans
-                            if (_hasUsedAllFreeScans) ...[
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: ElevatedButton.icon(
-                                      onPressed: _showRewardedAdForFreeScan,
-                                      icon: Icon(Icons.play_circle_outline, size: 20),
-                                      label: Text(
-                                        'Watch Ad for Free Scan',
-                                        style: TextStyle(fontSize: 13),
-                                      ),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.orange.shade600,
-                                        foregroundColor: Colors.white,
-                                        padding: EdgeInsets.symmetric(vertical: 10),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: ElevatedButton.icon(
-                                      onPressed: () => Navigator.pushNamed(context, '/purchase'),
-                                      icon: Icon(Icons.star, size: 20),
-                                      label: Text(
-                                        'Go Premium',
-                                        style: TextStyle(fontSize: 13),
-                                      ),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.green.shade600,
-                                        foregroundColor: Colors.white,
-                                        padding: EdgeInsets.symmetric(vertical: 10),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      SingleChildScrollView(
-                        controller: _feedScrollController,
-                        child: Column(
-                          children: [
-                            // Your 4 buttons row
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                              children: [
-                                _buildActionButton(
-                                  key: _autoButtonKey,
-                                  icon: Icons.qr_code_scanner,
-                                  label: 'Auto',
-                                  color: Colors.purple.shade600,
-                                  onPressed: _isScanning ? null : _autoScanBarcode,
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                _buildActionButton(
-                                  key: _scanButtonKey,
-                                  icon: Icons.camera_alt,
-                                  label: 'Scan',
-                                  color: Colors.green.shade600,
-                                  onPressed: _isScanning ? null : _takePhoto,
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                _buildActionButton(
-                                  key: _manualButtonKey,
-                                  icon: Icons.edit_outlined,
-                                  label: 'Code',
-                                  color: Colors.blue.shade600,
-                                  onPressed: () => Navigator.pushNamed(context, '/manual-barcode-entry'),
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                _buildActionButton(
-                                  key: _lookupButtonKey,
-                                  icon: Icons.search,
-                                  label: 'Search',
-                                  color: Colors.orange.shade800,
-                                  onPressed: () => Navigator.pushNamed(context, '/nutrition-search'),
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                              ],
-                            ),
-
-                            const SizedBox(height: 16),
-
-                            // Tutorial button
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                print('🎓 Tutorial button pressed');
-                                // Scroll to top before showing tutorial
-                                _feedScrollController.animateTo(
-                                  0,
-                                  duration: const Duration(milliseconds: 300),
-                                  curve: Curves.easeInOut,
-                                );
-                                setState(() {
-                                  _showTutorial = true;
-                                });
-                              },
-                              icon: const Icon(Icons.help_outline),
-                              label: const Text('Tutorial'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue.shade700,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(25),
-                                ),
-                              ),
-                            ),
-
-                            // ... rest of your homepage content
-                          ],
-                        ),
-                      )
-
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-    
-              ElevatedButton.icon(
-                onPressed: () {
-                  print('🎓 Tutorial button pressed');
-                  print('📍 Current _showTutorial state: $_showTutorial');
-                  setState(() {
-                    _showTutorial = true;
-                  });
-                  print('✅ Tutorial state set to: $_showTutorial');
-                },
-                icon: const Icon(Icons.help_outline),
-                label: const Text('Tutorial'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue.shade700,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(25),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 30),
-
-              // 🔥 UPDATED: Feed Section with Infinite Scroll
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white.withAlpha((0.9 * 255).toInt()),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.public, color: Colors.green, size: 24),
-                        const SizedBox(width: 12),
-                        const Text(
-                          "Community Feed",
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const Spacer(),
-                        Container(
-                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade50,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.blue.shade200),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.public, size: 14, color: Colors.blue.shade700),
-                              SizedBox(width: 4),
-                              Text(
-                                'Public',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.blue.shade700,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Post Composer
-                    _buildPostComposer(),
-                    const SizedBox(height: 16),
-                    
-                    // 🔥 NEW: Feed with infinite scroll
-                    if (_isLoadingFeed && _feedPosts.isEmpty)
-                      const Center(
-                        child: Padding(
-                          padding: EdgeInsets.all(20),
-                          child: CircularProgressIndicator(),
-                        ),
-                      )
-                    else if (_feedPosts.isEmpty)
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            children: [
-                              Icon(Icons.rss_feed, size: 64, color: Colors.grey.shade400),
-                              const SizedBox(height: 12),
-                              Text(
-                                'No posts yet',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Be the first to share something!',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey.shade500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    else
-                      // 🔥 Feed list with scroll controller
-                      ListView.builder(
-                        shrinkWrap: true,
-                        physics: NeverScrollableScrollPhysics(), // Parent scrolls
-                        itemCount: _feedPosts.length + (_hasMorePosts ? 1 : 0),
-                        itemBuilder: (context, index) {
-                          // Show loading indicator at bottom if loading more
-                          if (index == _feedPosts.length) {
-                            return Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: _isLoadingMorePosts
-                                    ? CircularProgressIndicator()
-                                    : SizedBox.shrink(),
-                              ),
-                            );
-                          }
-                          
-                          return _buildFeedPost(_feedPosts[index]);
-                        },
-                      ),
-                      
-                    // End of feed indicator
-                    if (!_hasMorePosts && _feedPosts.isNotEmpty)
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            '✨ You\'ve seen all posts',
-                            style: TextStyle(
-                              color: Colors.grey.shade600,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 30),
-
-              if (_scannedRecipes.isNotEmpty)
-                PremiumGate(
-                  feature: PremiumFeature.viewRecipes,
-                  featureName: "Recipe Details",
-                  featureDescription:
-                      "View full recipe details with ingredients and directions.",
-                  child: Column(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withAlpha((0.9 * 255).toInt()),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          children: const [
-                            Icon(Icons.restaurant, color: Colors.green, size: 24),
-                            SizedBox(width: 12),
-                            Text(
-                              "Recipe Suggestions",
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      ..._scannedRecipes.map((recipe) =>
-                          _buildScannedRecipeCard(recipe)),
-                    ],
-                  ),
-                ),
             ],
           ),
-        ),
-      );
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.today, color: Colors.teal.shade700, size: 20),
+                  const SizedBox(width: 8),
+                  const Text(
+                    "Today's Nutrition",
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => Navigator.pushNamed(context, '/tracker'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.teal.shade700,
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 0),
+                    ),
+                    child: const Text('Full Detail →',
+                        style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _buildSnapshotNutrient(
+                    'Calories',
+                    totals['calories'] ?? 0,
+                    targets['calories']!,
+                    'kcal',
+                    status['calories'] ?? 'low',
+                  ),
+                  const SizedBox(width: 8),
+                  _buildSnapshotNutrient(
+                    'Protein',
+                    totals['protein'] ?? 0,
+                    targets['protein']!,
+                    'g',
+                    status['protein'] ?? 'low',
+                  ),
+                  const SizedBox(width: 8),
+                  _buildSnapshotNutrient(
+                    'Fiber',
+                    totals['fiber'] ?? 0,
+                    targets['fiber']!,
+                    'g',
+                    status['fiber'] ?? 'low',
+                  ),
+                  const SizedBox(width: 8),
+                  _buildSnapshotNutrient(
+                    'Sodium',
+                    totals['sodium'] ?? 0,
+                    targets['sodium']!,
+                    'mg',
+                    status['sodium'] ?? 'good',
+                  ),
+                ],
+              ),
+              if (entry.supplements.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Icon(Icons.medication, size: 14, color: Colors.indigo.shade600),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${entry.supplements.length} supplement${entry.supplements.length == 1 ? '' : 's'} logged today',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.indigo.shade700,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSnapshotNutrient(
+    String label,
+    double current,
+    double target,
+    String unit,
+    String status,
+  ) {
+    Color color;
+    switch (status) {
+      case 'over':
+        color = Colors.red.shade600;
+        break;
+      case 'low':
+        color = Colors.orange.shade700;
+        break;
+      default:
+        color = Colors.green.shade600;
     }
+
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 3),
+            Text(
+              current >= 100
+                  ? current.toStringAsFixed(0)
+                  : current.toStringAsFixed(1),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+            Text(
+              unit,
+              style: TextStyle(fontSize: 9, color: Colors.grey.shade500),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+
+  Widget _buildInitialView() {
+    return Container(
+      decoration: BoxDecoration(
+        image: DecorationImage(
+          image: AssetImage(
+            MediaQuery.of(context).size.width > 600
+                ? 'assets/backgrounds/ipad_background.png'
+                : 'assets/backgrounds/home_background.png',
+          ),
+          fit: BoxFit.cover,
+        ),
+      ),
+      child: SingleChildScrollView(
+        controller: _feedScrollController,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(25),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search users...',
+                  hintStyle: TextStyle(color: Colors.grey.shade600),
+                  prefixIcon: Icon(Icons.person_search, color: Colors.green),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.search, color: Colors.green),
+                    onPressed: () => _searchUsers(_searchController.text),
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(25),
+                    borderSide: BorderSide.none,
+                  ),
+                  filled: true,
+                  fillColor: Colors.transparent,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                ),
+                onSubmitted: (value) => _searchUsers(value),
+              ),
+            ),
+
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha((0.95 * 255).toInt()),
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.favorite_rounded,
+                          color: Colors.green.shade700, size: 20),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Welcome to LiverWise',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'LiverWise helps you eat better for your liver. '
+                    'Scan any food barcode to see how liver-friendly it is, '
+                    'log your meals to track daily nutrition, and discover '
+                    'recipes designed around a liver-healthy diet.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey.shade700,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      _buildAppFeatureChip(Icons.qr_code_scanner, 'Scan Labels'),
+                      const SizedBox(width: 8),
+                      _buildAppFeatureChip(Icons.bar_chart, 'Track Meals'),
+                      const SizedBox(width: 8),
+                      _buildAppFeatureChip(Icons.restaurant, 'Get Recipes'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Today's nutrition snapshot — only shows if tracker data exists
+            _buildNutritionSnapshot(),
+
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha((0.95 * 255).toInt()),
+                borderRadius: BorderRadius.circular(15),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  if (!_isPremium)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: _hasUsedAllFreeScans
+                            ? Colors.red.shade50
+                            : Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: _hasUsedAllFreeScans
+                              ? Colors.red.shade200
+                              : Colors.blue.shade200,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                _hasUsedAllFreeScans
+                                    ? Icons.warning_rounded
+                                    : Icons.info_outline,
+                                color: _hasUsedAllFreeScans
+                                    ? Colors.red.shade700
+                                    : Colors.blue.shade700,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  _hasUsedAllFreeScans
+                                      ? 'Daily free scans used.'
+                                      : '$_remainingScans free scan${_remainingScans == 1 ? '' : 's'} remaining today',
+                                  style: TextStyle(
+                                    color: _hasUsedAllFreeScans
+                                        ? Colors.red.shade900
+                                        : Colors.blue.shade900,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          
+                          // 🔥 NEW: Rewarded ad button when out of scans
+                          if (_hasUsedAllFreeScans) ...[
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: _showRewardedAdForFreeScan,
+                                    icon: Icon(Icons.play_circle_outline, size: 20),
+                                    label: Text(
+                                      'Watch Ad for Free Scan',
+                                      style: TextStyle(fontSize: 13),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.orange.shade600,
+                                      foregroundColor: Colors.white,
+                                      padding: EdgeInsets.symmetric(vertical: 10),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: () => Navigator.pushNamed(context, '/purchase'),
+                                    icon: Icon(Icons.star, size: 20),
+                                    label: Text(
+                                      'Go Premium',
+                                      style: TextStyle(fontSize: 13),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.green.shade600,
+                                      foregroundColor: Colors.white,
+                                      padding: EdgeInsets.symmetric(vertical: 10),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    SingleChildScrollView(
+                      controller: _feedScrollController,
+                      child: Column(
+                        children: [
+                          // Your 4 buttons row
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              _buildActionButton(
+                                key: _autoButtonKey,
+                                icon: Icons.qr_code_scanner,
+                                label: 'Auto',
+                                color: Colors.purple.shade600,
+                                onPressed: _isScanning ? null : _autoScanBarcode,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              _buildActionButton(
+                                key: _scanButtonKey,
+                                icon: Icons.camera_alt,
+                                label: 'Scan',
+                                color: Colors.green.shade600,
+                                onPressed: _isScanning ? null : _takePhoto,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              _buildActionButton(
+                                key: _manualButtonKey,
+                                icon: Icons.edit_outlined,
+                                label: 'Code',
+                                color: Colors.blue.shade600,
+                                onPressed: () => Navigator.pushNamed(context, '/manual-barcode-entry'),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              _buildActionButton(
+                                key: _lookupButtonKey,
+                                icon: Icons.search,
+                                label: 'Search',
+                                color: Colors.orange.shade800,
+                                onPressed: () => Navigator.pushNamed(context, '/nutrition-search'),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 16),
+
+                          // Tutorial button
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              print('🎓 Tutorial button pressed');
+                              // Scroll to top before showing tutorial
+                              _feedScrollController.animateTo(
+                                0,
+                                duration: const Duration(milliseconds: 300),
+                                curve: Curves.easeInOut,
+                              );
+                              setState(() {
+                                _showTutorial = true;
+                              });
+                            },
+                            icon: const Icon(Icons.help_outline),
+                            label: const Text('Tutorial'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue.shade700,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(25),
+                              ),
+                            ),
+                          ),
+
+                          // ... rest of your homepage content
+                        ],
+                      ),
+                    )
+
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+  
+            ElevatedButton.icon(
+              onPressed: () {
+                print('🎓 Tutorial button pressed');
+                print('📍 Current _showTutorial state: $_showTutorial');
+                setState(() {
+                  _showTutorial = true;
+                });
+                print('✅ Tutorial state set to: $_showTutorial');
+              },
+              icon: const Icon(Icons.help_outline),
+              label: const Text('Tutorial'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue.shade700,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(25),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 30),
+
+            // 🔥 UPDATED: Feed Section with Infinite Scroll
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.public, color: Colors.green, size: 24),
+                      const SizedBox(width: 12),
+                      const Text(
+                        "Community Feed",
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Spacer(),
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.blue.shade200),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.public, size: 14, color: Colors.blue.shade700),
+                            SizedBox(width: 4),
+                            Text(
+                              'Public',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.blue.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Post Composer
+                  _buildPostComposer(),
+                  const SizedBox(height: 16),
+                  
+                  // 🔥 NEW: Feed with infinite scroll
+                  if (_isLoadingFeed && _feedPosts.isEmpty)
+                    const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(20),
+                        child: CircularProgressIndicator(),
+                      ),
+                    )
+                  else if (_feedPosts.isEmpty)
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          children: [
+                            Icon(Icons.rss_feed, size: 64, color: Colors.grey.shade400),
+                            const SizedBox(height: 12),
+                            Text(
+                              'No posts yet',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Be the first to share something!',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey.shade500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else
+                    // 🔥 Feed list with scroll controller
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: NeverScrollableScrollPhysics(), // Parent scrolls
+                      itemCount: _feedPosts.length + (_hasMorePosts ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        // Show loading indicator at bottom if loading more
+                        if (index == _feedPosts.length) {
+                          return Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: _isLoadingMorePosts
+                                  ? CircularProgressIndicator()
+                                  : SizedBox.shrink(),
+                            ),
+                          );
+                        }
+                        
+                        return _buildFeedPost(_feedPosts[index]);
+                      },
+                    ),
+                    
+                  // End of feed indicator
+                  if (!_hasMorePosts && _feedPosts.isNotEmpty)
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Text(
+                          '✨ You\'ve seen all posts',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 30),
+
+            if (_scannedRecipes.isNotEmpty)
+              PremiumGate(
+                feature: PremiumFeature.viewRecipes,
+                featureName: "Recipe Details",
+                featureDescription:
+                    "View full recipe details with ingredients and directions.",
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: const [
+                          Icon(Icons.restaurant, color: Colors.green, size: 24),
+                          SizedBox(width: 12),
+                          Text(
+                            "Recipe Suggestions",
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ..._scannedRecipes.map((recipe) =>
+                        _buildScannedRecipeCard(recipe)),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
   Widget _buildScanningView() {
     return Container(
       decoration: BoxDecoration(
@@ -4917,7 +5143,7 @@ class _HomePageState extends State<HomePage>
                     ),
                   const SizedBox(width: 8),
 
-                  if (_currentNutrition != null && _nutritionText.isNotEmpty)
+                  if (_currentNutrition != null)
                     ElevatedButton.icon(
                       onPressed: _saveCurrentIngredient,
                       icon: const Icon(Icons.bookmark_add),
@@ -4928,9 +5154,8 @@ class _HomePageState extends State<HomePage>
                       ),
                     ),
                   const SizedBox(width: 8),
-
-                  if (_nutritionText.isNotEmpty)
-                    ElevatedButton.icon(
+                    if (_currentNutrition != null)                    
+                      ElevatedButton.icon(
                       onPressed: _addNutritionToGroceryList,
                       icon: const Icon(Icons.add_shopping_cart),
                       label: const Text("Grocery List"),
@@ -4984,23 +5209,15 @@ class _HomePageState extends State<HomePage>
                 ),
               ),
 
-            if (_nutritionText.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade700,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  _nutritionText,
-                  style: const TextStyle(color: Colors.white),
-                ),
+            if (_currentNutrition != null && _liverHealthScore != null)
+              ScanResultsCard(
+                productName: _currentNutrition!.productName,
+                fat: _currentNutrition!.fat,
+                sodium: _currentNutrition!.sodium,
+                sugar: _currentNutrition!.sugar,
+                calories: _currentNutrition!.calories,
+                liverScore: _liverHealthScore!,
               ),
-
-            const SizedBox(height: 20),
-
-            if (_showLiverBar && _liverHealthScore != null)
-              LiverHealthBar(healthScore: _liverHealthScore!),
 
             const SizedBox(height: 20),
 

@@ -9,6 +9,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'config/app_config.dart';
 import 'pages/badge_debug_page.dart';
 import 'pages/tracker_page.dart';
+import 'pages/onboarding_page.dart';
 
 // 🔥 Firebase imports
 import 'package:firebase_core/firebase_core.dart';
@@ -55,10 +56,10 @@ void main() async {
   try {
     // Load environment variables FIRST
     await dotenv.load(fileName: ".env");
-    
+
     // Validate configuration
     AppConfig.validateConfig();
-    
+
     // 🔥 CRITICAL FIX: Platform-specific Firebase initialization
     // iOS/iPadOS: Firebase auto-initializes, do NOT manually set up
     // Android: Manual initialization required
@@ -72,7 +73,7 @@ void main() async {
 
         // Register background message handler (Android only)
         FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-        
+
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('✅ Background FCM handler registered (Android)');
         }
@@ -86,7 +87,7 @@ void main() async {
             profileUpdateStreamController.add(null);
           }
         });
-        
+
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('✅ Foreground FCM listener registered (Android)');
         }
@@ -99,7 +100,7 @@ void main() async {
           sound: true,
           provisional: false,
         );
-        
+
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('📱 Notification permission: ${settings.authorizationStatus}');
         }
@@ -326,13 +327,33 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   bool _isPremium = false;
+  bool _isReady = false;
+  bool _showOnboarding = false;
   late final AppLinks _appLinks;
 
   @override
   void initState() {
     super.initState();
-    _checkPremiumStatus();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await _checkPremiumStatus();
+    await _checkOnboarding();
+    if (mounted) {
+      setState(() => _isReady = true);
+    }
     _initAppLinks();
+  }
+
+  Future<void> _checkOnboarding() async {
+    final completed = await OnboardingPage.hasCompletedOnboarding();
+    final user = Supabase.instance.client.auth.currentUser;
+    // Only show onboarding if user is authenticated (we have their data)
+    // and they haven't seen it before
+    if (!completed && user != null) {
+      _showOnboarding = true;
+    }
   }
 
   Future<void> _initAppLinks() async {
@@ -388,7 +409,7 @@ class _MyAppState extends State<MyApp> {
       if (AppConfig.enableDebugPrints) {
         AppConfig.debugPrint('❌ Error handling reset-password link: $e');
       }
-      
+
       // Show user-friendly error if mounted
       if (mounted) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -409,11 +430,11 @@ class _MyAppState extends State<MyApp> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final userId = Supabase.instance.client.auth.currentUser?.id;
-      
+
       if (AppConfig.enableDebugPrints && userId != null) {
         AppConfig.debugPrint('Current user ID: $userId');
       }
-      
+
       if (mounted) {
         setState(() {
           _isPremium = prefs.getBool('isPremiumUser') ?? false;
@@ -423,7 +444,7 @@ class _MyAppState extends State<MyApp> {
       if (AppConfig.enableDebugPrints) {
         AppConfig.debugPrint('Error checking premium status: $e');
       }
-      
+
       // Default to free tier on error
       if (mounted) {
         setState(() {
@@ -453,6 +474,7 @@ class _MyAppState extends State<MyApp> {
       routes: {
         '/login': (context) => const LoginPage(),
         '/home': (context) => const HomePage(),
+        '/onboarding': (context) => const OnboardingPage(),
         '/profile': (context) => ProfileScreen(favoriteRecipes: const []),
         '/purchase': (context) => const PremiumPage(),
         '/grocery-list': (context) => const GroceryListPage(),
@@ -478,7 +500,7 @@ class _MyAppState extends State<MyApp> {
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('Unknown route requested: ${settings.name}');
         }
-        
+
         // User-friendly 404 page
         return MaterialPageRoute(
           builder: (context) => Scaffold(
@@ -570,6 +592,10 @@ class _MyAppState extends State<MyApp> {
       if (user != null) {
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('✅ User authenticated: ${user.email}');
+        }
+        // Show onboarding for first-time users
+        if (_showOnboarding) {
+          return '/onboarding';
         }
         return '/home';
       } else {
