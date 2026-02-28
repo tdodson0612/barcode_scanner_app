@@ -1,18 +1,14 @@
 // lib/models/tracker_entry.dart
 
+/// Kept for backward-compatible JSON deserialization of existing stored data.
+/// New code uses List<Map<String, dynamic>> with a 'notes' key instead.
 class SupplementEntry {
   final String name;
   final String amount; // e.g. "500mg", "1 tablet", "2 capsules"
 
-  SupplementEntry({
-    required this.name,
-    required this.amount,
-  });
+  SupplementEntry({required this.name, required this.amount});
 
-  Map<String, dynamic> toJson() => {
-        'name': name,
-        'amount': amount,
-      };
+  Map<String, dynamic> toJson() => {'name': name, 'amount': amount};
 
   factory SupplementEntry.fromJson(Map<String, dynamic> json) =>
       SupplementEntry(
@@ -20,93 +16,96 @@ class SupplementEntry {
         amount: json['amount'] as String? ?? '',
       );
 
-  SupplementEntry copyWith({String? name, String? amount}) => SupplementEntry(
-        name: name ?? this.name,
-        amount: amount ?? this.amount,
-      );
+  SupplementEntry copyWith({String? name, String? amount}) =>
+      SupplementEntry(name: name ?? this.name, amount: amount ?? this.amount);
 }
 
 class TrackerEntry {
   final String date; // YYYY-MM-DD format
   final List<Map<String, dynamic>> meals;
+  final List<Map<String, dynamic>> supplements;
   final String? exercise;
   final String? waterIntake;
   final double? weight; // Weight in kg (nullable for days without weight tracking)
   final int dailyScore;
-  final List<SupplementEntry> supplements;
 
   TrackerEntry({
     required this.date,
     this.meals = const [],
+    this.supplements = const [],
     this.exercise,
     this.waterIntake,
     this.weight,
     required this.dailyScore,
-    this.supplements = const [],
   });
 
-  // Convenience getter for meal count
+  // Convenience getters
   int get mealCount => meals.length;
+  int get supplementCount => supplements.length;
 
   // ========================================
   // JSON SERIALIZATION
   // ========================================
 
-  /// Convert to JSON for storage
   Map<String, dynamic> toJson() {
     return {
       'date': date,
       'meals': meals,
+      'supplements': supplements,
       'exercise': exercise,
       'waterIntake': waterIntake,
       'weight': weight,
       'dailyScore': dailyScore,
-      'supplements': supplements.map((s) => s.toJson()).toList(),
     };
   }
 
-  /// Create from JSON
   factory TrackerEntry.fromJson(Map<String, dynamic> json) {
     return TrackerEntry(
       date: json['date'] as String,
       meals: json['meals'] != null
           ? List<Map<String, dynamic>>.from(
-              (json['meals'] as List).map((m) => Map<String, dynamic>.from(m)))
+              (json['meals'] as List).map((m) => Map<String, dynamic>.from(m)),
+            )
+          : [],
+      // Handle both old SupplementEntry-style JSON and new Map-style JSON
+      supplements: json['supplements'] != null
+          ? List<Map<String, dynamic>>.from(
+              (json['supplements'] as List).map((s) {
+                final map = Map<String, dynamic>.from(s as Map);
+                // If old format had no 'notes' key, add it as empty string
+                map.putIfAbsent('notes', () => '');
+                return map;
+              }),
+            )
           : [],
       exercise: json['exercise'] as String?,
       waterIntake: json['waterIntake'] as String?,
-      weight:
-          json['weight'] != null ? (json['weight'] as num).toDouble() : null,
+      weight: json['weight'] != null ? (json['weight'] as num).toDouble() : null,
       dailyScore: json['dailyScore'] as int? ?? 0,
-      supplements: json['supplements'] != null
-          ? List<SupplementEntry>.from(
-              (json['supplements'] as List)
-                  .map((s) => SupplementEntry.fromJson(Map<String, dynamic>.from(s))))
-          : [],
     );
   }
 
   // ========================================
-  // COPY WITH (for updates)
+  // COPY WITH
   // ========================================
 
   TrackerEntry copyWith({
     String? date,
     List<Map<String, dynamic>>? meals,
+    List<Map<String, dynamic>>? supplements,
     String? exercise,
     String? waterIntake,
     double? weight,
     int? dailyScore,
-    List<SupplementEntry>? supplements,
   }) {
     return TrackerEntry(
       date: date ?? this.date,
       meals: meals ?? this.meals,
+      supplements: supplements ?? this.supplements,
       exercise: exercise ?? this.exercise,
       waterIntake: waterIntake ?? this.waterIntake,
       weight: weight ?? this.weight,
       dailyScore: dailyScore ?? this.dailyScore,
-      supplements: supplements ?? this.supplements,
     );
   }
 

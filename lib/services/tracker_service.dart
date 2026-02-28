@@ -16,11 +16,11 @@ class TrackerService {
 
   static const Map<String, double> dailyTargets = {
     'calories': 2000,
-    'fat': 55,         // grams — liver diet keeps fat moderate
-    'sodium': 1500,    // mg — low sodium for liver health
-    'sugar': 30,       // grams — low sugar
-    'protein': 60,     // grams — adequate protein
-    'fiber': 25,       // grams — high fiber good for liver
+    'fat': 55,          // grams — liver diet keeps fat moderate
+    'sodium': 1500,     // mg — low sodium for liver health
+    'sugar': 30,        // grams — low sugar
+    'protein': 60,      // grams — adequate protein
+    'fiber': 25,        // grams — high fiber good for liver
     'saturatedFat': 15, // grams — limit saturated fat
   };
 
@@ -38,6 +38,7 @@ class TrackerService {
   // DISCLAIMER MANAGEMENT
   // ========================================
 
+  /// Check if user has accepted the tracker disclaimer
   static Future<bool> hasAcceptedDisclaimer() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -48,6 +49,7 @@ class TrackerService {
     }
   }
 
+  /// Mark disclaimer as accepted
   static Future<void> acceptDisclaimer() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -71,6 +73,7 @@ class TrackerService {
   // ENTRY MANAGEMENT
   // ========================================
 
+  /// Get all tracker entries for current user
   static Future<List<TrackerEntry>> getEntries(String userId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -80,9 +83,11 @@ class TrackerService {
       if (jsonString == null) return [];
 
       final List<dynamic> jsonList = json.decode(jsonString);
-      final entries =
-          jsonList.map((json) => TrackerEntry.fromJson(json)).toList();
+      final entries = jsonList
+          .map((json) => TrackerEntry.fromJson(json))
+          .toList();
 
+      // Sort by date descending (newest first)
       entries.sort((a, b) => b.date.compareTo(a.date));
 
       AppConfig.debugPrint('📋 Loaded ${entries.length} tracker entries');
@@ -93,25 +98,51 @@ class TrackerService {
     }
   }
 
+  /// Save a tracker entry with verification
   static Future<void> saveEntry(String userId, TrackerEntry entry) async {
     try {
+      AppConfig.debugPrint('💾 Saving tracker entry for ${entry.date}');
+
       final entries = await getEntries(userId);
+
+      // Remove existing entry for this date if it exists
       entries.removeWhere((e) => e.date == entry.date);
+
+      // Add new entry
       entries.add(entry);
 
+      // Save back to storage
       final prefs = await SharedPreferences.getInstance();
       final key = _getStorageKey(userId);
-      final jsonString =
-          json.encode(entries.map((e) => e.toJson()).toList());
-      await prefs.setString(key, jsonString);
+      final jsonString = json.encode(entries.map((e) => e.toJson()).toList());
 
-      AppConfig.debugPrint('✅ Saved tracker entry for ${entry.date}');
+      // ✅ VERIFY SAVE OPERATION
+      final saveSuccess = await prefs.setString(key, jsonString);
+
+      if (!saveSuccess) {
+        throw Exception('Failed to save entry to SharedPreferences');
+      }
+
+      // ✅ VERIFY DATA WAS ACTUALLY SAVED
+      final savedData = prefs.getString(key);
+      if (savedData == null || savedData != jsonString) {
+        throw Exception('Data verification failed - saved data does not match');
+      }
+
+      AppConfig.debugPrint('✅ Saved and verified tracker entry for ${entry.date}');
+      AppConfig.debugPrint('   Weight: ${entry.weight?.toStringAsFixed(1) ?? 'none'} kg');
+      AppConfig.debugPrint('   Meals: ${entry.meals.length}');
+      AppConfig.debugPrint('   Supplements: ${entry.supplements.length}');
+      AppConfig.debugPrint('   Exercise: ${entry.exercise ?? 'none'}');
+      AppConfig.debugPrint('   Water: ${entry.waterIntake ?? 'none'}');
+      AppConfig.debugPrint('   Score: ${entry.dailyScore}');
     } catch (e) {
       AppConfig.debugPrint('❌ Error saving entry: $e');
-      throw Exception('Failed to save tracker entry');
+      throw Exception('Failed to save tracker entry: $e');
     }
   }
 
+  /// Delete a tracker entry
   static Future<void> deleteEntry(String userId, String date) async {
     try {
       final entries = await getEntries(userId);
@@ -119,8 +150,7 @@ class TrackerService {
 
       final prefs = await SharedPreferences.getInstance();
       final key = _getStorageKey(userId);
-      final jsonString =
-          json.encode(entries.map((e) => e.toJson()).toList());
+      final jsonString = json.encode(entries.map((e) => e.toJson()).toList());
       await prefs.setString(key, jsonString);
 
       AppConfig.debugPrint('✅ Deleted tracker entry for $date');
@@ -130,13 +160,28 @@ class TrackerService {
     }
   }
 
-  static Future<TrackerEntry?> getEntryForDate(
-      String userId, String date) async {
+  /// Get entry for a specific date with detailed logging (returns null if not found)
+  static Future<TrackerEntry?> getEntryForDate(String userId, String date) async {
     try {
       final entries = await getEntries(userId);
+
+      AppConfig.debugPrint('📋 Looking for entry on $date');
+      AppConfig.debugPrint('   Total entries in storage: ${entries.length}');
+
       try {
-        return entries.firstWhere((e) => e.date == date);
+        final entry = entries.firstWhere((e) => e.date == date);
+
+        AppConfig.debugPrint('✅ Found entry for $date:');
+        AppConfig.debugPrint('   Weight: ${entry.weight?.toStringAsFixed(1) ?? 'none'} kg');
+        AppConfig.debugPrint('   Meals: ${entry.meals.length}');
+        AppConfig.debugPrint('   Supplements: ${entry.supplements.length}');
+        AppConfig.debugPrint('   Exercise: ${entry.exercise ?? 'none'}');
+        AppConfig.debugPrint('   Water: ${entry.waterIntake ?? 'none'}');
+        AppConfig.debugPrint('   Score: ${entry.dailyScore}');
+
+        return entry;
       } catch (e) {
+        AppConfig.debugPrint('ℹ️ No entry found for $date');
         return null;
       }
     } catch (e) {
@@ -183,8 +228,6 @@ class TrackerService {
   }
 
   /// Returns gap analysis: positive = need more, negative = over limit
-  /// For upper-limit nutrients (fat, sodium, sugar): negative = over budget
-  /// For lower-target nutrients (protein, fiber, calories): positive = still need more
   static Map<String, double> calculateNutritionGaps(
       List<Map<String, dynamic>> meals) {
     final totals = calculateNutritionTotals(meals);
@@ -193,14 +236,7 @@ class TrackerService {
     for (final nutrient in dailyTargets.keys) {
       final target = dailyTargets[nutrient]!;
       final actual = totals[nutrient] ?? 0;
-
-      if (_upperLimitNutrients.contains(nutrient)) {
-        // Negative means over the limit (bad), positive means under limit (good)
-        gaps[nutrient] = target - actual;
-      } else {
-        // Positive means still need more, negative means over target
-        gaps[nutrient] = target - actual;
-      }
+      gaps[nutrient] = target - actual;
     }
 
     return gaps;
@@ -223,7 +259,7 @@ class TrackerService {
         } else if (ratio >= 0.7) {
           status[nutrient] = 'good';
         } else {
-          status[nutrient] = 'low'; // unusually low for these isn't really "low" but fine
+          status[nutrient] = 'low';
         }
       } else {
         // Lower target nutrients
@@ -244,9 +280,10 @@ class TrackerService {
   // SCORE CALCULATION
   // ========================================
 
+  /// Get today's score (returns null if no entry exists)
   static Future<int?> getTodayScore(String userId) async {
     try {
-      final today = DateTime.now().toString().split(' ')[0];
+      final today = DateTime.now().toString().split(' ')[0]; // YYYY-MM-DD
       final entry = await getEntryForDate(userId, today);
       if (entry == null) return null;
       return entry.dailyScore;
@@ -256,6 +293,7 @@ class TrackerService {
     }
   }
 
+  /// Get weekly average score (last 7 days, returns null if no entries)
   static Future<int?> getWeeklyScore(String userId) async {
     try {
       final entries = await getEntries(userId);
@@ -276,8 +314,8 @@ class TrackerService {
 
       if (recentEntries.isEmpty) return null;
 
-      final totalScore =
-          recentEntries.fold<int>(0, (sum, entry) => sum + entry.dailyScore);
+      final totalScore = recentEntries.fold<int>(
+          0, (sum, entry) => sum + entry.dailyScore);
       final average = (totalScore / recentEntries.length).round();
 
       AppConfig.debugPrint(
@@ -289,6 +327,7 @@ class TrackerService {
     }
   }
 
+  /// Get weekly average weight (last 7 days, returns null if no entries with weight)
   static Future<double?> getWeeklyWeightAverage(String userId) async {
     try {
       final entries = await getEntries(userId);
@@ -315,7 +354,7 @@ class TrackerService {
       final average = totalWeight / recentEntriesWithWeight.length;
 
       AppConfig.debugPrint(
-          '⚖️ Weekly weight average: ${average.toStringAsFixed(1)}kg');
+          '⚖️ Weekly weight average: ${average.toStringAsFixed(1)}kg (from ${recentEntriesWithWeight.length} days)');
       return average;
     } catch (e) {
       AppConfig.debugPrint('❌ Error calculating weekly weight: $e');
@@ -323,9 +362,11 @@ class TrackerService {
     }
   }
 
+  /// Get last recorded weight
   static Future<double?> getLastWeight(String userId) async {
     try {
       final entries = await getEntries(userId);
+      // Entries are already sorted by date descending
       for (final entry in entries) {
         if (entry.weight != null) return entry.weight;
       }
@@ -340,6 +381,7 @@ class TrackerService {
   // AUTO-FILL MISSING WEIGHT ENTRIES
   // ========================================
 
+  /// Auto-fill missing weight days with previous weight to maintain streak
   static Future<void> autoFillMissingWeights(String userId) async {
     try {
       final entries = await getEntries(userId);
@@ -349,7 +391,10 @@ class TrackerService {
           .toList()
         ..sort((a, b) => a.date.compareTo(b.date));
 
-      if (entriesWithWeight.isEmpty) return;
+      if (entriesWithWeight.isEmpty) {
+        AppConfig.debugPrint('ℹ️ No weight entries to auto-fill from');
+        return;
+      }
 
       final firstDate = DateTime.parse(entriesWithWeight.first.date);
       final lastDate = DateTime.parse(entriesWithWeight.last.date);
@@ -366,8 +411,7 @@ class TrackerService {
           orElse: () => TrackerEntry(date: dateString, dailyScore: 0),
         );
 
-        if (existingEntry.date == dateString &&
-            existingEntry.weight != null) {
+        if (existingEntry.date == dateString && existingEntry.weight != null) {
           lastKnownWeight = existingEntry.weight;
         } else if (existingEntry.date == dateString &&
             existingEntry.weight == null) {
@@ -376,6 +420,8 @@ class TrackerService {
                 existingEntry.copyWith(weight: lastKnownWeight);
             await saveEntry(userId, updatedEntry);
             filledCount++;
+            AppConfig.debugPrint(
+                '✅ Auto-filled weight for $dateString: ${lastKnownWeight}kg');
           }
         } else if (lastKnownWeight != null) {
           final newEntry = TrackerEntry(
@@ -386,12 +432,16 @@ class TrackerService {
           );
           await saveEntry(userId, newEntry);
           filledCount++;
+          AppConfig.debugPrint(
+              '✅ Created entry with auto-filled weight for $dateString: ${lastKnownWeight}kg');
         }
       }
 
       if (filledCount > 0) {
         AppConfig.debugPrint(
             '🎉 Auto-filled $filledCount missing weight entries');
+      } else {
+        AppConfig.debugPrint('ℹ️ No missing weight entries to fill');
       }
     } catch (e) {
       AppConfig.debugPrint('❌ Error auto-filling weights: $e');
@@ -399,6 +449,7 @@ class TrackerService {
     }
   }
 
+  /// Check if user has consecutive weight entries (for streak tracking)
   static Future<int> getWeightStreak(String userId) async {
     try {
       final entries = await getEntries(userId);
@@ -438,6 +489,7 @@ class TrackerService {
 
   static const String _DAY7_POPUP_KEY = 'day7_popup_shown_';
 
+  /// Check if user has reached 7-day weight streak
   static Future<bool> hasReachedDay7Streak(String userId) async {
     try {
       final streak = await getWeightStreak(userId);
@@ -448,6 +500,7 @@ class TrackerService {
     }
   }
 
+  /// Check if day 7 popup has been shown
   static Future<bool> hasShownDay7Popup(String userId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -458,6 +511,7 @@ class TrackerService {
     }
   }
 
+  /// Mark day 7 popup as shown
   static Future<void> markDay7PopupShown(String userId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -472,6 +526,9 @@ class TrackerService {
   // WEEK-OVER-WEEK WEIGHT LOSS (DAY 14+)
   // ========================================
 
+  /// Calculate weight loss from week 1 avg to week 2 avg
+  /// Returns null if user hasn't completed 14 days
+  /// Returns positive number for weight loss, negative for weight gain
   static Future<double?> getWeekOverWeekWeightLoss(String userId) async {
     try {
       final entries = await getEntries(userId);
@@ -481,7 +538,11 @@ class TrackerService {
           .toList()
         ..sort((a, b) => a.date.compareTo(b.date));
 
-      if (entriesWithWeight.length < 14) return null;
+      if (entriesWithWeight.length < 14) {
+        AppConfig.debugPrint(
+            'ℹ️ Not enough data for week-over-week (need 14 days, have ${entriesWithWeight.length})');
+        return null;
+      }
 
       final week1Entries = entriesWithWeight.take(7).toList();
       final week2Entries = entriesWithWeight.skip(7).take(7).toList();
@@ -498,8 +559,12 @@ class TrackerService {
           week2Entries.length;
 
       final difference = week1Avg - week2Avg;
+
+      AppConfig.debugPrint('📊 Week 1 avg: ${week1Avg.toStringAsFixed(1)}kg');
+      AppConfig.debugPrint('📊 Week 2 avg: ${week2Avg.toStringAsFixed(1)}kg');
       AppConfig.debugPrint(
-          '📊 Week-over-week weight change: ${difference.toStringAsFixed(1)}kg');
+          '📊 Weight change: ${difference.toStringAsFixed(1)}kg');
+
       return difference;
     } catch (e) {
       AppConfig.debugPrint('❌ Error calculating week-over-week: $e');
@@ -507,10 +572,7 @@ class TrackerService {
     }
   }
 
-  // ========================================
-  // SCORE CALCULATION
-  // ========================================
-
+  /// Calculate daily score from meals with disease-aware logic
   static int calculateDailyScore({
     required List<Map<String, dynamic>> meals,
     String? diseaseType,
@@ -538,12 +600,14 @@ class TrackerService {
 
     int finalScore = avgMealScore;
 
+    // Exercise bonus: +5 per 30 minutes, max +10
     if (exercise != null && exercise.isNotEmpty) {
       final exerciseMinutes = _parseExerciseMinutes(exercise);
       final exerciseBonus = ((exerciseMinutes / 30) * 5).clamp(0, 10).round();
       finalScore += exerciseBonus;
     }
 
+    // Water bonus: +2 per 4 cups, max +5
     if (waterIntake != null && waterIntake.isNotEmpty) {
       final waterCups = _parseWaterCups(waterIntake);
       final waterBonus = ((waterCups / 4) * 2).clamp(0, 5).round();
@@ -589,6 +653,7 @@ class TrackerService {
   // DATA MANAGEMENT
   // ========================================
 
+  /// Get last 7 days of entries for graph
   static Future<List<TrackerEntry>> getLastSevenDays(String userId) async {
     try {
       final entries = await getEntries(userId);
@@ -609,6 +674,7 @@ class TrackerService {
     }
   }
 
+  /// Clear all tracker data (for reset/logout)
   static Future<void> clearAllData(String userId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -616,6 +682,43 @@ class TrackerService {
       AppConfig.debugPrint('✅ Cleared all tracker data');
     } catch (e) {
       AppConfig.debugPrint('❌ Error clearing tracker data: $e');
+    }
+  }
+
+  // ========================================
+  // DEBUG HELPER
+  // ========================================
+
+  /// Debug method to check storage state
+  static Future<void> debugStorageState(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = _getStorageKey(userId);
+      final jsonString = prefs.getString(key);
+
+      if (jsonString == null) {
+        AppConfig.debugPrint('🔍 DEBUG: No data in storage for user $userId');
+        return;
+      }
+
+      final List<dynamic> jsonList = json.decode(jsonString);
+      final entries = jsonList
+          .map((json) => TrackerEntry.fromJson(json))
+          .toList();
+
+      AppConfig.debugPrint('🔍 DEBUG: Storage state for user $userId');
+      AppConfig.debugPrint('   Total entries: ${entries.length}');
+
+      for (final entry in entries.take(5)) {
+        AppConfig.debugPrint(
+            '   - ${entry.date}: ${entry.weight?.toStringAsFixed(1) ?? 'no weight'} kg, ${entry.meals.length} meals, score ${entry.dailyScore}');
+      }
+
+      if (entries.length > 5) {
+        AppConfig.debugPrint('   ... and ${entries.length - 5} more entries');
+      }
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error checking storage state: $e');
     }
   }
 }
