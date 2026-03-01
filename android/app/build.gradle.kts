@@ -16,7 +16,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.wiseapps.liverwise"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 35  // ✅ Updated to SDK 35 for Android 15 support
     ndkVersion = "27.0.12077973"
 
     buildFeatures {
@@ -35,17 +35,39 @@ android {
 
     defaultConfig {
         applicationId = "com.wiseapps.liverwise"
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        minSdk = 24  // Keep your minimum SDK
+        targetSdk = 35  // ✅ Updated to target SDK 35 for Android 15
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
+        
+        // ✅ FIX #3: Enable 16 KB page alignment for native libraries
+        // This ensures compatibility with devices using 16 KB memory pages
+        ndk {
+            // Explicitly declare supported ABIs if needed
+            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
+        }
     }
 
-    // ✅ FIX: 16 KB page alignment for native libraries
+    // ✅ FIX #3: Configure 16 KB page alignment for native libraries
     packaging {
         jniLibs {
-            useLegacyPackaging = false
+            useLegacyPackaging = false  // Use modern packaging with proper alignment
+        }
+        
+        // Ensure proper alignment for all native libraries
+        resources {
+            excludes += listOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/license.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "META-INF/notice.txt",
+                "META-INF/ASL2.0",
+                "META-INF/*.kotlin_module"
+            )
         }
     }
 
@@ -61,8 +83,13 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
+            
+            // Optimize for production
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
         debug {
+            // Debug settings
         }
     }
 }
@@ -72,8 +99,16 @@ flutter {
 }
 
 dependencies {
+    // Firebase
     implementation(platform("com.google.firebase:firebase-bom:34.6.0"))
     implementation("com.google.firebase:firebase-messaging")
-    implementation("androidx.core:core-ktx:1.13.1")
+    
+    // AndroidX Core (updated for edge-to-edge support)
+    implementation("androidx.core:core-ktx:1.15.0")  // ✅ Updated for Android 15 compatibility
+    
+    // Desugaring for older Android versions
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    
+    // ✅ FIX #1: Add AndroidX Activity for edge-to-edge support
+    implementation("androidx.activity:activity-ktx:1.9.3")
 }

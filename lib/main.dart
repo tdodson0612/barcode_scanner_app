@@ -1,7 +1,8 @@
-// main.dart - FIXED: iOS/iPad-compatible Firebase initialization
+// main.dart - FIXED: iOS/iPad-compatible Firebase initialization + Android 15 Edge-to-Edge
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';  // ✅ ADDED for SystemChrome
 import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -50,6 +51,25 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // ✅ NEW: Configure system UI for edge-to-edge display on Android 15+
+  // This fixes Google Play Console warnings about deprecated edge-to-edge APIs
+  if (!kIsWeb && Platform.isAndroid) {
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,  // Transparent status bar
+        statusBarIconBrightness: Brightness.dark,  // Dark icons on light background
+        systemNavigationBarColor: Colors.transparent,  // Transparent nav bar
+        systemNavigationBarIconBrightness: Brightness.dark,
+      ),
+    );
+    
+    // Enable edge-to-edge mode (draws behind system bars)
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.edgeToEdge,  // ✅ Modern API for edge-to-edge (replaces deprecated APIs)
+    );
+  }
+  
   MobileAds.instance.initialize();
 
   try {
