@@ -16,7 +16,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.wiseapps.liverwise"
-    compileSdk = 35  // ✅ Updated to SDK 35 for Android 15 support
+    compileSdk = 36  // ✅ Updated to SDK 35 for Android 15 support
     ndkVersion = "27.0.12077973"
 
     buildFeatures {
