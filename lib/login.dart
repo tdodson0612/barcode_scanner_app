@@ -8,12 +8,16 @@
 //    genuine auth errors. Previously ALL exceptions from _handleSignUp()
 //    were routed through _handleAuthError(), which showed "Hmm, who are you?"
 //    even when the real problem was a database profile-creation failure.
+//
+// 🐛 TEMP: Debug test button added (_runDebugTest) — REMOVE before Play Store upload.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'services/auth_service.dart';
 import 'services/error_handling_service.dart';
+import 'services/profile_data_access.dart';
 import 'config/app_config.dart';
 import 'utils/screen_utils.dart';
 
@@ -115,7 +119,7 @@ class _LoginPageState extends State<LoginPage> {
   void _handleError(dynamic error, {bool isSignUp = false}) {
     final errorMessage = error.toString();
 
-    // Profile setup failures (signup only) — show a dedicated, non-auth dialog
+    // Profile setup failures (signup only) — dedicated non-auth dialog
     if (error is ProfileSetupException ||
         errorMessage.contains('profile setup failed') ||
         errorMessage.contains('finish setting up your profile') ||
@@ -130,13 +134,11 @@ class _LoginPageState extends State<LoginPage> {
             'setting up your profile.',
       );
       // Switch to sign-in mode so the user can immediately log in
-      if (mounted) {
-        setState(() => _isLogin = true);
-      }
+      if (mounted) setState(() => _isLogin = true);
       return;
     }
 
-    // Map error message → user-friendly string for the snackbar
+    // Map error message → user-friendly string
     final String userFriendlyMessage;
 
     if (errorMessage.contains('Incorrect email or password') ||
@@ -163,14 +165,13 @@ class _LoginPageState extends State<LoginPage> {
       userFriendlyMessage =
           'Session error detected. Please try the "Clear Session" button below.';
     } else if (isSignUp) {
-      // Generic signup failure — do NOT show auth dialog
       userFriendlyMessage =
           'Unable to create account right now. Please try again.';
     } else {
       userFriendlyMessage = 'Unable to sign in right now. Please try again.';
     }
 
-    // Decide category: only use authError for genuine login auth failures
+    // Only use authError for genuine login auth failures
     final category = (!isSignUp &&
             (errorMessage.contains('Incorrect email') ||
                 errorMessage.contains('verify your email') ||
@@ -199,11 +200,10 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       AppConfig.debugPrint('🔐 Login attempt for: $trimmedEmail');
-
       if (_rememberMe) await _saveCredentials();
 
       // Auto-clear stale session before every login attempt.
-      // This fixes the Android "Hmm, who are you?" loop caused by leftover
+      // Fixes the Android "Hmm, who are you?" loop caused by leftover
       // session tokens from a previous sign-out.
       AppConfig.debugPrint('🧹 Auto-clearing session before login...');
       await AuthService.forceResetSession().catchError((e) {
@@ -273,9 +273,8 @@ class _LoginPageState extends State<LoginPage> {
         password: _password,
       ).timeout(
         const Duration(seconds: 30),
-        onTimeout: () => throw Exception(
-          'Connection timed out. Please try again.',
-        ),
+        onTimeout: () =>
+            throw Exception('Connection timed out. Please try again.'),
       );
 
       if (response.user == null) {
@@ -284,7 +283,6 @@ class _LoginPageState extends State<LoginPage> {
 
       AppConfig.debugPrint('✅ Sign up successful: ${response.user?.email}');
       if (_rememberMe) await _saveCredentials();
-
       if (!mounted) return;
 
       if (response.session == null) {
@@ -306,7 +304,7 @@ class _LoginPageState extends State<LoginPage> {
           });
         }
       } else {
-        // Immediate session (no email confirmation required)
+        // Immediate session — no email confirmation required
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Welcome to LiverWise!'),
@@ -314,9 +312,7 @@ class _LoginPageState extends State<LoginPage> {
           ),
         );
         await Future.delayed(const Duration(milliseconds: 1500));
-        if (mounted) {
-          Navigator.pushReplacementNamed(context, '/home');
-        }
+        if (mounted) Navigator.pushReplacementNamed(context, '/home');
       }
     } catch (e) {
       AppConfig.debugPrint('❌ Sign up error: $e');
@@ -357,23 +353,20 @@ class _LoginPageState extends State<LoginPage> {
     }
     if (resetEmail.isEmpty) {
       ErrorHandlingService.showSimpleError(
-        context,
-        'Please enter your email address',
-      );
+          context, 'Please enter your email address');
       return;
     }
     if (!_isValidEmail(resetEmail)) {
       ErrorHandlingService.showSimpleError(
-        context,
-        'Please enter a valid email address',
-      );
+          context, 'Please enter a valid email address');
       return;
     }
 
     try {
       await AuthService.resetPassword(resetEmail).timeout(
         const Duration(seconds: 10),
-        onTimeout: () => throw Exception('Request timed out. Please try again.'),
+        onTimeout: () =>
+            throw Exception('Request timed out. Please try again.'),
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -406,9 +399,7 @@ class _LoginPageState extends State<LoginPage> {
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Row(
           children: [
             Icon(Icons.lock_reset, color: Colors.blue),
@@ -429,16 +420,14 @@ class _LoginPageState extends State<LoginPage> {
               controller: controller,
               decoration: InputDecoration(
                 labelText: 'Email Address',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 prefixIcon: const Icon(Icons.email_outlined),
               ),
               keyboardType: TextInputType.emailAddress,
               autofocus: true,
               textInputAction: TextInputAction.done,
-              onSubmitted: (v) =>
-                  Navigator.pop(dialogContext, v.trim()),
+              onSubmitted: (v) => Navigator.pop(dialogContext, v.trim()),
             ),
           ],
         ),
@@ -501,6 +490,111 @@ class _LoginPageState extends State<LoginPage> {
       if (value != _passwordController.text) return 'Passwords do not match';
     }
     return null;
+  }
+
+  // --------------------------------------------------------
+  // 🐛 TEMPORARY DEBUG METHOD — REMOVE BEFORE PLAY STORE UPLOAD
+  // --------------------------------------------------------
+
+  Future<void> _runDebugTest() async {
+    final testEmail =
+        'debugtest_${DateTime.now().millisecondsSinceEpoch}@test.com';
+    const testPassword = 'test1234';
+
+    AppConfig.debugPrint('');
+    AppConfig.debugPrint('=== DEBUG SIGNUP TEST START ===');
+    AppConfig.debugPrint('Test email: $testEmail');
+
+    setState(() => _isLoading = true);
+
+    // Step 1: Check Supabase connection & current session state
+    try {
+      AppConfig.debugPrint('');
+      AppConfig.debugPrint('1️⃣  Checking Supabase connection...');
+      final user = Supabase.instance.client.auth.currentUser;
+      final session = Supabase.instance.client.auth.currentSession;
+      AppConfig.debugPrint('   Current user:    ${user?.email ?? "none"}');
+      AppConfig.debugPrint(
+          '   Session active:  ${session != null ? "YES" : "NO"}');
+      if (session != null) {
+        AppConfig.debugPrint(
+            '   Access token:    ${session.accessToken.substring(0, 20)}...');
+      }
+      AppConfig.debugPrint('   ✅ Supabase reachable');
+    } catch (e) {
+      AppConfig.debugPrint('   ❌ Supabase connection check failed: $e');
+    }
+
+    // Step 2: Test full signup flow (auth user + profile creation)
+    try {
+      AppConfig.debugPrint('');
+      AppConfig.debugPrint('2️⃣  Testing AuthService.signUp()...');
+      final response = await AuthService.signUp(
+        email: testEmail,
+        password: testPassword,
+      );
+      AppConfig.debugPrint(
+          '   Auth user ID:  ${response.user?.id ?? "null"}');
+      AppConfig.debugPrint(
+          '   Session:       ${response.session != null ? "created ✅" : "null (email confirm required)"}');
+      AppConfig.debugPrint('   ✅ Signup + profile creation succeeded');
+    } catch (e) {
+      AppConfig.debugPrint('   ❌ Signup failed');
+      AppConfig.debugPrint('   Error type:    ${e.runtimeType}');
+      AppConfig.debugPrint('   Error message: $e');
+    }
+
+    // Step 3: Test profile fetch for currently logged-in user (if any)
+    try {
+      AppConfig.debugPrint('');
+      AppConfig.debugPrint('3️⃣  Testing ProfileDataAccess.getUserProfile()...');
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      if (uid != null) {
+        final profile = await ProfileDataAccess.getUserProfile(uid);
+        AppConfig.debugPrint(
+            '   Profile found:  ${profile != null ? "YES ✅" : "NO ❌"}');
+        if (profile != null) {
+          AppConfig.debugPrint('   username:       ${profile['username']}');
+          AppConfig.debugPrint('   is_premium:     ${profile['is_premium']}');
+          AppConfig.debugPrint('   xp:             ${profile['xp']}');
+          AppConfig.debugPrint('   level:          ${profile['level']}');
+        }
+      } else {
+        AppConfig.debugPrint(
+            '   ⚠️  No logged-in user — skipping profile fetch');
+      }
+    } catch (e) {
+      AppConfig.debugPrint('   ❌ Profile fetch failed');
+      AppConfig.debugPrint('   Error type:    ${e.runtimeType}');
+      AppConfig.debugPrint('   Error message: $e');
+    }
+
+    // Step 4: Test forceResetSession (used by "Clear Session" button)
+    try {
+      AppConfig.debugPrint('');
+      AppConfig.debugPrint('4️⃣  Testing AuthService.forceResetSession()...');
+      await AuthService.forceResetSession();
+      AppConfig.debugPrint('   ✅ Session reset succeeded');
+      AppConfig.debugPrint(
+          '   User after reset: ${Supabase.instance.client.auth.currentUser?.email ?? "none (correct)"}');
+    } catch (e) {
+      AppConfig.debugPrint('   ❌ Session reset failed: $e');
+    }
+
+    AppConfig.debugPrint('');
+    AppConfig.debugPrint('=== DEBUG SIGNUP TEST END ===');
+    AppConfig.debugPrint('');
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Debug test complete — check VS Code console'),
+          backgroundColor: Colors.purple,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   // --------------------------------------------------------
@@ -599,8 +693,7 @@ class _LoginPageState extends State<LoginPage> {
                               controller: _emailController,
                               decoration: InputDecoration(
                                 labelText: 'Email Address',
-                                prefixIcon:
-                                    const Icon(Icons.email_outlined),
+                                prefixIcon: const Icon(Icons.email_outlined),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
@@ -622,8 +715,7 @@ class _LoginPageState extends State<LoginPage> {
                               controller: _passwordController,
                               decoration: InputDecoration(
                                 labelText: 'Password',
-                                prefixIcon:
-                                    const Icon(Icons.lock_outline),
+                                prefixIcon: const Icon(Icons.lock_outline),
                                 suffixIcon: IconButton(
                                   icon: Icon(
                                     _obscurePassword
@@ -661,8 +753,7 @@ class _LoginPageState extends State<LoginPage> {
                                 controller: _confirmPasswordController,
                                 decoration: InputDecoration(
                                   labelText: 'Confirm Password',
-                                  prefixIcon:
-                                      const Icon(Icons.lock_outline),
+                                  prefixIcon: const Icon(Icons.lock_outline),
                                   suffixIcon: IconButton(
                                     icon: Icon(
                                       _obscureConfirmPassword
@@ -686,7 +777,7 @@ class _LoginPageState extends State<LoginPage> {
                                 autocorrect: false,
                                 enableSuggestions: false,
                                 autofillHints: const [
-                                  AutofillHints.newPassword,
+                                  AutofillHints.newPassword
                                 ],
                                 onFieldSubmitted: (_) => _submitForm(),
                               ),
@@ -701,9 +792,8 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                                 borderRadius: BorderRadius.circular(8),
                                 child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 4,
-                                  ),
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 4),
                                   child: Row(
                                     children: [
                                       Checkbox(
@@ -735,16 +825,14 @@ class _LoginPageState extends State<LoginPage> {
                             SizedBox(
                               height: ScreenUtils.getButtonHeight(context),
                               child: ElevatedButton(
-                                onPressed:
-                                    _isLoading ? null : _submitForm,
+                                onPressed: _isLoading ? null : _submitForm,
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.green.shade600,
                                   foregroundColor: Colors.white,
                                   disabledBackgroundColor:
                                       Colors.grey.shade300,
                                   shape: RoundedRectangleBorder(
-                                    borderRadius:
-                                        BorderRadius.circular(12),
+                                    borderRadius: BorderRadius.circular(12),
                                   ),
                                   elevation: 2,
                                 ),
@@ -756,8 +844,7 @@ class _LoginPageState extends State<LoginPage> {
                                           const SizedBox(
                                             width: 20,
                                             height: 20,
-                                            child:
-                                                CircularProgressIndicator(
+                                            child: CircularProgressIndicator(
                                               color: Colors.white,
                                               strokeWidth: 2,
                                             ),
@@ -768,12 +855,10 @@ class _LoginPageState extends State<LoginPage> {
                                                 ? 'Signing In...'
                                                 : 'Creating Account...',
                                             style: TextStyle(
-                                              fontSize:
-                                                  (isTablet ? 18 : 16) *
-                                                      ScreenUtils
-                                                          .getFontSizeMultiplier(
-                                                        context,
-                                                      ),
+                                              fontSize: (isTablet ? 18 : 16) *
+                                                  ScreenUtils
+                                                      .getFontSizeMultiplier(
+                                                          context),
                                             ),
                                           ),
                                         ],
@@ -784,45 +869,37 @@ class _LoginPageState extends State<LoginPage> {
                                             : 'Create Account',
                                         style: TextStyle(
                                           fontSize: (isTablet ? 18 : 16) *
-                                              ScreenUtils
-                                                  .getFontSizeMultiplier(
-                                            context,
-                                          ),
+                                              ScreenUtils.getFontSizeMultiplier(
+                                                  context),
                                           fontWeight: FontWeight.w600,
                                         ),
                                       ),
                               ),
                             ),
 
-                            // Forgot password + Clear session (login only)
+                            // Forgot password + Clear session + Debug (login only)
                             if (_isLogin) ...[
                               const SizedBox(height: 16),
                               TextButton(
-                                onPressed: _isLoading
-                                    ? null
-                                    : _sendPasswordResetEmail,
+                                onPressed:
+                                    _isLoading ? null : _sendPasswordResetEmail,
                                 child: Text(
                                   'Forgot your password?',
                                   style: TextStyle(
                                     color: Colors.green.shade600,
                                     fontSize: (isTablet ? 16 : 14) *
                                         ScreenUtils.getFontSizeMultiplier(
-                                          context,
-                                        ),
+                                            context),
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ),
                               const SizedBox(height: 8),
                               TextButton.icon(
-                                onPressed: _isLoading
-                                    ? null
-                                    : _forceResetSession,
-                                icon: const Icon(
-                                  Icons.refresh,
-                                  size: 16,
-                                  color: Colors.orange,
-                                ),
+                                onPressed:
+                                    _isLoading ? null : _forceResetSession,
+                                icon: const Icon(Icons.refresh,
+                                    size: 16, color: Colors.orange),
                                 label: Text(
                                   'Having login issues? Clear session',
                                   style: TextStyle(
@@ -831,6 +908,22 @@ class _LoginPageState extends State<LoginPage> {
                                   ),
                                 ),
                               ),
+
+                              // 🐛 TEMP DEBUG BUTTON — REMOVE BEFORE PLAY STORE UPLOAD
+                              if (AppConfig.enableDebugPrints) ...[
+                                const SizedBox(height: 8),
+                                TextButton.icon(
+                                  onPressed:
+                                      _isLoading ? null : _runDebugTest,
+                                  icon: const Icon(Icons.bug_report,
+                                      size: 16, color: Colors.purple),
+                                  label: const Text(
+                                    '🐛 Debug: Test Signup Flow',
+                                    style: TextStyle(
+                                        fontSize: 11, color: Colors.purple),
+                                  ),
+                                ),
+                              ],
                             ],
 
                             SizedBox(height: isTablet ? 32 : 24),
@@ -841,8 +934,7 @@ class _LoginPageState extends State<LoginPage> {
                                 const Expanded(child: Divider()),
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                  ),
+                                      horizontal: 16),
                                   child: Text(
                                     'OR',
                                     style: TextStyle(
@@ -867,8 +959,7 @@ class _LoginPageState extends State<LoginPage> {
                                   style: TextStyle(
                                     fontSize: (isTablet ? 16 : 14) *
                                         ScreenUtils.getFontSizeMultiplier(
-                                          context,
-                                        ),
+                                            context),
                                     color: Colors.grey.shade800,
                                   ),
                                   children: [
@@ -878,9 +969,8 @@ class _LoginPageState extends State<LoginPage> {
                                           : 'Already have an account? ',
                                     ),
                                     TextSpan(
-                                      text: _isLogin
-                                          ? 'Create one'
-                                          : 'Sign in',
+                                      text:
+                                          _isLogin ? 'Create one' : 'Sign in',
                                       style: TextStyle(
                                         color: Colors.green.shade600,
                                         fontWeight: FontWeight.w600,
