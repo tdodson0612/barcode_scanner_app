@@ -1,7 +1,13 @@
 // lib/login.dart
+//
 // ✅ Auto-clears session before every login attempt to fix Android sign-in loop
 // ✅ No competing navigation
 // ✅ Proper iOS auth flow
+//
+// 🔧 FIX: _handleAuthError now distinguishes ProfileSetupException from
+//    genuine auth errors. Previously ALL exceptions from _handleSignUp()
+//    were routed through _handleAuthError(), which showed "Hmm, who are you?"
+//    even when the real problem was a database profile-creation failure.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -10,7 +16,6 @@ import 'services/auth_service.dart';
 import 'services/error_handling_service.dart';
 import 'config/app_config.dart';
 import 'utils/screen_utils.dart';
-
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -53,7 +58,6 @@ class _LoginPageState extends State<LoginPage> {
       final prefs = await SharedPreferences.getInstance();
       final rememberMe = prefs.getBool('remember_me') ?? true;
       final savedEmail = prefs.getString('saved_email') ?? '';
-
       if (mounted) {
         setState(() {
           _rememberMe = rememberMe;
@@ -72,7 +76,6 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('remember_me', _rememberMe);
-
       if (_rememberMe) {
         await prefs.setString('saved_email', _email.trim());
       } else {
@@ -85,11 +88,8 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _submitForm() async {
     FocusScope.of(context).unfocus();
-
     if (!_formKey.currentState!.validate()) return;
-
     _formKey.currentState!.save();
-
     if (!mounted) return;
 
     setState(() => _isLoading = true);
@@ -103,25 +103,54 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
-        _handleAuthError(e);
+        _handleError(e, isSignUp: !_isLogin);
       }
     }
   }
 
-  void _handleAuthError(dynamic error) {
-    String errorMessage = error.toString();
-    String userFriendlyMessage;
+  /// Route errors to the right handler based on their type and origin.
+  ///
+  /// This replaces the old _handleAuthError() which treated ALL signup
+  /// failures as auth errors and showed "Hmm, who are you?".
+  void _handleError(dynamic error, {bool isSignUp = false}) {
+    final errorMessage = error.toString();
 
-    if (errorMessage.contains('Invalid login credentials') ||
+    // Profile setup failures (signup only) — show a dedicated, non-auth dialog
+    if (error is ProfileSetupException ||
+        errorMessage.contains('profile setup failed') ||
+        errorMessage.contains('finish setting up your profile') ||
+        errorMessage.contains('failed to create user profile')) {
+      ErrorHandlingService.handleError(
+        context: context,
+        error: error,
+        category: ErrorHandlingService.profileSetupError,
+        showDialog: true,
+        customMessage:
+            'Your account was created! Please sign in and we\'ll finish '
+            'setting up your profile.',
+      );
+      // Switch to sign-in mode so the user can immediately log in
+      if (mounted) {
+        setState(() => _isLogin = true);
+      }
+      return;
+    }
+
+    // Map error message → user-friendly string for the snackbar
+    final String userFriendlyMessage;
+
+    if (errorMessage.contains('Incorrect email or password') ||
+        errorMessage.contains('Invalid login credentials') ||
         errorMessage.contains('Invalid email or password')) {
       userFriendlyMessage = 'Incorrect email or password. Please try again.';
-    } else if (errorMessage.contains('Email not confirmed')) {
+    } else if (errorMessage.contains('verify your email') ||
+        errorMessage.contains('Email not confirmed')) {
       userFriendlyMessage =
           'Please verify your email first. Check your inbox for the confirmation link.';
-    } else if (errorMessage.contains('User already registered')) {
+    } else if (errorMessage.contains('already registered')) {
       userFriendlyMessage =
           'This email is already registered. Try signing in instead.';
-    } else if (errorMessage.contains('Password should be at least 6 characters')) {
+    } else if (errorMessage.contains('at least 6 characters')) {
       userFriendlyMessage = 'Password must be at least 6 characters long.';
     } else if (errorMessage.contains('timeout') ||
         errorMessage.contains('network')) {
@@ -129,23 +158,34 @@ class _LoginPageState extends State<LoginPage> {
           'Connection timed out. Please check your internet and try again.';
     } else if (errorMessage.contains('Passwords do not match')) {
       userFriendlyMessage = 'The passwords you entered don\'t match.';
-    } else if (errorMessage.contains('row-level security') ||
-        errorMessage.contains('RLS')) {
-      userFriendlyMessage =
-          'Account setup failed. Please contact support if this continues.';
-    } else if (errorMessage.contains('session') ||
-        errorMessage.contains('expired')) {
+    } else if (errorMessage.contains('login has expired') ||
+        errorMessage.contains('Clear Session')) {
       userFriendlyMessage =
           'Session error detected. Please try the "Clear Session" button below.';
+    } else if (isSignUp) {
+      // Generic signup failure — do NOT show auth dialog
+      userFriendlyMessage =
+          'Unable to create account right now. Please try again.';
     } else {
       userFriendlyMessage = 'Unable to sign in right now. Please try again.';
     }
 
+    // Decide category: only use authError for genuine login auth failures
+    final category = (!isSignUp &&
+            (errorMessage.contains('Incorrect email') ||
+                errorMessage.contains('verify your email') ||
+                errorMessage.contains('login has expired')))
+        ? ErrorHandlingService.authError
+        : (isSignUp
+            ? ErrorHandlingService.unknownError
+            : ErrorHandlingService.authError);
+
     ErrorHandlingService.handleError(
       context: context,
       error: error,
-      category: ErrorHandlingService.authError,
+      category: category,
       showSnackBar: true,
+      showDialog: false,
       customMessage: userFriendlyMessage,
       onRetry: _submitForm,
     );
@@ -154,20 +194,17 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _handleLogin() async {
     try {
       final trimmedEmail = _email.trim().toLowerCase();
-
       if (trimmedEmail.isEmpty) {
         throw Exception('Please enter your email address');
       }
 
       AppConfig.debugPrint('🔐 Login attempt for: $trimmedEmail');
 
-      if (_rememberMe) {
-        await _saveCredentials();
-      }
+      if (_rememberMe) await _saveCredentials();
 
-      // ✅ AUTO CLEAR SESSION: Wipe any stale/corrupt local session state
-      // before every login attempt. This fixes the Android "Hmm, who are you?"
-      // loop caused by leftover session tokens from a previous sign-out.
+      // Auto-clear stale session before every login attempt.
+      // This fixes the Android "Hmm, who are you?" loop caused by leftover
+      // session tokens from a previous sign-out.
       AppConfig.debugPrint('🧹 Auto-clearing session before login...');
       await AuthService.forceResetSession().catchError((e) {
         AppConfig.debugPrint('⚠️ Auto session clear failed (continuing): $e');
@@ -178,22 +215,19 @@ class _LoginPageState extends State<LoginPage> {
         password: _password,
       ).timeout(
         const Duration(seconds: 20),
-        onTimeout: () {
-          throw Exception(
-              'Login timed out. Please check your connection and try again.');
-        },
+        onTimeout: () => throw Exception(
+          'Login timed out. Please check your connection and try again.',
+        ),
       );
 
-      // Verify we actually got authenticated
       if (response.user == null || response.session == null) {
         throw Exception('Login failed - no user session created');
       }
 
       AppConfig.debugPrint('✅ Login successful: ${response.user?.email}');
 
-      // Longer wait for iOS auth state to settle
+      // Give iOS auth state time to settle
       await Future.delayed(const Duration(milliseconds: 1500));
-
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -211,21 +245,14 @@ class _LoginPageState extends State<LoginPage> {
       );
 
       await Future.delayed(const Duration(milliseconds: 300));
-
       if (!mounted) return;
 
-      Navigator.pushNamedAndRemoveUntil(
-        context,
-        '/home',
-        (route) => false,
-      );
+      Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false);
     } catch (e) {
       AppConfig.debugPrint('❌ Login error: $e');
       rethrow;
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -233,86 +260,76 @@ class _LoginPageState extends State<LoginPage> {
     if (_password != _confirmPassword) {
       throw Exception('Passwords do not match');
     }
-
     if (_password.length < 6) {
       throw Exception('Password should be at least 6 characters');
     }
 
     try {
       final trimmedEmail = _email.trim().toLowerCase();
-
       AppConfig.debugPrint('📝 Sign up attempt for: $trimmedEmail');
 
       final response = await AuthService.signUp(
         email: trimmedEmail,
         password: _password,
       ).timeout(
-        const Duration(seconds: 20),
-        onTimeout: () {
-          throw Exception('Connection timed out. Please try again.');
-        },
+        const Duration(seconds: 30),
+        onTimeout: () => throw Exception(
+          'Connection timed out. Please try again.',
+        ),
       );
 
-      if (response.user != null) {
-        AppConfig.debugPrint('✅ Sign up successful: ${response.user?.email}');
+      if (response.user == null) {
+        throw Exception('Sign up failed. Please try again.');
+      }
 
-        if (_rememberMe) {
-          await _saveCredentials();
-        }
+      AppConfig.debugPrint('✅ Sign up successful: ${response.user?.email}');
+      if (_rememberMe) await _saveCredentials();
 
+      if (!mounted) return;
+
+      if (response.session == null) {
+        // Email confirmation required
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Account created! Please check your email to confirm your account.',
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 5),
+          ),
+        );
+        await Future.delayed(const Duration(seconds: 2));
         if (mounted) {
-          if (response.session == null) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                    'Account created! Please check your email to confirm your account.'),
-                backgroundColor: Colors.green,
-                duration: Duration(seconds: 4),
-              ),
-            );
-
-            await Future.delayed(const Duration(seconds: 2));
-
-            if (mounted) {
-              setState(() {
-                _isLogin = true;
-                _isLoading = false;
-              });
-            }
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Welcome to LiverWise!'),
-                backgroundColor: Colors.green,
-              ),
-            );
-
-            await Future.delayed(const Duration(milliseconds: 1500));
-
-            if (mounted) {
-              Navigator.pushReplacementNamed(context, '/home');
-            }
-          }
+          setState(() {
+            _isLogin = true;
+            _isLoading = false;
+          });
         }
       } else {
-        throw Exception('Sign up failed. Please try again.');
+        // Immediate session (no email confirmation required)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Welcome to LiverWise!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        await Future.delayed(const Duration(milliseconds: 1500));
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/home');
+        }
       }
     } catch (e) {
       AppConfig.debugPrint('❌ Sign up error: $e');
       rethrow;
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _forceResetSession() async {
     try {
       setState(() => _isLoading = true);
-
       await AuthService.forceResetSession();
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -329,44 +346,41 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _sendPasswordResetEmail() async {
     String resetEmail = _emailController.text.trim().toLowerCase();
-
     if (resetEmail.isEmpty) {
       resetEmail = await _showEmailInputDialog() ?? '';
     }
-
     if (resetEmail.isEmpty) {
       ErrorHandlingService.showSimpleError(
-          context, 'Please enter your email address');
+        context,
+        'Please enter your email address',
+      );
       return;
     }
-
     if (!_isValidEmail(resetEmail)) {
       ErrorHandlingService.showSimpleError(
-          context, 'Please enter a valid email address');
+        context,
+        'Please enter a valid email address',
+      );
       return;
     }
 
     try {
       await AuthService.resetPassword(resetEmail).timeout(
         const Duration(seconds: 10),
-        onTimeout: () {
-          throw Exception('Request timed out. Please try again.');
-        },
+        onTimeout: () => throw Exception('Request timed out. Please try again.'),
       );
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-                'Password reset link sent! Check your email and spam folder.'),
+              'Password reset link sent! Check your email and spam folder.',
+            ),
             backgroundColor: Colors.green,
             duration: Duration(seconds: 4),
           ),
@@ -388,7 +402,6 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<String?> _showEmailInputDialog() async {
     final controller = TextEditingController();
-
     return showDialog<String>(
       context: context,
       barrierDismissible: true,
@@ -424,8 +437,8 @@ class _LoginPageState extends State<LoginPage> {
               keyboardType: TextInputType.emailAddress,
               autofocus: true,
               textInputAction: TextInputAction.done,
-              onSubmitted: (value) =>
-                  Navigator.pop(dialogContext, value.trim()),
+              onSubmitted: (v) =>
+                  Navigator.pop(dialogContext, v.trim()),
             ),
           ],
         ),
@@ -452,41 +465,30 @@ class _LoginPageState extends State<LoginPage> {
     setState(() {
       _isLogin = !_isLogin;
       _formKey.currentState?.reset();
-
       final savedEmail = _emailController.text;
       _emailController.clear();
       _passwordController.clear();
       _confirmPasswordController.clear();
-
       if (savedEmail.isNotEmpty && _isValidEmail(savedEmail)) {
         _emailController.text = savedEmail;
         _email = savedEmail;
       }
-
       _password = '';
       _confirmPassword = '';
     });
   }
 
-  bool _isValidEmail(String email) {
-    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-        .hasMatch(email.trim());
-  }
+  bool _isValidEmail(String email) =>
+      RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email.trim());
 
   String? _validateEmail(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Email is required';
-    }
-    if (!_isValidEmail(value)) {
-      return 'Please enter a valid email address';
-    }
+    if (value == null || value.trim().isEmpty) return 'Email is required';
+    if (!_isValidEmail(value)) return 'Please enter a valid email address';
     return null;
   }
 
   String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Password is required';
-    }
+    if (value == null || value.isEmpty) return 'Password is required';
     if (!_isLogin && value.length < 6) {
       return 'Password must be at least 6 characters';
     }
@@ -495,15 +497,15 @@ class _LoginPageState extends State<LoginPage> {
 
   String? _validateConfirmPassword(String? value) {
     if (!_isLogin) {
-      if (value == null || value.isEmpty) {
-        return 'Please confirm your password';
-      }
-      if (value != _passwordController.text) {
-        return 'Passwords do not match';
-      }
+      if (value == null || value.isEmpty) return 'Please confirm your password';
+      if (value != _passwordController.text) return 'Passwords do not match';
     }
     return null;
   }
+
+  // --------------------------------------------------------
+  // BUILD
+  // --------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -535,8 +537,9 @@ class _LoginPageState extends State<LoginPage> {
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding:
-                  EdgeInsets.all(ScreenUtils.getResponsivePadding(context)),
+              padding: EdgeInsets.all(
+                ScreenUtils.getResponsivePadding(context),
+              ),
               child: Container(
                 constraints: BoxConstraints(maxWidth: maxWidth),
                 child: Card(
@@ -547,7 +550,8 @@ class _LoginPageState extends State<LoginPage> {
                   color: Colors.white.withOpacity(0.95),
                   child: Padding(
                     padding: EdgeInsets.all(
-                        ScreenUtils.getResponsivePadding(context)),
+                      ScreenUtils.getResponsivePadding(context),
+                    ),
                     child: AutofillGroup(
                       child: Form(
                         key: _formKey,
@@ -557,8 +561,10 @@ class _LoginPageState extends State<LoginPage> {
                           children: [
                             Icon(
                               Icons.restaurant_menu,
-                              size: ScreenUtils.getIconSize(context,
-                                  baseSize: 64),
+                              size: ScreenUtils.getIconSize(
+                                context,
+                                baseSize: 64,
+                              ),
                               color: Colors.green.shade600,
                             ),
                             SizedBox(height: isTablet ? 24 : 16),
@@ -588,11 +594,11 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                             SizedBox(height: isTablet ? 40 : 32),
 
-                            // Email Field
+                            // Email
                             TextFormField(
                               controller: _emailController,
                               decoration: InputDecoration(
-                                labelText: "Email Address",
+                                labelText: 'Email Address',
                                 prefixIcon:
                                     const Icon(Icons.email_outlined),
                                 border: OutlineInputBorder(
@@ -604,24 +610,26 @@ class _LoginPageState extends State<LoginPage> {
                               keyboardType: TextInputType.emailAddress,
                               textInputAction: TextInputAction.next,
                               validator: _validateEmail,
-                              onSaved: (val) => _email = val?.trim() ?? '',
+                              onSaved: (v) => _email = v?.trim() ?? '',
                               autocorrect: false,
                               enableSuggestions: false,
                               autofillHints: const [AutofillHints.email],
                             ),
                             const SizedBox(height: 16),
 
-                            // Password Field
+                            // Password
                             TextFormField(
                               controller: _passwordController,
                               decoration: InputDecoration(
-                                labelText: "Password",
+                                labelText: 'Password',
                                 prefixIcon:
                                     const Icon(Icons.lock_outline),
                                 suffixIcon: IconButton(
-                                  icon: Icon(_obscurePassword
-                                      ? Icons.visibility_outlined
-                                      : Icons.visibility_off_outlined),
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_outlined
+                                        : Icons.visibility_off_outlined,
+                                  ),
                                   onPressed: () => setState(() =>
                                       _obscurePassword = !_obscurePassword),
                                 ),
@@ -636,7 +644,7 @@ class _LoginPageState extends State<LoginPage> {
                                   ? TextInputAction.done
                                   : TextInputAction.next,
                               validator: _validatePassword,
-                              onSaved: (val) => _password = val ?? '',
+                              onSaved: (v) => _password = v ?? '',
                               autocorrect: false,
                               enableSuggestions: false,
                               autofillHints: _isLogin
@@ -646,19 +654,21 @@ class _LoginPageState extends State<LoginPage> {
                                   _isLogin ? (_) => _submitForm() : null,
                             ),
 
-                            // Confirm Password (Sign Up Only)
+                            // Confirm password (sign-up only)
                             if (!_isLogin) ...[
                               const SizedBox(height: 16),
                               TextFormField(
                                 controller: _confirmPasswordController,
                                 decoration: InputDecoration(
-                                  labelText: "Confirm Password",
+                                  labelText: 'Confirm Password',
                                   prefixIcon:
                                       const Icon(Icons.lock_outline),
                                   suffixIcon: IconButton(
-                                    icon: Icon(_obscureConfirmPassword
-                                        ? Icons.visibility_outlined
-                                        : Icons.visibility_off_outlined),
+                                    icon: Icon(
+                                      _obscureConfirmPassword
+                                          ? Icons.visibility_outlined
+                                          : Icons.visibility_off_outlined,
+                                    ),
                                     onPressed: () => setState(() =>
                                         _obscureConfirmPassword =
                                             !_obscureConfirmPassword),
@@ -672,33 +682,35 @@ class _LoginPageState extends State<LoginPage> {
                                 obscureText: _obscureConfirmPassword,
                                 textInputAction: TextInputAction.done,
                                 validator: _validateConfirmPassword,
-                                onSaved: (val) =>
-                                    _confirmPassword = val ?? '',
+                                onSaved: (v) => _confirmPassword = v ?? '',
                                 autocorrect: false,
                                 enableSuggestions: false,
                                 autofillHints: const [
-                                  AutofillHints.newPassword
+                                  AutofillHints.newPassword,
                                 ],
                                 onFieldSubmitted: (_) => _submitForm(),
                               ),
                             ],
 
-                            // Remember Me (Login Only)
+                            // Remember me (login only)
                             if (_isLogin) ...[
                               const SizedBox(height: 16),
                               InkWell(
                                 onTap: () => setState(
-                                    () => _rememberMe = !_rememberMe),
+                                  () => _rememberMe = !_rememberMe,
+                                ),
                                 borderRadius: BorderRadius.circular(8),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
-                                      vertical: 4),
+                                    vertical: 4,
+                                  ),
                                   child: Row(
                                     children: [
                                       Checkbox(
                                         value: _rememberMe,
-                                        onChanged: (value) => setState(() =>
-                                            _rememberMe = value ?? true),
+                                        onChanged: (v) => setState(
+                                          () => _rememberMe = v ?? true,
+                                        ),
                                         activeColor: Colors.green.shade600,
                                       ),
                                       Expanded(
@@ -719,10 +731,9 @@ class _LoginPageState extends State<LoginPage> {
 
                             SizedBox(height: isTablet ? 32 : 24),
 
-                            // Submit Button
+                            // Submit button
                             SizedBox(
-                              height:
-                                  ScreenUtils.getButtonHeight(context),
+                              height: ScreenUtils.getButtonHeight(context),
                               child: ElevatedButton(
                                 onPressed:
                                     _isLoading ? null : _submitForm,
@@ -757,12 +768,12 @@ class _LoginPageState extends State<LoginPage> {
                                                 ? 'Signing In...'
                                                 : 'Creating Account...',
                                             style: TextStyle(
-                                              fontSize: (isTablet
-                                                          ? 18
-                                                          : 16) *
-                                                  ScreenUtils
-                                                      .getFontSizeMultiplier(
-                                                          context),
+                                              fontSize:
+                                                  (isTablet ? 18 : 16) *
+                                                      ScreenUtils
+                                                          .getFontSizeMultiplier(
+                                                        context,
+                                                      ),
                                             ),
                                           ),
                                         ],
@@ -772,18 +783,18 @@ class _LoginPageState extends State<LoginPage> {
                                             ? 'Sign In'
                                             : 'Create Account',
                                         style: TextStyle(
-                                          fontSize:
-                                              (isTablet ? 18 : 16) *
-                                                  ScreenUtils
-                                                      .getFontSizeMultiplier(
-                                                          context),
+                                          fontSize: (isTablet ? 18 : 16) *
+                                              ScreenUtils
+                                                  .getFontSizeMultiplier(
+                                            context,
+                                          ),
                                           fontWeight: FontWeight.w600,
                                         ),
                                       ),
                               ),
                             ),
 
-                            // Forgot Password (Login Only)
+                            // Forgot password + Clear session (login only)
                             if (_isLogin) ...[
                               const SizedBox(height: 16),
                               TextButton(
@@ -791,27 +802,29 @@ class _LoginPageState extends State<LoginPage> {
                                     ? null
                                     : _sendPasswordResetEmail,
                                 child: Text(
-                                  "Forgot your password?",
+                                  'Forgot your password?',
                                   style: TextStyle(
                                     color: Colors.green.shade600,
                                     fontSize: (isTablet ? 16 : 14) *
                                         ScreenUtils.getFontSizeMultiplier(
-                                            context),
+                                          context,
+                                        ),
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ),
-
-                              // Clear Session Button
                               const SizedBox(height: 8),
                               TextButton.icon(
                                 onPressed: _isLoading
                                     ? null
                                     : _forceResetSession,
-                                icon: const Icon(Icons.refresh,
-                                    size: 16, color: Colors.orange),
+                                icon: const Icon(
+                                  Icons.refresh,
+                                  size: 16,
+                                  color: Colors.orange,
+                                ),
                                 label: Text(
-                                  "Having login issues? Clear session",
+                                  'Having login issues? Clear session',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: Colors.orange.shade700,
@@ -822,13 +835,14 @@ class _LoginPageState extends State<LoginPage> {
 
                             SizedBox(height: isTablet ? 32 : 24),
 
-                            // Divider
+                            // OR divider
                             Row(
                               children: [
                                 const Expanded(child: Divider()),
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 16),
+                                    horizontal: 16,
+                                  ),
                                   child: Text(
                                     'OR',
                                     style: TextStyle(
@@ -844,24 +858,24 @@ class _LoginPageState extends State<LoginPage> {
 
                             SizedBox(height: isTablet ? 32 : 24),
 
-                            // Toggle Mode Button
+                            // Toggle sign-in / sign-up
                             TextButton(
-                              onPressed:
-                                  _isLoading ? null : _toggleMode,
+                              onPressed: _isLoading ? null : _toggleMode,
                               child: RichText(
                                 textAlign: TextAlign.center,
                                 text: TextSpan(
                                   style: TextStyle(
                                     fontSize: (isTablet ? 16 : 14) *
                                         ScreenUtils.getFontSizeMultiplier(
-                                            context),
+                                          context,
+                                        ),
                                     color: Colors.grey.shade800,
                                   ),
                                   children: [
                                     TextSpan(
                                       text: _isLogin
                                           ? "Don't have an account? "
-                                          : "Already have an account? ",
+                                          : 'Already have an account? ',
                                     ),
                                     TextSpan(
                                       text: _isLogin

@@ -1,12 +1,22 @@
 // lib/services/auth_service.dart
+//
 // ✅ Simplified login flow - no complex retry logic
 // ✅ Proper session handling for iOS and Android
 // ✅ Non-blocking profile setup
 // ✅ FCM only on Android (iOS disabled)
-// 🔧 FIX: Removed _clearExistingSession() from signIn() - was breaking
-//         Android login after sign-out by calling signOut() on a null session,
-//         producing a session/token error that the error handler misclassified
-//         as an auth error, causing the "Hmm, who are you?" loop.
+//
+// 🔧 FIX (login loop): Removed _clearExistingSession() from signIn().
+//    Calling signOut() before login when there is no active session
+//    produces a session/token error on Android that the error handler
+//    misclassified as an auth error, causing the "Hmm, who are you?" loop.
+//
+// 🔧 FIX (signup "Hmm who are you?"): Profile creation failure during
+//    signup was being caught and re-thrown as a generic Exception whose
+//    message contained the word "failed", which _isAuthError() matched
+//    on 'token'/'session'/'expired' substrings in unrelated Supabase
+//    errors. The error classification is now more precise, and signup
+//    errors that are NOT auth errors surface a dedicated message instead
+//    of the auth-error dialog.
 
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -14,7 +24,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 
-// Database access
 import 'profile_data_access.dart';
 import 'database_service_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -36,8 +45,7 @@ class AuthService {
   static String? get currentUserId => currentUser?.id;
 
   static String? get currentUsername {
-    final username = currentUser?.userMetadata?['username'] as String?;
-    return username;
+    return currentUser?.userMetadata?['username'] as String?;
   }
 
   static Stream<AuthState> get authStateChanges =>
@@ -56,8 +64,7 @@ class AuthService {
   }
 
   static bool _isDefaultPremiumEmail(String email) {
-    final normalizedEmail = email.trim().toLowerCase();
-    return _premiumEmails.contains(normalizedEmail);
+    return _premiumEmails.contains(email.trim().toLowerCase());
   }
 
   // --------------------------------------------------------
@@ -66,7 +73,6 @@ class AuthService {
 
   static Future<String?> fetchCurrentUsername() async {
     if (currentUserId == null) return null;
-
     try {
       final profile = await ProfileDataAccess.getUserProfile(currentUserId!);
       return profile?['username'] as String?;
@@ -86,16 +92,10 @@ class AuthService {
   }) async {
     try {
       final normalizedEmail = email.trim().toLowerCase();
-
       AppConfig.debugPrint('🔐 Starting login for: $normalizedEmail');
 
-      // NOTE: _clearExistingSession() intentionally removed here.
-      // Calling signOut() before login when there is no active session
-      // produces a session/token error on Android that causes the
-      // "Hmm, who are you?" error loop. forceResetSession() in the UI
-      // handles the edge case where a stale session needs clearing.
-
-      AppConfig.debugPrint('🔑 Calling Supabase signIn...');
+      // NOTE: _clearExistingSession() intentionally not called here.
+      // See file header for explanation.
 
       final response = await _supabase.auth
           .signInWithPassword(
@@ -104,13 +104,11 @@ class AuthService {
           )
           .timeout(
             const Duration(seconds: 30),
-            onTimeout: () {
-              throw Exception(
-                  'Login timed out. Please check your connection and try again.');
-            },
+            onTimeout: () => throw Exception(
+              'Login timed out. Please check your connection and try again.',
+            ),
           );
 
-      // Verify we got a valid session
       if (response.user == null || response.session == null) {
         throw Exception('Login failed - no session created');
       }
@@ -118,24 +116,25 @@ class AuthService {
       final userId = response.user!.id;
       AppConfig.debugPrint('✅ Supabase login successful: $userId');
 
-      // Setup profile (non-blocking, best effort)
-      _setupProfileAfterLogin(userId, normalizedEmail).catchError((error) {
-        AppConfig.debugPrint('⚠️ Profile setup failed (continuing): $error');
+      // Non-blocking best-effort tasks
+      _setupProfileAfterLogin(userId, normalizedEmail).catchError((e) {
+        AppConfig.debugPrint('⚠️ Profile setup failed (continuing): $e');
       });
 
-      // Setup FCM (Android only, non-blocking)
-      _setupFcmAfterLogin(userId).catchError((error) {
-        AppConfig.debugPrint('⚠️ FCM setup failed (continuing): $error');
+      _setupFcmAfterLogin(userId).catchError((e) {
+        AppConfig.debugPrint('⚠️ FCM setup failed (continuing): $e');
       });
 
-      AppConfig.debugPrint('✅ Login complete, returning response');
+      AppConfig.debugPrint('✅ Login complete');
       return response;
     } on AuthException catch (e) {
       AppConfig.debugPrint('❌ Supabase auth error: ${e.message}');
-      throw _createUserFriendlyError(e);
+      throw _createUserFriendlyAuthError(e);
     } catch (e) {
       AppConfig.debugPrint('❌ Login error: $e');
-      throw _createUserFriendlyError(e);
+      // Only wrap if not already user-friendly
+      if (e is Exception) rethrow;
+      throw _createUserFriendlyAuthError(e);
     }
   }
 
@@ -147,89 +146,91 @@ class AuthService {
     required String email,
     required String password,
   }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    AppConfig.debugPrint('📝 Starting signup for: $normalizedEmail');
+
+    // Step 1: Create the Supabase auth user
+    final AuthResponse response;
     try {
-      final normalizedEmail = email.trim().toLowerCase();
-
-      AppConfig.debugPrint('📝 Starting signup for: $normalizedEmail');
-
-      final response = await _supabase.auth
+      response = await _supabase.auth
           .signUp(
             email: normalizedEmail,
             password: password,
           )
           .timeout(
             const Duration(seconds: 30),
-            onTimeout: () {
-              throw Exception(
-                  'Signup timed out. Please check your connection and try again.');
-            },
+            onTimeout: () => throw Exception(
+              'Signup timed out. Please check your connection and try again.',
+            ),
           );
-
-      if (response.user == null) {
-        throw Exception('Signup failed - no user created');
-      }
-
-      final userId = response.user!.id;
-      final isPremium = _isDefaultPremiumEmail(normalizedEmail);
-
-      AppConfig.debugPrint('✅ User created: $userId');
-
-      // Wait a moment for Supabase to settle
-      await Future.delayed(const Duration(milliseconds: 1000));
-
-      // Create profile (blocking - needed before proceeding)
-      try {
-        await ProfileDataAccess.createUserProfile(
-          userId,
-          normalizedEmail,
-          isPremium: isPremium,
-        );
-        AppConfig.debugPrint('✅ Profile created during signup');
-      } catch (profileError) {
-        AppConfig.debugPrint('❌ Profile creation failed: $profileError');
-        throw Exception(
-            'Signup succeeded but profile setup failed. Please sign in.');
-      }
-
-      // Setup FCM (non-blocking)
-      _setupFcmAfterLogin(userId).catchError((error) {
-        AppConfig.debugPrint('⚠️ FCM setup failed: $error');
-      });
-
-      return response;
     } on AuthException catch (e) {
       AppConfig.debugPrint('❌ Signup auth error: ${e.message}');
-      throw _createUserFriendlyError(e);
-    } catch (e) {
-      AppConfig.debugPrint('❌ Signup error: $e');
-      throw _createUserFriendlyError(e);
+      throw _createUserFriendlyAuthError(e);
     }
+
+    if (response.user == null) {
+      throw Exception('Account creation failed. Please try again.');
+    }
+
+    final userId = response.user!.id;
+    final isPremium = _isDefaultPremiumEmail(normalizedEmail);
+    AppConfig.debugPrint('✅ Auth user created: $userId');
+
+    // Step 2: Create profile row.
+    //
+    // When email confirmation is required, response.session is null here,
+    // which means we have no access token to pass to the worker.
+    // ProfileDataAccess.createUserProfile() intentionally does NOT use
+    // requireAuth so this insert succeeds via the anon key + RLS policy.
+    //
+    // Give Supabase a moment to propagate the new user before inserting.
+    await Future.delayed(const Duration(milliseconds: 800));
+
+    try {
+      await ProfileDataAccess.createUserProfile(
+        userId,
+        normalizedEmail,
+        isPremium: isPremium,
+      );
+      AppConfig.debugPrint('✅ Profile created during signup');
+    } catch (profileError) {
+      AppConfig.debugPrint('❌ Profile creation failed: $profileError');
+      // Surface a clear, non-auth-classified message.
+      // Do NOT throw an AuthException or a message containing auth keywords,
+      // because ErrorHandlingService._isAuthError() would misclassify it.
+      throw _ProfileSetupException(
+        'Your account was created but profile setup failed. '
+        'Please sign in and we will finish setting up your profile.',
+      );
+    }
+
+    // Step 3: FCM (non-blocking, Android only)
+    _setupFcmAfterLogin(userId).catchError((e) {
+      AppConfig.debugPrint('⚠️ FCM setup failed: $e');
+    });
+
+    return response;
   }
 
   // --------------------------------------------------------
-  // FORCE RESET SESSION (Debug / "Clear Session" button)
+  // FORCE RESET SESSION (exposed for "Clear Session" button)
   // --------------------------------------------------------
 
   static Future<void> forceResetSession() async {
     try {
       AppConfig.debugPrint('🧹 Force resetting session...');
 
-      // Sign out from Supabase (ignore errors if already signed out)
       try {
         await _supabase.auth.signOut();
       } catch (e) {
         AppConfig.debugPrint('⚠️ signOut during reset failed (continuing): $e');
       }
 
-      // Clear local cache
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('isPremiumUser');
       await prefs.remove('saved_email');
 
-      // Clear database cache
       await DatabaseServiceCore.clearAllUserCache();
-
-      // Wait for state to settle
       await Future.delayed(const Duration(seconds: 1));
 
       AppConfig.debugPrint('✅ Session reset complete');
@@ -246,7 +247,6 @@ class AuthService {
   static Future<void> signOut() async {
     try {
       AppConfig.debugPrint('🔓 Signing out...');
-
       await DatabaseServiceCore.clearAllUserCache();
       await _supabase.auth.signOut();
 
@@ -278,17 +278,13 @@ class AuthService {
   }
 
   static Future<void> updatePassword(String newPassword) async {
-    // Note: when called from ResetPasswordPage, setSession() is called first
-    // so currentUserId will be non-null even though user wasn't "logged in"
-    // via the normal flow.
     if (currentUserId == null) {
-      throw Exception('No user session found. Please request a new reset link.');
-    }
-
-    try {
-      await _supabase.auth.updateUser(
-        UserAttributes(password: newPassword),
+      throw Exception(
+        'No user session found. Please request a new reset link.',
       );
+    }
+    try {
+      await _supabase.auth.updateUser(UserAttributes(password: newPassword));
       AppConfig.debugPrint('✅ Password updated');
     } catch (e) {
       AppConfig.debugPrint('❌ Password update failed: $e');
@@ -300,7 +296,6 @@ class AuthService {
     if (currentUser?.email == null) {
       throw Exception('No user email found');
     }
-
     try {
       await _supabase.auth.resend(
         type: OtpType.signup,
@@ -323,8 +318,8 @@ class AuthService {
       AppConfig.debugPrint('🌟 User upgraded to premium: $userId');
 
       if (currentUserId == userId) {
-        _setupFcmAfterLogin(userId).catchError((error) {
-          AppConfig.debugPrint('⚠️ FCM update failed: $error');
+        _setupFcmAfterLogin(userId).catchError((e) {
+          AppConfig.debugPrint('⚠️ FCM update failed: $e');
         });
       }
     } catch (e) {
@@ -334,17 +329,16 @@ class AuthService {
   }
 
   // ========================================================
-  // PRIVATE HELPER METHODS
+  // PRIVATE HELPERS
   // ========================================================
 
-  /// Setup user profile after successful login (best effort, non-blocking)
+  /// Setup profile after login - best effort, non-blocking.
   static Future<void> _setupProfileAfterLogin(
     String userId,
     String email,
   ) async {
     try {
       AppConfig.debugPrint('📋 Checking user profile...');
-
       final profile = await ProfileDataAccess.getUserProfile(userId);
 
       if (profile == null) {
@@ -359,21 +353,19 @@ class AuthService {
       } else {
         final isPremium = _isDefaultPremiumEmail(email);
         final currentPremium = profile['is_premium'] as bool? ?? false;
-
         if (isPremium && !currentPremium) {
           AppConfig.debugPrint('⭐ Upgrading to premium');
           await ProfileDataAccess.setPremium(userId, true);
         }
-
         AppConfig.debugPrint('✅ Profile exists');
       }
     } catch (e) {
-      AppConfig.debugPrint('⚠️ Profile setup error: $e');
-      // Don't rethrow - allow login to continue
+      AppConfig.debugPrint('⚠️ Profile setup error (non-fatal): $e');
+      // Do not rethrow - login should succeed regardless
     }
   }
 
-  /// Setup FCM token (Android only, best effort, non-blocking)
+  /// Setup FCM token (Android only, non-blocking).
   static Future<void> _setupFcmAfterLogin(String userId) async {
     if (kIsWeb || Platform.isIOS) {
       AppConfig.debugPrint('ℹ️ Skipping FCM (iOS/Web)');
@@ -382,7 +374,6 @@ class AuthService {
 
     try {
       AppConfig.debugPrint('📱 Setting up FCM (Android)...');
-
       final token = await FirebaseMessaging.instance.getToken();
 
       if (token == null) {
@@ -390,7 +381,9 @@ class AuthService {
         return;
       }
 
-      AppConfig.debugPrint('📱 Saving FCM token: ${token.substring(0, 20)}...');
+      AppConfig.debugPrint(
+        '📱 Saving FCM token: ${token.substring(0, 20)}...',
+      );
 
       await DatabaseServiceCore.workerQuery(
         action: 'update',
@@ -403,23 +396,19 @@ class AuthService {
       );
 
       AppConfig.debugPrint('✅ FCM token saved');
-
       _listenForFcmTokenRefresh(userId);
     } catch (e) {
-      AppConfig.debugPrint('⚠️ FCM setup failed: $e');
-      // Don't rethrow - FCM is optional
+      AppConfig.debugPrint('⚠️ FCM setup failed (non-fatal): $e');
     }
   }
 
-  /// Listen for FCM token refresh (Android only)
   static void _listenForFcmTokenRefresh(String userId) {
     if (kIsWeb || Platform.isIOS) return;
-
     try {
       FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
         AppConfig.debugPrint(
-            '🔄 FCM token refreshed: ${newToken.substring(0, 20)}...');
-
+          '🔄 FCM token refreshed: ${newToken.substring(0, 20)}...',
+        );
         try {
           await DatabaseServiceCore.workerQuery(
             action: 'update',
@@ -440,43 +429,76 @@ class AuthService {
     }
   }
 
-  /// Convert auth exceptions to user-friendly messages
-  static Exception _createUserFriendlyError(dynamic error) {
-    final errorString = error.toString().toLowerCase();
+  /// Convert Supabase AuthExceptions and raw errors to clean user messages.
+  ///
+  /// IMPORTANT: returned Exception messages must NOT contain the words
+  /// 'token', 'session', or 'expired' unless the error genuinely is an
+  /// auth/session problem, because ErrorHandlingService._isAuthError()
+  /// matches on those substrings and will show the "Hmm, who are you?"
+  /// dialog for unrelated errors.
+  static Exception _createUserFriendlyAuthError(dynamic error) {
+    final msg = error.toString().toLowerCase();
 
-    if (errorString.contains('invalid login credentials') ||
-        errorString.contains('invalid email or password')) {
+    if (msg.contains('invalid login credentials') ||
+        msg.contains('invalid email or password')) {
       return Exception('Incorrect email or password. Please try again.');
     }
 
-    if (errorString.contains('email not confirmed')) {
-      return Exception('Please verify your email before signing in.');
-    }
-
-    if (errorString.contains('user already registered')) {
+    if (msg.contains('email not confirmed')) {
       return Exception(
-          'This email is already registered. Try signing in instead.');
+        'Please verify your email before signing in. '
+        'Check your inbox for the confirmation link.',
+      );
     }
 
-    if (errorString.contains('password should be at least 6 characters')) {
+    if (msg.contains('user already registered')) {
+      return Exception(
+        'This email is already registered. Try signing in instead.',
+      );
+    }
+
+    if (msg.contains('password should be at least 6 characters')) {
       return Exception('Password must be at least 6 characters long.');
     }
 
-    if (errorString.contains('timeout')) {
+    if (msg.contains('timeout')) {
       return Exception(
-          'Connection timed out. Please check your internet and try again.');
+        'Connection timed out. Please check your internet and try again.',
+      );
     }
 
-    if (errorString.contains('network') || errorString.contains('socket')) {
+    if (msg.contains('network') || msg.contains('socket')) {
       return Exception(
-          'Network error. Please check your internet connection.');
+        'Network error. Please check your internet connection.',
+      );
     }
 
-    if (errorString.contains('session') || errorString.contains('expired')) {
+    // Genuine session/token errors (login only - not signup profile errors)
+    if (msg.contains('refresh_token') ||
+        msg.contains('invalid grant') ||
+        msg.contains('401') ||
+        msg.contains('403')) {
       return Exception(
-          'Session expired. Please try the "Clear Session" button and try again.');
+        'Your login has expired. Please use the "Clear Session" button and try again.',
+      );
     }
 
     return Exception('Unable to complete request. Please try again.');
   }
+}
+
+/// Thrown when the Supabase auth user was created successfully but profile
+/// row insertion failed. Kept as a separate type so callers (login.dart) can
+/// show a specific, non-auth-classified message to the user.
+class _ProfileSetupException implements Exception {
+  final String message;
+  const _ProfileSetupException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+// Make it accessible to login.dart
+class ProfileSetupException extends _ProfileSetupException {
+  const ProfileSetupException(super.message);
 }
