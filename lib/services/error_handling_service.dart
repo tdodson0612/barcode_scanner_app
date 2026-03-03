@@ -362,13 +362,12 @@ class ErrorHandlingService {
 
   static bool _isImageError(String s) {
     return s.contains('camera') ||
-        s.contains('image') ||
+        s.contains('image picker') ||
+        s.contains('pickimage') ||
         s.contains('picker') ||
-        s.contains('photo') ||
         s.contains('permission denied') ||
         s.contains('access denied');
   }
-
   static bool _isAdError(String s) {
     return s.contains('admob') ||
         s.contains('interstitial') ||

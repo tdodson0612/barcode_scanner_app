@@ -1529,17 +1529,13 @@ class _ProfileScreenState extends State<ProfileScreen>
         ErrorHandlingService.showSuccess(context, 'Profile picture updated!');
       }
     } catch (e) {
+      AppConfig.debugPrint('❌ Profile picture upload error: $e'); // ADD THIS
       if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.imageError,
-          customMessage: 'Unable to upload profile picture',
-          onRetry: () => _pickImage(source),
+        setState(() { _isLoading = false; });
+        // Show the actual error message so you can see what's really failing
+        ErrorHandlingService.showSimpleError(
+          context,
+          e.toString().replaceFirst('Exception: ', ''),
         );
       }
     }
