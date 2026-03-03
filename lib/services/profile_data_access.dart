@@ -8,6 +8,12 @@
 //    is null and the Cloudflare Worker rejects the request with an auth
 //    error. The Supabase anon key + RLS policy on user_profiles is the
 //    correct mechanism to secure this insert instead.
+//
+// 🔧 FIX 2: createUserProfile now treats a 23505 duplicate key error as
+//    a success. The handle_new_user database trigger fires first and inserts
+//    the profile row before the app code runs. When the app then attempts
+//    its own insert, the Worker returns 409/23505. This is not an error —
+//    the profile exists and the user is good to go.
 
 import 'database_service_core.dart';
 
@@ -27,7 +33,6 @@ class ProfileDataAccess {
       if (result == null || (result as List).isEmpty) return null;
       return result[0] as Map<String, dynamic>;
     } catch (e) {
-      // Rethrow with cleaner message so callers can distinguish
       throw Exception('Failed to fetch user profile: $e');
     }
   }
@@ -47,6 +52,11 @@ class ProfileDataAccess {
   //       `WITH CHECK (auth.uid() = id)`
   //     already enforces that users can only insert their own row.
   //     The anon key does not bypass RLS.
+  //
+  //     Duplicate handling: The handle_new_user trigger on auth.users
+  //     fires before this code runs and may have already created the row.
+  //     A 23505 duplicate key error means the profile already exists and
+  //     is treated as success — no action needed.
   static Future<void> createUserProfile(
     String userId,
     String email, {
@@ -71,6 +81,16 @@ class ProfileDataAccess {
         },
       );
     } catch (e) {
+      final errorStr = e.toString();
+
+      // 23505 = duplicate key — the handle_new_user trigger already created
+      // this profile row. Treat as success and return normally.
+      if (errorStr.contains('23505') ||
+          errorStr.contains('duplicate key') ||
+          errorStr.contains('already exists')) {
+        return;
+      }
+
       throw Exception('Failed to create user profile: $e');
     }
   }
