@@ -4049,67 +4049,82 @@ class _HomePageState extends State<HomePage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── Header ──────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
+                // Avatar
                 CircleAvatar(
                   radius: 20,
                   backgroundColor: Colors.green.shade100,
-                  backgroundImage: post['avatar_url'] != null && post['avatar_url'].toString().isNotEmpty
+                  backgroundImage: post['avatar_url'] != null &&
+                          post['avatar_url'].toString().isNotEmpty
                       ? NetworkImage(post['avatar_url'])
                       : null,
-                  child: (post['avatar_url'] == null || post['avatar_url'].toString().isEmpty)
+                  child: (post['avatar_url'] == null ||
+                          post['avatar_url'].toString().isEmpty)
                       ? Icon(Icons.person, color: Colors.green.shade700)
                       : null,
                 ),
                 const SizedBox(width: 12),
+                // Username + badge + timestamp — takes all remaining space
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Username row with badge
                       Row(
                         children: [
-                          Text(
-                            post['username'] ?? 'Anonymous',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
+                          // Username shrinks before the badge overflows
+                          Flexible(
+                            child: Text(
+                              post['username'] ?? 'Anonymous',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 6),
+                          // Visibility badge — fixed size, never overflows
                           Container(
-                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: visibility == 'public' 
-                                ? Colors.blue.shade50 
-                                : Colors.green.shade50,
+                              color: visibility == 'public'
+                                  ? Colors.blue.shade50
+                                  : Colors.green.shade50,
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color: visibility == 'public' 
-                                  ? Colors.blue.shade200 
-                                  : Colors.green.shade200,
+                                color: visibility == 'public'
+                                    ? Colors.blue.shade200
+                                    : Colors.green.shade200,
                               ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
-                                  visibility == 'public' ? Icons.public : Icons.people,
+                                  visibility == 'public'
+                                      ? Icons.public
+                                      : Icons.people,
                                   size: 10,
-                                  color: visibility == 'public' 
-                                    ? Colors.blue.shade700 
-                                    : Colors.green.shade700,
+                                  color: visibility == 'public'
+                                      ? Colors.blue.shade700
+                                      : Colors.green.shade700,
                                 ),
-                                SizedBox(width: 3),
+                                const SizedBox(width: 3),
                                 Text(
                                   visibility == 'public' ? 'Public' : 'Friends',
                                   style: TextStyle(
                                     fontSize: 9,
                                     fontWeight: FontWeight.w600,
-                                    color: visibility == 'public' 
-                                      ? Colors.blue.shade700 
-                                      : Colors.green.shade700,
+                                    color: visibility == 'public'
+                                        ? Colors.blue.shade700
+                                        : Colors.green.shade700,
                                   ),
                                 ),
                               ],
@@ -4117,6 +4132,8 @@ class _HomePageState extends State<HomePage>
                           ),
                         ],
                       ),
+                      const SizedBox(height: 2),
+                      // Timestamp
                       Text(
                         _formatPostTime(post['created_at']),
                         style: TextStyle(
@@ -4127,21 +4144,19 @@ class _HomePageState extends State<HomePage>
                     ],
                   ),
                 ),
+                // Three-dot menu
                 PopupMenuButton<String>(
                   icon: Icon(Icons.more_horiz, color: Colors.grey.shade600),
                   onSelected: (value) {
-                    if (value == 'report') {
-                      _reportPost(post);
-                    } else if (value == 'delete') {
-                      _deletePost(post);
-                    }
+                    if (value == 'report') _reportPost(post);
+                    if (value == 'delete') _deletePost(post);
                   },
                   itemBuilder: (context) => [
                     if (!isOwnPost)
-                      PopupMenuItem(
+                      const PopupMenuItem(
                         value: 'report',
                         child: Row(
-                          children: const [
+                          children: [
                             Icon(Icons.flag, color: Colors.red, size: 20),
                             SizedBox(width: 8),
                             Text('Report Post'),
@@ -4149,10 +4164,10 @@ class _HomePageState extends State<HomePage>
                         ),
                       ),
                     if (isOwnPost)
-                      PopupMenuItem(
+                      const PopupMenuItem(
                         value: 'delete',
                         child: Row(
-                          children: const [
+                          children: [
                             Icon(Icons.delete, color: Colors.red, size: 20),
                             SizedBox(width: 8),
                             Text('Delete Post'),
@@ -4164,13 +4179,15 @@ class _HomePageState extends State<HomePage>
               ],
             ),
           ),
-          
+
+          // ── Body: text content + photo ───────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (post['content'] != null && post['content'].toString().isNotEmpty)
+                if (post['content'] != null &&
+                    post['content'].toString().isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: Text(
@@ -4181,8 +4198,8 @@ class _HomePageState extends State<HomePage>
                       ),
                     ),
                   ),
-                
-                if (post['photo_url'] != null && post['photo_url'].toString().isNotEmpty)
+                if (post['photo_url'] != null &&
+                    post['photo_url'].toString().isNotEmpty)
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Image.network(
@@ -4204,25 +4221,25 @@ class _HomePageState extends State<HomePage>
                           ),
                         );
                       },
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          height: 200,
-                          color: Colors.grey.shade200,
-                          child: Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.broken_image, size: 48, color: Colors.grey.shade400),
-                                SizedBox(height: 8),
-                                Text(
-                                  'Failed to load image',
-                                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-                                ),
-                              ],
-                            ),
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        height: 200,
+                        color: Colors.grey.shade200,
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.broken_image,
+                                  size: 48, color: Colors.grey.shade400),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Failed to load image',
+                                style: TextStyle(
+                                    color: Colors.grey.shade600, fontSize: 12),
+                              ),
+                            ],
                           ),
-                        );
-                      },
+                        ),
+                      ),
                     ),
                   ),
               ],
@@ -4231,75 +4248,108 @@ class _HomePageState extends State<HomePage>
 
           const SizedBox(height: 12),
 
+          // ── Action bar: like / comment / save ────────────────────
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
+                // Like
                 InkWell(
                   onTap: () => _toggleLike(postId!),
-                  child: Row(
-                    children: [
-                      Icon(
-                        isLiked ? Icons.favorite : Icons.favorite_border,
-                        size: 20,
-                        color: isLiked ? Colors.green : Colors.grey.shade700,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        likeCount > 0 ? likeCount.toString() : '',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isLiked ? Colors.green : Colors.grey.shade700,
-                          fontWeight: FontWeight.w600,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 4, vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isLiked ? Icons.favorite : Icons.favorite_border,
+                          size: 20,
+                          color:
+                              isLiked ? Colors.green : Colors.grey.shade700,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 4),
+                        if (likeCount > 0)
+                          Text(
+                            likeCount.toString(),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isLiked
+                                  ? Colors.green
+                                  : Colors.grey.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 16),
+                // Comment
                 InkWell(
                   onTap: () => _toggleComments(postId!),
-                  child: Row(
-                    children: [
-                      Icon(Icons.comment_outlined, size: 20, color: Colors.grey.shade700),
-                      const SizedBox(width: 4),
-                      Text(
-                        comments.isNotEmpty ? '${comments.length}' : 'Comment',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade700,
-                          fontWeight: FontWeight.w600,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 4, vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(Icons.comment_outlined,
+                            size: 20, color: Colors.grey.shade700),
+                        const SizedBox(width: 4),
+                        Text(
+                          comments.isNotEmpty
+                              ? '${comments.length}'
+                              : 'Comment',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 16),
+                // Save
                 InkWell(
                   onTap: () => _toggleSavePost(postId!),
-                  child: Row(
-                    children: [
-                      Icon(
-                        isSaved ? Icons.bookmark : Icons.bookmark_border,
-                        size: 20,
-                        color: isSaved ? Colors.blue : Colors.grey.shade700,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Save',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isSaved ? Colors.blue : Colors.grey.shade700,
-                          fontWeight: FontWeight.w600,
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 4, vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isSaved
+                              ? Icons.bookmark
+                              : Icons.bookmark_border,
+                          size: 20,
+                          color:
+                              isSaved ? Colors.blue : Colors.grey.shade700,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 4),
+                        Text(
+                          'Save',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isSaved
+                                ? Colors.blue
+                                : Colors.grey.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          
+
+          // ── Comments section (expanded) ──────────────────────────
           if (isExpanded) _buildCommentsSection(postId!),
         ],
       ),
@@ -4608,6 +4658,8 @@ class _HomePageState extends State<HomePage>
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+
+            // ── Search bar ───────────────────────────────────────────
             Container(
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
@@ -4626,7 +4678,7 @@ class _HomePageState extends State<HomePage>
                 decoration: InputDecoration(
                   hintText: 'Search users...',
                   hintStyle: TextStyle(color: Colors.grey.shade600),
-                  prefixIcon: Icon(Icons.person_search, color: Colors.green),
+                  prefixIcon: const Icon(Icons.person_search, color: Colors.green),
                   suffixIcon: IconButton(
                     icon: const Icon(Icons.search, color: Colors.green),
                     onPressed: () => _searchUsers(_searchController.text),
@@ -4637,12 +4689,14 @@ class _HomePageState extends State<HomePage>
                   ),
                   filled: true,
                   fillColor: Colors.transparent,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 16),
                 ),
-                onSubmitted: (value) => _searchUsers(value),
+                onSubmitted: _searchUsers,
               ),
             ),
 
+            // ── Welcome card ─────────────────────────────────────────
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -4695,9 +4749,10 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 16),
 
-            // Today's nutrition snapshot — only shows if tracker data exists
+            // ── Today's nutrition snapshot ───────────────────────────
             _buildNutritionSnapshot(),
 
+            // ── Scan buttons card ────────────────────────────────────
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -4713,6 +4768,8 @@ class _HomePageState extends State<HomePage>
               ),
               child: Column(
                 children: [
+
+                  // Free scan counter / rewarded ad banner
                   if (!_isPremium)
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -4756,8 +4813,6 @@ class _HomePageState extends State<HomePage>
                               ),
                             ],
                           ),
-                          
-                          // 🔥 NEW: Rewarded ad button when out of scans
                           if (_hasUsedAllFreeScans) ...[
                             const SizedBox(height: 12),
                             Row(
@@ -4765,31 +4820,35 @@ class _HomePageState extends State<HomePage>
                                 Expanded(
                                   child: ElevatedButton.icon(
                                     onPressed: _showRewardedAdForFreeScan,
-                                    icon: Icon(Icons.play_circle_outline, size: 20),
-                                    label: Text(
+                                    icon: const Icon(
+                                        Icons.play_circle_outline, size: 20),
+                                    label: const Text(
                                       'Watch Ad for Free Scan',
                                       style: TextStyle(fontSize: 13),
                                     ),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: Colors.orange.shade600,
                                       foregroundColor: Colors.white,
-                                      padding: EdgeInsets.symmetric(vertical: 10),
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 10),
                                     ),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: ElevatedButton.icon(
-                                    onPressed: () => Navigator.pushNamed(context, '/purchase'),
-                                    icon: Icon(Icons.star, size: 20),
-                                    label: Text(
+                                    onPressed: () => Navigator.pushNamed(
+                                        context, '/purchase'),
+                                    icon: const Icon(Icons.star, size: 20),
+                                    label: const Text(
                                       'Go Premium',
                                       style: TextStyle(fontSize: 13),
                                     ),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: Colors.green.shade600,
                                       foregroundColor: Colors.white,
-                                      padding: EdgeInsets.symmetric(vertical: 10),
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 10),
                                     ),
                                   ),
                                 ),
@@ -4799,111 +4858,79 @@ class _HomePageState extends State<HomePage>
                         ],
                       ),
                     ),
-                    SingleChildScrollView(
-                      controller: _feedScrollController,
-                      child: Column(
-                        children: [
-                          // Your 4 buttons row
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              _buildActionButton(
-                                key: _autoButtonKey,
-                                icon: Icons.qr_code_scanner,
-                                label: 'Auto',
-                                color: Colors.purple.shade600,
-                                onPressed: _isScanning ? null : _autoScanBarcode,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              _buildActionButton(
-                                key: _scanButtonKey,
-                                icon: Icons.camera_alt,
-                                label: 'Scan',
-                                color: Colors.green.shade600,
-                                onPressed: _isScanning ? null : _takePhoto,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              _buildActionButton(
-                                key: _manualButtonKey,
-                                icon: Icons.edit_outlined,
-                                label: 'Code',
-                                color: Colors.blue.shade600,
-                                onPressed: () => Navigator.pushNamed(context, '/manual-barcode-entry'),
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              _buildActionButton(
-                                key: _lookupButtonKey,
-                                icon: Icons.search,
-                                label: 'Search',
-                                color: Colors.orange.shade800,
-                                onPressed: () => Navigator.pushNamed(context, '/nutrition-search'),
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ],
-                          ),
 
-                          const SizedBox(height: 16),
-
-                          // Tutorial button
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              print('🎓 Tutorial button pressed');
-                              // Scroll to top before showing tutorial
-                              _feedScrollController.animateTo(
-                                0,
-                                duration: const Duration(milliseconds: 300),
-                                curve: Curves.easeInOut,
-                              );
-                              setState(() {
-                                _showTutorial = true;
-                              });
-                            },
-                            icon: const Icon(Icons.help_outline),
-                            label: const Text('Tutorial'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue.shade700,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(25),
-                              ),
-                            ),
-                          ),
-
-                          // ... rest of your homepage content
-                        ],
+                  // 4 scan action buttons
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _buildActionButton(
+                        key: _autoButtonKey,
+                        icon: Icons.qr_code_scanner,
+                        label: 'Auto',
+                        color: Colors.purple.shade600,
+                        onPressed: _isScanning ? null : _autoScanBarcode,
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                    )
+                      _buildActionButton(
+                        key: _scanButtonKey,
+                        icon: Icons.camera_alt,
+                        label: 'Scan',
+                        color: Colors.green.shade600,
+                        onPressed: _isScanning ? null : _takePhoto,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      _buildActionButton(
+                        key: _manualButtonKey,
+                        icon: Icons.edit_outlined,
+                        label: 'Code',
+                        color: Colors.blue.shade600,
+                        onPressed: () => Navigator.pushNamed(
+                            context, '/manual-barcode-entry'),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      _buildActionButton(
+                        key: _lookupButtonKey,
+                        icon: Icons.search,
+                        label: 'Search',
+                        color: Colors.orange.shade800,
+                        onPressed: () => Navigator.pushNamed(
+                            context, '/nutrition-search'),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ],
+                  ),
 
+                  const SizedBox(height: 16),
+
+                  // Tutorial button
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      _feedScrollController.animateTo(
+                        0,
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOut,
+                      );
+                      setState(() => _showTutorial = true);
+                    },
+                    icon: const Icon(Icons.help_outline),
+                    label: const Text('Tutorial'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue.shade700,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(25),
+                      ),
+                    ),
+                  ),
                 ],
-              ),
-            ),
-            const SizedBox(height: 16),
-  
-            ElevatedButton.icon(
-              onPressed: () {
-                print('🎓 Tutorial button pressed');
-                print('📍 Current _showTutorial state: $_showTutorial');
-                setState(() {
-                  _showTutorial = true;
-                });
-                print('✅ Tutorial state set to: $_showTutorial');
-              },
-              icon: const Icon(Icons.help_outline),
-              label: const Text('Tutorial'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue.shade700,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(25),
-                ),
               ),
             ),
 
             const SizedBox(height: 30),
 
-            // 🔥 UPDATED: Feed Section with Infinite Scroll
+            // ── Community Feed ───────────────────────────────────────
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -4913,12 +4940,14 @@ class _HomePageState extends State<HomePage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+
+                  // Feed header
                   Row(
                     children: [
-                      Icon(Icons.public, color: Colors.green, size: 24),
+                      const Icon(Icons.public, color: Colors.green, size: 24),
                       const SizedBox(width: 12),
                       const Text(
-                        "Community Feed",
+                        'Community Feed',
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -4926,7 +4955,8 @@ class _HomePageState extends State<HomePage>
                       ),
                       const Spacer(),
                       Container(
-                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.blue.shade50,
                           borderRadius: BorderRadius.circular(12),
@@ -4935,8 +4965,9 @@ class _HomePageState extends State<HomePage>
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.public, size: 14, color: Colors.blue.shade700),
-                            SizedBox(width: 4),
+                            Icon(Icons.public,
+                                size: 14, color: Colors.blue.shade700),
+                            const SizedBox(width: 4),
                             Text(
                               'Public',
                               style: TextStyle(
@@ -4950,13 +4981,15 @@ class _HomePageState extends State<HomePage>
                       ),
                     ],
                   ),
+
                   const SizedBox(height: 16),
-                  
-                  // Post Composer
+
+                  // Post composer
                   _buildPostComposer(),
+
                   const SizedBox(height: 16),
-                  
-                  // 🔥 NEW: Feed with infinite scroll
+
+                  // Feed posts
                   if (_isLoadingFeed && _feedPosts.isEmpty)
                     const Center(
                       child: Padding(
@@ -4970,61 +5003,54 @@ class _HomePageState extends State<HomePage>
                         padding: const EdgeInsets.all(20),
                         child: Column(
                           children: [
-                            Icon(Icons.rss_feed, size: 64, color: Colors.grey.shade400),
+                            Icon(Icons.rss_feed,
+                                size: 64, color: Colors.grey.shade400),
                             const SizedBox(height: 12),
                             Text(
                               'No posts yet',
                               style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey.shade600,
-                              ),
+                                  fontSize: 16, color: Colors.grey.shade600),
                             ),
                             const SizedBox(height: 8),
                             Text(
                               'Be the first to share something!',
                               style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey.shade500,
-                              ),
+                                  fontSize: 14, color: Colors.grey.shade500),
                             ),
                           ],
                         ),
                       ),
                     )
                   else
-                    // 🔥 Feed list with scroll controller
                     ListView.builder(
                       shrinkWrap: true,
-                      physics: NeverScrollableScrollPhysics(), // Parent scrolls
-                      itemCount: _feedPosts.length + (_hasMorePosts ? 1 : 0),
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount:
+                          _feedPosts.length + (_hasMorePosts ? 1 : 0),
                       itemBuilder: (context, index) {
-                        // Show loading indicator at bottom if loading more
                         if (index == _feedPosts.length) {
                           return Center(
                             child: Padding(
                               padding: const EdgeInsets.all(16),
                               child: _isLoadingMorePosts
-                                  ? CircularProgressIndicator()
-                                  : SizedBox.shrink(),
+                                  ? const CircularProgressIndicator()
+                                  : const SizedBox.shrink(),
                             ),
                           );
                         }
-                        
                         return _buildFeedPost(_feedPosts[index]);
                       },
                     ),
-                    
-                  // End of feed indicator
+
+                  // End-of-feed indicator
                   if (!_hasMorePosts && _feedPosts.isNotEmpty)
                     Center(
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Text(
-                          '✨ You\'ve seen all posts',
+                          "✨ You've seen all posts",
                           style: TextStyle(
-                            color: Colors.grey.shade600,
-                            fontSize: 14,
-                          ),
+                              color: Colors.grey.shade600, fontSize: 14),
                         ),
                       ),
                     ),
@@ -5034,26 +5060,29 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 30),
 
+            // ── Scanned recipe suggestions (only when present) ───────
             if (_scannedRecipes.isNotEmpty)
               PremiumGate(
                 feature: PremiumFeature.viewRecipes,
-                featureName: "Recipe Details",
+                featureName: 'Recipe Details',
                 featureDescription:
-                    "View full recipe details with ingredients and directions.",
+                    'View full recipe details with ingredients and directions.',
                 child: Column(
                   children: [
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                        color: Colors.white
+                            .withAlpha((0.9 * 255).toInt()),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Row(
-                        children: const [
-                          Icon(Icons.restaurant, color: Colors.green, size: 24),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.restaurant,
+                              color: Colors.green, size: 24),
                           SizedBox(width: 12),
                           Text(
-                            "Recipe Suggestions",
+                            'Recipe Suggestions',
                             style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
@@ -5063,11 +5092,12 @@ class _HomePageState extends State<HomePage>
                       ),
                     ),
                     const SizedBox(height: 16),
-                    ..._scannedRecipes.map((recipe) =>
-                        _buildScannedRecipeCard(recipe)),
+                    ..._scannedRecipes
+                        .map((recipe) => _buildScannedRecipeCard(recipe)),
                   ],
                 ),
               ),
+
           ],
         ),
       ),
@@ -5608,7 +5638,7 @@ class _HomePageState extends State<HomePage>
       }
     }
   }
-  @override
+  
   @override
   Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
