@@ -4070,11 +4070,14 @@ class _HomePageState extends State<HomePage>
                     children: [
                       Row(
                         children: [
-                          Text(
-                            post['username'] ?? 'Anonymous',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
+                          Flexible(
+                            child: Text(
+                              post['username'] ?? 'Anonymous',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           SizedBox(width: 8),
