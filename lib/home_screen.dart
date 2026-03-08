@@ -4077,7 +4077,6 @@ class _HomePageState extends State<HomePage>
                       // Username row with badge
                       Row(
                         children: [
-                          // Username shrinks before the badge overflows
                           Flexible(
                             child: Text(
                               post['username'] ?? 'Anonymous',
@@ -4088,8 +4087,7 @@ class _HomePageState extends State<HomePage>
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          const SizedBox(width: 6),
-                          // Visibility badge — fixed size, never overflows
+                          SizedBox(width: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 6, vertical: 2),
