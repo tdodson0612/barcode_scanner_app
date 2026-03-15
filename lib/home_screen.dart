@@ -33,7 +33,8 @@ import 'package:liver_wise/services/draft_recipes_service.dart';
 import 'services/picture_service.dart';
 import 'package:liver_wise/widgets/tutorial_overlay.dart';
 import '../models/tracker_entry.dart';   
-
+import 'package:liver_wise/services/presence_service.dart';
+import 'package:liver_wise/widgets/friends_online_bar.dart';
 
 class Recipe {
   final String title;
@@ -351,7 +352,7 @@ class _HomePageState extends State<HomePage>
     _checkDay7Achievement();
     _loadFeed();
     _feedScrollController.addListener(_onFeedScroll);
-
+    PresenceService.startHeartbeat();
   }
 
   bool _didPrecache = false;
@@ -413,7 +414,8 @@ class _HomePageState extends State<HomePage>
     _interstitialAd?.dispose();
     _rewardedAd?.dispose();
     _searchController.dispose();
-    _feedScrollController.dispose(); // 🔥 NEW
+    _feedScrollController.dispose();
+    PresenceService.stopHeartbeat();
     super.dispose();
   }
 
@@ -4746,6 +4748,9 @@ class _HomePageState extends State<HomePage>
             ),
 
             const SizedBox(height: 16),
+
+            // ── Friends online ───────────────────────────────────────
+            const FriendsOnlineBar(),
 
             // ── Today's nutrition snapshot ───────────────────────────
             _buildNutritionSnapshot(),

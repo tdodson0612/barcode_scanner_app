@@ -4,7 +4,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 # App version - increment for each App Store submission
 # Format: MAJOR.MINOR.PATCH+BUILD_NUMBER
-version: 1.0.7+100
+version: 1.0.7+101
 
 
 # Flutter SDK constraints
@@ -35,7 +35,8 @@ dependencies:
   google_mlkit_commons: ^0.6.1
   camera: ^0.10.5+5  # For auto-barcode scanner
 
-
+  # Audio playback
+  audioplayers: ^5.2.1
   
   # Networking
   http: ^1.2.1
@@ -101,6 +102,10 @@ flutter:
     
     # Additional assets (add as needed)
     - assets/leviliver.png
+
+    # sounds
+    - assets/sounds/message_chime.mp3
+
 
   
 
