@@ -39,6 +39,14 @@ import './pages/my_cookbook_page.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import './pages/saved_posts_page.dart';
 
+// ── Liver health features ──────────────────────────────────────────────────
+import 'pages/liver_hub_page.dart';
+import 'pages/liver_dashboard_page.dart';
+import 'pages/hydration_log_page.dart';
+import 'pages/supplement_schedule_page.dart';
+import 'pages/symptom_log_page.dart';
+import 'services/liver_notification_service.dart';
+
 
 /// 🔥 Background FCM handler (Android only - required for messages when app is terminated)
 @pragma('vm:entry-point')
@@ -166,6 +174,12 @@ void main() async {
       AppConfig.debugPrint('✅ Supabase initialized successfully');
       AppConfig.debugPrint('App Name: ${AppConfig.appName}');
       AppConfig.debugPrint('Platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
+    }
+
+    // ── Initialize liver health notification service ──────────────────────
+    await LiverNotificationService.initialize();
+    if (AppConfig.enableDebugPrints) {
+      AppConfig.debugPrint('✅ LiverNotificationService initialized');
     }
 
     runApp(const MyApp());
@@ -511,6 +525,12 @@ class _MyAppState extends State<MyApp> {
         '/tracker': (context) => const TrackerPage(),
         '/my-cookbook': (context) => const MyCookbookPage(),
         '/saved-posts': (context) => const SavedPostsPage(),
+        // ── Liver health features ──────────────────────────────────────────
+        '/liver-hub':           (context) => const LiverHubPage(),
+        '/liver-dashboard':     (context) => const LiverDashboardPage(),
+        '/hydration-log':       (context) => const HydrationLogPage(),
+        '/supplement-schedule': (context) => const SupplementSchedulePage(),
+        '/symptom-log':         (context) => const SymptomLogPage(),
         '/reset-password': (context) {
           final session = ModalRoute.of(context)?.settings.arguments as Session?;
           return ResetPasswordPage(session: session);
