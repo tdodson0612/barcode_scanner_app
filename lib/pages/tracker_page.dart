@@ -620,7 +620,6 @@ class _TrackerPageState extends State<TrackerPage> {
                       if (value != null) {
                         setDialogState(() {
                           heightSystem = value;
-                          // Auto-convert values when switching units
                           if (value == 'imperial' &&
                               cmController.text.isNotEmpty) {
                             final cm =
@@ -760,7 +759,6 @@ class _TrackerPageState extends State<TrackerPage> {
                         '📏 Saving height: $heightInCm cm ($heightSystem)');
                     await ProfileService.updateHeight(uid, heightInCm);
 
-                    // Verify save
                     final savedHeight =
                         await ProfileService.getHeight(uid);
                     if (savedHeight == null ||
@@ -769,7 +767,6 @@ class _TrackerPageState extends State<TrackerPage> {
                           'Height verification failed after save');
                     }
 
-                    // Save height unit preference to SharedPreferences
                     await _saveUnitPreference(
                         _PREF_HEIGHT_UNIT, heightSystem);
 
@@ -879,6 +876,8 @@ class _TrackerPageState extends State<TrackerPage> {
           _buildExerciseSection(),
           const SizedBox(height: 20),
           _buildWaterSection(),
+          const SizedBox(height: 20),
+          _buildAlcoholSection(),
           const SizedBox(height: 20),
           _buildScoreSection(),
           const SizedBox(height: 20),
@@ -1581,6 +1580,51 @@ class _TrackerPageState extends State<TrackerPage> {
     );
   }
 
+  // ── Alcohol Section ───────────────────────────────────────────
+
+  Widget _buildAlcoholSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.local_bar, color: Colors.brown, size: 24),
+                SizedBox(width: 8),
+                Text('Alcohol Intake',
+                    style: TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Track alcohol consumption and monitor liver health impact.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => Navigator.pushNamed(context, '/alcohol-log'),
+                icon: const Icon(Icons.open_in_new, size: 18),
+                label: const Text('Open Alcohol Tracker'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.brown.shade700,
+                  side: BorderSide(color: Colors.brown.shade300),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildScoreSection() {
     final score = _currentEntry?.dailyScore ?? 0;
     return Card(
@@ -1671,7 +1715,6 @@ class _SupplementDialogState extends State<_SupplementDialog> {
     'mg', 'mcg', 'g', 'IU', 'ml', 'capsule(s)', 'tablet(s)', 'tsp', 'tbsp',
   ];
 
-  // Common liver-health supplements for quick fill
   final List<String> _commonSupplements = [
     'Vitamin D',
     'Vitamin C',
@@ -1736,7 +1779,6 @@ class _SupplementDialogState extends State<_SupplementDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Quick-fill chips
             Text(
               'Common liver-health supplements:',
               style: TextStyle(
@@ -1776,7 +1818,6 @@ class _SupplementDialogState extends State<_SupplementDialog> {
             ),
             const SizedBox(height: 16),
 
-            // Name field
             TextField(
               controller: _nameController,
               textCapitalization: TextCapitalization.words,
@@ -1790,7 +1831,6 @@ class _SupplementDialogState extends State<_SupplementDialog> {
             ),
             const SizedBox(height: 16),
 
-            // Amount + unit row
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1835,7 +1875,6 @@ class _SupplementDialogState extends State<_SupplementDialog> {
             ),
             const SizedBox(height: 16),
 
-            // Notes field
             TextField(
               controller: _notesController,
               textCapitalization: TextCapitalization.sentences,
