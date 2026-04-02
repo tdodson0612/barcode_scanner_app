@@ -2,7 +2,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart';  // ✅ ADDED for SystemChrome
 import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -62,19 +62,21 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // ✅ Configure system UI for edge-to-edge display on Android 15+
+  // ✅ NEW: Configure system UI for edge-to-edge display on Android 15+
+  // This fixes Google Play Console warnings about deprecated edge-to-edge APIs
   if (!kIsWeb && Platform.isAndroid) {
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.dark,
-        systemNavigationBarColor: Colors.transparent,
+        statusBarColor: Colors.transparent,  // Transparent status bar
+        statusBarIconBrightness: Brightness.dark,  // Dark icons on light background
+        systemNavigationBarColor: Colors.transparent,  // Transparent nav bar
         systemNavigationBarIconBrightness: Brightness.dark,
       ),
     );
     
+    // Enable edge-to-edge mode (draws behind system bars)
     SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.edgeToEdge,
+      SystemUiMode.edgeToEdge,  // ✅ Modern API for edge-to-edge (replaces deprecated APIs)
     );
   }
   
@@ -139,6 +141,7 @@ void main() async {
         }
       } else if (!kIsWeb && Platform.isIOS) {
         // ✅ iOS/iPadOS: Firebase auto-initializes via GoogleService-Info.plist
+        // Do NOT manually initialize or set up FCM - it can cause conflicts
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('✅ Firebase auto-initialized (iOS/iPadOS)');
           AppConfig.debugPrint('ℹ️  FCM disabled on iOS to prevent conflicts during review');
@@ -194,6 +197,7 @@ void main() async {
 Widget _buildErrorApp(dynamic error) {
   final errorString = error.toString().toLowerCase();
 
+  // Determine user-friendly message
   String title = 'Unable to Start App';
   String message = 'Please check your internet connection and try again.';
   IconData icon = Icons.cloud_off_rounded;
@@ -227,17 +231,23 @@ Widget _buildErrorApp(dynamic error) {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                // Icon
                 Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
                     color: iconColor.withOpacity(0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(icon, size: 80, color: iconColor),
+                  child: Icon(
+                    icon,
+                    size: 80,
+                    color: iconColor,
+                  ),
                 ),
 
                 const SizedBox(height: 32),
 
+                // Title
                 Text(
                   title,
                   style: const TextStyle(
@@ -249,6 +259,7 @@ Widget _buildErrorApp(dynamic error) {
 
                 const SizedBox(height: 12),
 
+                // Message
                 Text(
                   message,
                   style: TextStyle(
@@ -261,11 +272,13 @@ Widget _buildErrorApp(dynamic error) {
 
                 const SizedBox(height: 40),
 
+                // Retry button
                 SizedBox(
                   width: 200,
                   height: 50,
                   child: ElevatedButton.icon(
                     onPressed: () {
+                      // Force app restart by calling main again
                       WidgetsFlutterBinding.ensureInitialized();
                       main();
                     },
@@ -289,6 +302,7 @@ Widget _buildErrorApp(dynamic error) {
 
                 const SizedBox(height: 24),
 
+                // Help text
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -317,12 +331,16 @@ Widget _buildErrorApp(dynamic error) {
                   ),
                 ),
 
+                // Debug details
                 if (AppConfig.enableDebugPrints)
                   Padding(
                     padding: const EdgeInsets.only(top: 16),
                     child: Text(
                       'Debug: $error',
-                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Colors.grey,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -366,6 +384,8 @@ class _MyAppState extends State<MyApp> {
   Future<void> _checkOnboarding() async {
     final completed = await OnboardingPage.hasCompletedOnboarding();
     final user = Supabase.instance.client.auth.currentUser;
+    // Only show onboarding if user is authenticated (we have their data)
+    // and they haven't seen it before
     if (!completed && user != null) {
       _showOnboarding = true;
     }
@@ -425,6 +445,7 @@ class _MyAppState extends State<MyApp> {
         AppConfig.debugPrint('❌ Error handling reset-password link: $e');
       }
 
+      // Show user-friendly error if mounted
       if (mounted) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
@@ -459,6 +480,7 @@ class _MyAppState extends State<MyApp> {
         AppConfig.debugPrint('Error checking premium status: $e');
       }
 
+      // Default to free tier on error
       if (mounted) {
         setState(() {
           _isPremium = false;
@@ -470,14 +492,6 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     final supabase = Supabase.instance.client;
-
-    if (!_isReady) {
-      return const MaterialApp(
-        home: Scaffold(
-          body: Center(child: CircularProgressIndicator()),
-        ),
-      );
-    }
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -529,6 +543,7 @@ class _MyAppState extends State<MyApp> {
           AppConfig.debugPrint('Unknown route requested: ${settings.name}');
         }
 
+        // User-friendly 404 page
         return MaterialPageRoute(
           builder: (context) => Scaffold(
             appBar: AppBar(
@@ -578,6 +593,7 @@ class _MyAppState extends State<MyApp> {
                       height: 50,
                       child: ElevatedButton.icon(
                         onPressed: () {
+                          // Try to go back, or go home if can't go back
                           if (Navigator.canPop(context)) {
                             Navigator.pop(context);
                           } else {
@@ -619,6 +635,7 @@ class _MyAppState extends State<MyApp> {
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('✅ User authenticated: ${user.email}');
         }
+        // Show onboarding for first-time users
         if (_showOnboarding) {
           return '/onboarding';
         }
@@ -633,6 +650,7 @@ class _MyAppState extends State<MyApp> {
       if (AppConfig.enableDebugPrints) {
         AppConfig.debugPrint('⚠️ Error determining initial route: $e');
       }
+      // On error, default to login (safe fallback)
       return '/login';
     }
   }
