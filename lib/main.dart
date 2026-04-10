@@ -48,6 +48,11 @@ import 'pages/symptom_log_page.dart';
 import 'pages/alcohol_log_page.dart';
 import 'services/liver_notification_service.dart';
 
+// ── LoRA & Settings ───────────────────────────────────────────────────────
+import 'pages/lora_dataset_page.dart';
+import 'pages/settings_page.dart';
+import 'widgets/admin_guard.dart'; // ← NEW
+
 
 /// 🔥 Background FCM handler (Android only - required for messages when app is terminated)
 @pragma('vm:entry-point')
@@ -507,25 +512,28 @@ class _MyAppState extends State<MyApp> {
       ),
       initialRoute: _getInitialRoute(supabase),
       routes: {
-        '/login': (context) => const LoginPage(),
-        '/home': (context) => const HomePage(),
-        '/onboarding': (context) => const OnboardingPage(),
-        '/profile': (context) => ProfileScreen(favoriteRecipes: const []),
-        '/purchase': (context) => const PremiumPage(),
-        '/grocery-list': (context) => const GroceryListPage(),
-        '/submit-recipe': (context) => const SubmitRecipePage(),
-        '/messages': (context) => MessagesPage(),
-        '/search-users': (context) => const SearchUsersPage(),
-        '/favorite-recipes': (context) => FavoriteRecipesPage(favoriteRecipes: const []),
-        '/contact': (context) => const ContactScreen(),
-        '/manual-barcode-entry': (context) => const ManualBarcodeEntryScreen(),
-        '/nutrition-search': (context) => const NutritionSearchScreen(),
-        '/saved-ingredients': (context) => const SavedIngredientsScreen(),
-        '/badge-debug': (context) => BadgeDebugPage(),
-        '/submission-status': (context) => const SubmissionStatusPage(),
-        '/tracker': (context) => const TrackerPage(),
-        '/my-cookbook': (context) => const MyCookbookPage(),
-        '/saved-posts': (context) => const SavedPostsPage(),
+        '/login':               (context) => const LoginPage(),
+        '/home':                (context) => const HomePage(),
+        '/onboarding':          (context) => const OnboardingPage(),
+        '/profile':             (context) => ProfileScreen(favoriteRecipes: const []),
+        '/purchase':            (context) => const PremiumPage(),
+        '/grocery-list':        (context) => const GroceryListPage(),
+        '/submit-recipe':       (context) => const SubmitRecipePage(),
+        '/messages':            (context) => MessagesPage(),
+        '/search-users':        (context) => const SearchUsersPage(),
+        '/favorite-recipes':    (context) => FavoriteRecipesPage(favoriteRecipes: const []),
+        '/contact':             (context) => const ContactScreen(),
+        '/manual-barcode-entry':(context) => const ManualBarcodeEntryScreen(),
+        '/nutrition-search':    (context) => const NutritionSearchScreen(),
+        '/saved-ingredients':   (context) => const SavedIngredientsScreen(),
+        '/badge-debug':         (context) => BadgeDebugPage(),
+        '/submission-status':   (context) => const SubmissionStatusPage(),
+        '/tracker':             (context) => const TrackerPage(),
+        '/my-cookbook':         (context) => const MyCookbookPage(),
+        '/saved-posts':         (context) => const SavedPostsPage(),
+        '/settings':            (context) => const SettingsPage(),
+        // ── Admin-only (dev build + admin email required) ────────────────
+        '/lora-dataset':        (context) => const AdminGuard(child: LoraDatasetPage()), // ← CHANGED
         // ── Liver health features ──────────────────────────────────────────
         '/liver-hub':           (context) => const LiverHubPage(),
         '/liver-dashboard':     (context) => const LiverDashboardPage(),
@@ -593,7 +601,6 @@ class _MyAppState extends State<MyApp> {
                       height: 50,
                       child: ElevatedButton.icon(
                         onPressed: () {
-                          // Try to go back, or go home if can't go back
                           if (Navigator.canPop(context)) {
                             Navigator.pop(context);
                           } else {
@@ -635,7 +642,6 @@ class _MyAppState extends State<MyApp> {
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('✅ User authenticated: ${user.email}');
         }
-        // Show onboarding for first-time users
         if (_showOnboarding) {
           return '/onboarding';
         }
@@ -650,7 +656,6 @@ class _MyAppState extends State<MyApp> {
       if (AppConfig.enableDebugPrints) {
         AppConfig.debugPrint('⚠️ Error determining initial route: $e');
       }
-      // On error, default to login (safe fallback)
       return '/login';
     }
   }

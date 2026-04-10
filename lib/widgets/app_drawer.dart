@@ -1,5 +1,4 @@
 // lib/widgets/app_drawer.dart
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:liver_wise/services/messaging_service.dart';
@@ -7,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../controllers/premium_gate_controller.dart';
 import '../services/auth_service.dart';
 import '../services/database_service_core.dart';
+import '../config/app_config.dart';
 
 class AppDrawer extends StatefulWidget {
   final String currentPage;
@@ -90,8 +90,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
         final cachedCount = prefs.getInt(AppDrawer._cacheKey);
         final cachedTime = prefs.getInt(AppDrawer._cacheTimeKey);
         if (cachedCount != null && cachedTime != null) {
-          final cacheAge =
-              DateTime.now().millisecondsSinceEpoch - cachedTime;
+          final cacheAge = DateTime.now().millisecondsSinceEpoch - cachedTime;
           if (cacheAge < _cacheDuration.inMilliseconds) {
             if (mounted) setState(() => _unreadCount = cachedCount);
             return;
@@ -120,17 +119,15 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
     }
   }
 
-  // ── Navigation helper ────────────────────────────────────────────────────
-
+  // ── Navigation helper ──────────────────────────────────────────────────
   void _go(BuildContext context, String route) {
-    Navigator.pop(context); // close drawer
+    Navigator.pop(context);
     if (widget.currentPage != route.replaceAll('/', '').replaceAll('-', '_')) {
       Navigator.pushNamed(context, route);
     }
   }
 
-  // ── Tile builders ────────────────────────────────────────────────────────
-
+  // ── Tile builders ──────────────────────────────────────────────────────
   Widget _tile({
     required BuildContext context,
     required IconData icon,
@@ -161,8 +158,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       trailing: trailing,
       onTap: onTap ?? () => _go(context, route),
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
     );
   }
 
@@ -197,8 +193,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
               style: TextStyle(color: Colors.grey.shade500, fontSize: 14)),
           const SizedBox(width: 6),
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
             decoration: BoxDecoration(
               color: Colors.amber.shade700,
               borderRadius: BorderRadius.circular(6),
@@ -215,8 +210,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
           ),
         ],
       ),
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       onTap: () {
         Navigator.pop(context);
         Navigator.pushNamed(context, '/purchase');
@@ -247,32 +241,34 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
     );
   }
 
-  // ── Main build ───────────────────────────────────────────────────────────
-
+  // ── Main build ─────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final userEmail = AuthService.currentUser?.email;
     final isPremium = _controller.isPremium;
+
+    // Show developer tools only in development mode
+    final isDev = AppConfig.isDevelopment;
 
     return Drawer(
       child: SafeArea(
         top: false,
         child: Column(
           children: [
-            // ── Header ──────────────────────────────────────────────────
+            // ── Header ────────────────────────────────────────────────
             _DrawerHeader(
               email: userEmail,
               isPremium: isPremium,
               scansUsed: _controller.totalScansUsed,
             ),
 
-            // ── Scrollable nav list ──────────────────────────────────────
+            // ── Scrollable nav list ────────────────────────────────────
             Expanded(
               child: ListView(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 children: [
-                  // ── Main ────────────────────────────────────────────────
+                  // ── Main ──────────────────────────────────────────
                   _sectionHeader('Main'),
                   _tile(
                     context: context,
@@ -347,7 +343,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
                     route: '/saved-posts',
                   ),
 
-                  // ── Nutrition & Scanning ─────────────────────────────────
+                  // ── Nutrition & Scanning ───────────────────────────
                   _sectionHeader('Nutrition & Scanning'),
                   _tile(
                     context: context,
@@ -371,7 +367,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
                     route: '/manual-barcode-entry',
                   ),
 
-                  // ── Liver Health ─────────────────────────────────────────
+                  // ── Liver Health ───────────────────────────────────
                   _sectionHeader(
                     'Liver Health',
                     icon: Icons.favorite_rounded,
@@ -418,7 +414,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
                     iconColor: Colors.purple.shade600,
                   ),
 
-                  // ── Recipes ──────────────────────────────────────────────
+                  // ── Recipes ────────────────────────────────────────
                   _sectionHeader('Recipes'),
                   if (isPremium) ...[
                     _tile(
@@ -460,7 +456,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
                     ),
                   ],
 
-                  // ── Shopping ─────────────────────────────────────────────
+                  // ── Shopping ───────────────────────────────────────
                   _sectionHeader('Shopping'),
                   if (isPremium) ...[
                     _tile(
@@ -490,14 +486,56 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
                     ),
                   ],
 
-                  // ── Account ──────────────────────────────────────────────
+                  // ── Developer Tools (dev mode only) ───────────────
+                  if (isDev) ...[
+                    _sectionHeader(
+                      'Developer Tools',
+                      icon: Icons.code_rounded,
+                      color: Colors.deepPurple.shade400,
+                    ),
+                    _tile(
+                      context: context,
+                      icon: Icons.psychology_rounded,
+                      label: 'LoRA Dataset Manager',
+                      pageKey: 'lora_dataset',
+                      route: '/lora-dataset',
+                      iconColor: Colors.deepPurple.shade600,
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.deepPurple.shade100,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          'DEV',
+                          style: TextStyle(
+                            color: Colors.deepPurple.shade800,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  // ── Account ────────────────────────────────────────
                   _sectionHeader('Account'),
+                  _tile(
+                    context: context,
+                    icon: Icons.settings_outlined,
+                    label: 'Settings',
+                    pageKey: 'settings',
+                    route: '/settings',
+                  ),
                   _tile(
                     context: context,
                     icon: isPremium
                         ? Icons.star_rounded
                         : Icons.star_outline_rounded,
-                    label: isPremium ? 'Premium Active' : 'Upgrade to Premium',
+                    label:
+                        isPremium ? 'Premium Active' : 'Upgrade to Premium',
                     pageKey: 'purchase',
                     route: '/purchase',
                     iconColor:
@@ -548,8 +586,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
     );
   }
 
-  // ── Sign out ─────────────────────────────────────────────────────────────
-
+  // ── Sign out ───────────────────────────────────────────────────────────
   void _showSignOutDialog(BuildContext context) {
     showDialog(
       context: context,
@@ -607,7 +644,6 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
       await AuthService.signOut();
       await prefs.clear();
       await DatabaseServiceCore.clearAllUserCache();
-
       if (context.mounted) Navigator.of(context).pop();
       if (context.mounted) {
         Navigator.of(context)
@@ -629,8 +665,7 @@ class _AppDrawerState extends State<AppDrawer> with WidgetsBindingObserver {
   }
 }
 
-// ── Drawer header ────────────────────────────────────────────────────────────
-
+// ── Drawer header ──────────────────────────────────────────────────────────
 class _DrawerHeader extends StatelessWidget {
   final String? email;
   final bool isPremium;
@@ -674,7 +709,6 @@ class _DrawerHeader extends StatelessWidget {
             child: const Icon(Icons.favorite_rounded,
                 color: Colors.white, size: 26),
           ),
-
           const SizedBox(height: 12),
 
           // App name

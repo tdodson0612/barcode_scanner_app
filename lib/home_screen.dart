@@ -35,6 +35,7 @@ import 'package:liver_wise/widgets/tutorial_overlay.dart';
 import '../models/tracker_entry.dart';   
 import 'package:liver_wise/services/presence_service.dart';
 import 'package:liver_wise/widgets/friends_online_bar.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class Recipe {
   final String title;

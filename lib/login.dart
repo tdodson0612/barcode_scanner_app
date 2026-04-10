@@ -43,10 +43,14 @@ class _LoginPageState extends State<LoginPage> {
   bool _obscureConfirmPassword = true;
   bool _rememberMe = true;
 
-  @override
+ @override
   void initState() {
     super.initState();
     _loadSavedCredentials();
+    
+    // TEMP — remove after getting token
+    final session = Supabase.instance.client.auth.currentSession;
+    AppConfig.debugPrint('TOKEN: ${session?.accessToken}');
   }
 
   @override

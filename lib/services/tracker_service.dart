@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/tracker_entry.dart';
 import '../liverhealthbar.dart';
 import '../config/app_config.dart';
+import 'liver_snapshot_sync.dart'; // ← NEW
 
 class TrackerService {
   static const String _STORAGE_KEY_PREFIX = 'tracker_entries_';
@@ -99,6 +100,11 @@ class TrackerService {
   }
 
   /// Save a tracker entry with verification
+  ///
+  /// LORA_INTEGRATION_POINT: After local save is verified, calls
+  /// LiverSnapshotSync.syncEntry() to push the entry to Supabase
+  /// so LiverDashboardPage always has current data. The sync is
+  /// best-effort — a sync failure does NOT fail the save.
   static Future<void> saveEntry(String userId, TrackerEntry entry) async {
     try {
       AppConfig.debugPrint('💾 Saving tracker entry for ${entry.date}');
@@ -136,6 +142,14 @@ class TrackerService {
       AppConfig.debugPrint('   Exercise: ${entry.exercise ?? 'none'}');
       AppConfig.debugPrint('   Water: ${entry.waterIntake ?? 'none'}');
       AppConfig.debugPrint('   Score: ${entry.dailyScore}');
+
+      // ── LORA_INTEGRATION_POINT: Sync to Supabase (best-effort) ──────────
+      // Non-blocking. A sync failure here does not affect the local save.
+      LiverSnapshotSync.syncEntry(userId, entry).catchError((e) {
+        AppConfig.debugPrint('⚠️ Snapshot sync failed (non-fatal): $e');
+      });
+      // ── End sync ─────────────────────────────────────────────────────────
+
     } catch (e) {
       AppConfig.debugPrint('❌ Error saving entry: $e');
       throw Exception('Failed to save tracker entry: $e');
