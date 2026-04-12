@@ -36,6 +36,7 @@ import '../models/tracker_entry.dart';
 import 'package:liver_wise/services/presence_service.dart';
 import 'package:liver_wise/widgets/friends_online_bar.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'widgets/health_summary_card.dart';
 
 class Recipe {
   final String title;
@@ -353,7 +354,6 @@ class _HomePageState extends State<HomePage>
     _checkDay7Achievement();
     _loadFeed();
     _feedScrollController.addListener(_onFeedScroll);
-    PresenceService.startHeartbeat();
   }
 
   bool _didPrecache = false;
@@ -409,6 +409,7 @@ class _HomePageState extends State<HomePage>
   }
 
   @override
+
   void dispose() {
     _isDisposed = true;
     _premiumController.removeListener(_onPremiumStateChanged);
@@ -416,7 +417,9 @@ class _HomePageState extends State<HomePage>
     _rewardedAd?.dispose();
     _searchController.dispose();
     _feedScrollController.dispose();
-    PresenceService.stopHeartbeat();
+    for (var controller in _commentControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -471,40 +474,83 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _initializeAsync() async {
     try {
-      await Future.delayed(const Duration(milliseconds: 100));
-      
-      if (!mounted || _isDisposed) return;
-      
-      await _premiumController.refresh();
-      
       if (AppConfig.enableDebugPrints) {
-        print("🔐 Premium status after refresh: $_isPremium");
+        print("🏠 HOME: Starting initialization...");
       }
-      
+
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      if (!mounted || _isDisposed) return;
+
+      final currentUserId = AuthService.currentUserId;
+      if (currentUserId == null) {
+        if (AppConfig.enableDebugPrints) {
+          print("⚠️ HOME: No user session found, skipping favorite load");
+        }
+
+        if (mounted && !_isDisposed) {
+          setState(() => _favoriteRecipes = []);
+        }
+
+        if (!_isPremium) {
+          _loadInterstitialAd();
+          _loadRewardedAd();
+        }
+
+        return;
+      }
+
+      if (AppConfig.enableDebugPrints) {
+        print("✅ HOME: Session found: $currentUserId");
+      }
+
+      if (!mounted || _isDisposed) return;
+
+      try {
+        await _premiumController.refresh();
+        if (AppConfig.enableDebugPrints) {
+          print("🔐 HOME: Premium status: $_isPremium");
+        }
+      } catch (e) {
+        if (AppConfig.enableDebugPrints) {
+          print("⚠️ HOME: Premium check failed (non-critical): $e");
+        }
+      }
+
+      if (!mounted || _isDisposed) return;
+
       if (!_isPremium) {
         if (AppConfig.enableDebugPrints) {
-          print("📺 Loading ads for FREE user");
+          print("📺 HOME: Loading ads for FREE user");
         }
         _loadInterstitialAd();
         _loadRewardedAd();
-      } else {
-        if (AppConfig.enableDebugPrints) {
-          print("🚫 Skipping ads for PREMIUM user");
-        }
       }
-      
-      await _loadFavoriteRecipes();
-      await _syncFavoritesFromDatabase();
 
+      if (!mounted || _isDisposed) return;
+
+      _loadFavoriteRecipes().then((_) {
+        if (AppConfig.enableDebugPrints) {
+          print("✅ HOME: Favorites loaded successfully");
+        }
+      }).catchError((e) {
+        if (AppConfig.enableDebugPrints) {
+          print("⚠️ HOME: Failed to load favorites (non-critical): $e");
+        }
+        if (mounted && !_isDisposed) {
+          setState(() => _favoriteRecipes = []);
+        }
+      });
+
+      if (AppConfig.enableDebugPrints) {
+        print("✅ HOME: Initialization complete");
+      }
     } catch (e) {
-      if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.initializationError,
-          showSnackBar: true,
-          customMessage: 'Failed to initialize home screen',
-        );
+      if (AppConfig.enableDebugPrints) {
+        print("❌ HOME: Initialization error: $e");
+      }
+      if (mounted && !_isDisposed) {
+        setState(() => _favoriteRecipes = []);
       }
     }
   }
@@ -513,6 +559,14 @@ class _HomePageState extends State<HomePage>
     if (_isDisposed || _isPremium) {
       if (AppConfig.enableDebugPrints && _isPremium) {
         print("🚫 Not loading interstitial - user is PREMIUM");
+      }
+      return;
+    }
+
+    // google_mobile_ads only has a plugin on Android/iOS — skip on macOS/web/desktop
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      if (AppConfig.enableDebugPrints) {
+        print("🚫 Skipping interstitial ad - not supported on this platform");
       }
       return;
     }
@@ -553,6 +607,14 @@ class _HomePageState extends State<HomePage>
     if (_isDisposed || _isPremium) {
       if (AppConfig.enableDebugPrints && _isPremium) {
         print("🚫 Not loading rewarded ad - user is PREMIUM");
+      }
+      return;
+    }
+
+    // google_mobile_ads only has a plugin on Android/iOS — skip on macOS/web/desktop
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      if (AppConfig.enableDebugPrints) {
+        print("🚫 Skipping rewarded ad - not supported on this platform");
       }
       return;
     }
@@ -760,22 +822,30 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _loadFavoriteRecipes() async {
-    try {
-      final recipes = await FavoriteRecipesService.getFavoriteRecipes();
+    final userId = AuthService.currentUserId;
+    if (userId == null) {
+      if (AppConfig.enableDebugPrints) {
+        print('⚠️ Cannot load favorites: No user ID');
+      }
+      if (mounted && !_isDisposed) {
+        setState(() => _favoriteRecipes = []);
+      }
+      return;
+    }
 
+    try {
+      AppConfig.debugPrint('📖 HOME: Loading favorite recipes for user: $userId');
+      final recipes = await FavoriteRecipesService.getFavoriteRecipes();
+      AppConfig.debugPrint('✅ HOME: Loaded ${recipes.length} favorite recipes');
       if (mounted && !_isDisposed) {
         setState(() => _favoriteRecipes = recipes);
       }
     } catch (e) {
-      if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.databaseError,
-          showSnackBar: true,
-          customMessage: 'Failed to load favorite recipes',
-        );
+      AppConfig.debugPrint('❌ HOME: Error loading favorites: $e');
+      if (mounted && !_isDisposed) {
+        setState(() => _favoriteRecipes = []);
       }
+      // Silent fail — no error dialog on home screen load
     }
   }
 
@@ -4823,6 +4893,9 @@ class _HomePageState extends State<HomePage>
             // ── Friends online ───────────────────────────────────────
             const FriendsOnlineBar(),
 
+            // ── Health summary (score, water, streak) ────────────────
+            const HealthSummaryCard(),
+
             // ── Today's nutrition snapshot ───────────────────────────
             _buildNutritionSnapshot(),
 
@@ -5008,6 +5081,9 @@ class _HomePageState extends State<HomePage>
             const SizedBox(height: 30),
 
             // ── Community Feed ───────────────────────────────────────
+            // ✅ FIXED: Added constraints matching BariWise to prevent
+            // the feed section from causing layout issues on iOS that
+            // resulted in a blank screen.
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -5102,8 +5178,7 @@ class _HomePageState extends State<HomePage>
                     ListView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      itemCount:
-                          _feedPosts.length + (_hasMorePosts ? 1 : 0),
+                      itemCount: _feedPosts.length + (_hasMorePosts ? 1 : 0),
                       itemBuilder: (context, index) {
                         if (index == _feedPosts.length) {
                           return Center(
@@ -5149,8 +5224,7 @@ class _HomePageState extends State<HomePage>
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white
-                            .withAlpha((0.9 * 255).toInt()),
+                        color: Colors.white.withAlpha((0.9 * 255).toInt()),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: const Row(

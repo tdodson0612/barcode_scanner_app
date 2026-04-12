@@ -1,8 +1,12 @@
-// main.dart - FIXED: iOS/iPad-compatible Firebase initialization + Android 15 Edge-to-Edge
+// main.dart
+// ✅ FIXED: Recursive main() call on retry replaced with safe runApp restart
+// ✅ FIXED: _isReady guard on initialRoute prevents routing before init completes
+// ✅ iOS/iPad-compatible Firebase initialization + Android 15 Edge-to-Edge
+
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';  // ✅ ADDED for SystemChrome
+import 'package:flutter/services.dart';
 import 'package:app_links/app_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -51,13 +55,12 @@ import 'services/liver_notification_service.dart';
 // ── LoRA & Settings ───────────────────────────────────────────────────────
 import 'pages/lora_dataset_page.dart';
 import 'pages/settings_page.dart';
-import 'widgets/admin_guard.dart'; // ← NEW
+import 'widgets/admin_guard.dart';
 
 
 /// 🔥 Background FCM handler (Android only - required for messages when app is terminated)
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Initialize Firebase if not already initialized (Android only)
   if (!kIsWeb && Platform.isAndroid) {
     await Firebase.initializeApp();
   }
@@ -66,67 +69,52 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // ✅ NEW: Configure system UI for edge-to-edge display on Android 15+
-  // This fixes Google Play Console warnings about deprecated edge-to-edge APIs
+
+  // ✅ Configure system UI for edge-to-edge display on Android 15+
   if (!kIsWeb && Platform.isAndroid) {
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,  // Transparent status bar
-        statusBarIconBrightness: Brightness.dark,  // Dark icons on light background
-        systemNavigationBarColor: Colors.transparent,  // Transparent nav bar
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        systemNavigationBarColor: Colors.transparent,
         systemNavigationBarIconBrightness: Brightness.dark,
       ),
     );
-    
-    // Enable edge-to-edge mode (draws behind system bars)
-    SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.edgeToEdge,  // ✅ Modern API for edge-to-edge (replaces deprecated APIs)
-    );
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   }
-  
-  MobileAds.instance.initialize();
+
+  // ✅ FIX: Only initialize MobileAds on Android/iOS — the plugin has no
+  // macOS/web implementation and throws MissingPluginException on those
+  // platforms, crashing before runApp is ever called (blank white screen).
+  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    MobileAds.instance.initialize();
+  }
 
   try {
-    // Load environment variables FIRST
     await dotenv.load(fileName: ".env");
-
-    // Validate configuration
     AppConfig.validateConfig();
 
-    // 🔥 CRITICAL FIX: Platform-specific Firebase initialization
-    // iOS/iPadOS: Firebase auto-initializes, do NOT manually set up
+    // 🔥 Platform-specific Firebase initialization
+    // iOS/iPadOS: Firebase auto-initializes via GoogleService-Info.plist
     // Android: Manual initialization required
     try {
       if (!kIsWeb && Platform.isAndroid) {
-        // ✅ ANDROID ONLY: Manual initialization
         await Firebase.initializeApp();
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('✅ Firebase initialized (Android)');
         }
 
-        // Register background message handler (Android only)
-        FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+        FirebaseMessaging.onBackgroundMessage(
+            _firebaseMessagingBackgroundHandler);
 
-        if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('✅ Background FCM handler registered (Android)');
-        }
-
-        // 🔔 Register FOREGROUND FCM listener (Android only)
         FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-          print("🔔 FCM onMessage: ${message.data}");
-
+          AppConfig.debugPrint("🔔 FCM onMessage: ${message.data}");
           if (message.data['type'] == 'refresh_profile') {
-            print("🔄 Refresh profile triggered (FOREGROUND)");
+            AppConfig.debugPrint("🔄 Refresh profile triggered (FOREGROUND)");
             profileUpdateStreamController.add(null);
           }
         });
 
-        if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('✅ Foreground FCM listener registered (Android)');
-        }
-
-        // Request notification permissions (Android only)
         final messaging = FirebaseMessaging.instance;
         final settings = await messaging.requestPermission(
           alert: true,
@@ -136,20 +124,20 @@ void main() async {
         );
 
         if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('📱 Notification permission: ${settings.authorizationStatus}');
-        }
-
-        // Get FCM token for debugging (Android only)
-        final token = await messaging.getToken();
-        if (AppConfig.enableDebugPrints && token != null) {
-          AppConfig.debugPrint('🔑 FCM Token: ${token.substring(0, 20)}...');
+          AppConfig.debugPrint(
+              '📱 Notification permission: ${settings.authorizationStatus}');
+          final token = await messaging.getToken();
+          if (token != null) {
+            AppConfig.debugPrint(
+                '🔑 FCM Token: ${token.substring(0, 20)}...');
+          }
         }
       } else if (!kIsWeb && Platform.isIOS) {
-        // ✅ iOS/iPadOS: Firebase auto-initializes via GoogleService-Info.plist
-        // Do NOT manually initialize or set up FCM - it can cause conflicts
+        // iOS/iPadOS: Firebase auto-initializes, FCM disabled to prevent conflicts
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('✅ Firebase auto-initialized (iOS/iPadOS)');
-          AppConfig.debugPrint('ℹ️  FCM disabled on iOS to prevent conflicts during review');
+          AppConfig.debugPrint(
+              'ℹ️  FCM disabled on iOS to prevent conflicts during review');
         }
       }
     } catch (fcmError) {
@@ -160,7 +148,7 @@ void main() async {
       // Continue without FCM - not critical for app function
     }
 
-    // Initialize Supabase with timeout (critical for app function)
+    // Initialize Supabase (critical for app function)
     if (AppConfig.enableDebugPrints) {
       AppConfig.debugPrint('🔄 Initializing Supabase...');
       AppConfig.debugPrint('Supabase URL: ${AppConfig.supabaseUrl}');
@@ -170,19 +158,23 @@ void main() async {
       url: AppConfig.supabaseUrl,
       anonKey: AppConfig.supabaseAnonKey,
     ).timeout(
-      const Duration(seconds: 15), // Increased timeout for iPad
+      const Duration(seconds: 15),
       onTimeout: () {
-        throw Exception('Supabase connection timeout. Please check your internet.');
+        throw Exception(
+            'Supabase connection timeout. Please check your internet.');
       },
     );
 
     if (AppConfig.enableDebugPrints) {
       AppConfig.debugPrint('✅ Supabase initialized successfully');
       AppConfig.debugPrint('App Name: ${AppConfig.appName}');
-      AppConfig.debugPrint('Platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
+      if (!kIsWeb) {
+        AppConfig.debugPrint(
+            'Platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
+      }
     }
 
-    // ── Initialize liver health notification service ──────────────────────
+    // Initialize liver health notification service
     await LiverNotificationService.initialize();
     if (AppConfig.enableDebugPrints) {
       AppConfig.debugPrint('✅ LiverNotificationService initialized');
@@ -202,7 +194,6 @@ void main() async {
 Widget _buildErrorApp(dynamic error) {
   final errorString = error.toString().toLowerCase();
 
-  // Determine user-friendly message
   String title = 'Unable to Start App';
   String message = 'Please check your internet connection and try again.';
   IconData icon = Icons.cloud_off_rounded;
@@ -212,7 +203,8 @@ Widget _buildErrorApp(dynamic error) {
     title = 'Connection Problem';
     message = 'Please check your internet connection and try again.';
     icon = Icons.wifi_off_rounded;
-  } else if (errorString.contains('configuration') || errorString.contains('url')) {
+  } else if (errorString.contains('configuration') ||
+      errorString.contains('url')) {
     title = 'Configuration Issue';
     message = 'The app needs to be updated. Please contact support.';
     icon = Icons.settings_rounded;
@@ -236,23 +228,17 @@ Widget _buildErrorApp(dynamic error) {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Icon
                 Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
                     color: iconColor.withOpacity(0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(
-                    icon,
-                    size: 80,
-                    color: iconColor,
-                  ),
+                  child: Icon(icon, size: 80, color: iconColor),
                 ),
 
                 const SizedBox(height: 32),
 
-                // Title
                 Text(
                   title,
                   style: const TextStyle(
@@ -264,7 +250,6 @@ Widget _buildErrorApp(dynamic error) {
 
                 const SizedBox(height: 12),
 
-                // Message
                 Text(
                   message,
                   style: TextStyle(
@@ -277,15 +262,21 @@ Widget _buildErrorApp(dynamic error) {
 
                 const SizedBox(height: 40),
 
-                // Retry button
+                // ✅ FIXED: Safe retry — re-runs runApp instead of
+                // recursively calling main() which caused a crash
                 SizedBox(
                   width: 200,
                   height: 50,
                   child: ElevatedButton.icon(
-                    onPressed: () {
-                      // Force app restart by calling main again
-                      WidgetsFlutterBinding.ensureInitialized();
-                      main();
+                    onPressed: () async {
+                      try {
+                        await dotenv.load(fileName: ".env");
+                        await Supabase.initialize(
+                          url: AppConfig.supabaseUrl,
+                          anonKey: AppConfig.supabaseAnonKey,
+                        ).timeout(const Duration(seconds: 15));
+                      } catch (_) {}
+                      runApp(const MyApp());
                     },
                     icon: const Icon(Icons.refresh),
                     label: const Text(
@@ -307,7 +298,6 @@ Widget _buildErrorApp(dynamic error) {
 
                 const SizedBox(height: 24),
 
-                // Help text
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -336,7 +326,6 @@ Widget _buildErrorApp(dynamic error) {
                   ),
                 ),
 
-                // Debug details
                 if (AppConfig.enableDebugPrints)
                   Padding(
                     padding: const EdgeInsets.only(top: 16),
@@ -389,8 +378,7 @@ class _MyAppState extends State<MyApp> {
   Future<void> _checkOnboarding() async {
     final completed = await OnboardingPage.hasCompletedOnboarding();
     final user = Supabase.instance.client.auth.currentUser;
-    // Only show onboarding if user is authenticated (we have their data)
-    // and they haven't seen it before
+    // Only show onboarding if user is authenticated and hasn't seen it
     if (!completed && user != null) {
       _showOnboarding = true;
     }
@@ -400,30 +388,27 @@ class _MyAppState extends State<MyApp> {
     try {
       _appLinks = AppLinks();
 
-      // Handle deep links when app is already running
       _appLinks.uriLinkStream.listen((Uri? uri) async {
         if (uri != null && uri.toString().contains('reset-password')) {
           await _handleResetPasswordLink(uri);
         }
       });
 
-      // Handle deep links when app is launched by link (cold start)
       try {
         final initialUri = await _appLinks.getInitialLink();
-        if (initialUri != null && initialUri.toString().contains('reset-password')) {
+        if (initialUri != null &&
+            initialUri.toString().contains('reset-password')) {
           await _handleResetPasswordLink(initialUri);
         }
       } catch (e) {
         if (AppConfig.enableDebugPrints) {
           AppConfig.debugPrint('Failed to handle initial deep link: $e');
         }
-        // Silent fail - not critical
       }
     } catch (e) {
       if (AppConfig.enableDebugPrints) {
         AppConfig.debugPrint('Failed to initialize app links: $e');
       }
-      // Silent fail - deep links not critical for app function
     }
   }
 
@@ -439,10 +424,12 @@ class _MyAppState extends State<MyApp> {
           );
 
       if (mounted) {
-        Navigator.pushNamed(context, '/reset-password', arguments: response.session);
+        Navigator.pushNamed(context, '/reset-password',
+            arguments: response.session);
       } else {
         if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('⚠️ No valid session found in reset-password link');
+          AppConfig.debugPrint(
+              '⚠️ No valid session found in reset-password link');
         }
       }
     } catch (e) {
@@ -450,13 +437,13 @@ class _MyAppState extends State<MyApp> {
         AppConfig.debugPrint('❌ Error handling reset-password link: $e');
       }
 
-      // Show user-friendly error if mounted
       if (mounted) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Password reset link is invalid or expired. Please request a new one.'),
+                content: Text(
+                    'Password reset link is invalid or expired. Please request a new one.'),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -484,8 +471,6 @@ class _MyAppState extends State<MyApp> {
       if (AppConfig.enableDebugPrints) {
         AppConfig.debugPrint('Error checking premium status: $e');
       }
-
-      // Default to free tier on error
       if (mounted) {
         setState(() {
           _isPremium = false;
@@ -504,13 +489,15 @@ class _MyAppState extends State<MyApp> {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
         useMaterial3: true,
-        // iPad-friendly defaults
         textTheme: const TextTheme(
           bodyLarge: TextStyle(fontSize: 16),
           bodyMedium: TextStyle(fontSize: 14),
         ),
       ),
-      initialRoute: _getInitialRoute(supabase),
+      // ✅ FIXED: _isReady guard prevents routing before initialization
+      // completes. Without this, _getInitialRoute ran before the Supabase
+      // session was restored on cold start, causing a blank screen on iOS.
+      initialRoute: _isReady ? _getInitialRoute(supabase) : '/login',
       routes: {
         '/login':               (context) => const LoginPage(),
         '/home':                (context) => const HomePage(),
@@ -532,9 +519,9 @@ class _MyAppState extends State<MyApp> {
         '/my-cookbook':         (context) => const MyCookbookPage(),
         '/saved-posts':         (context) => const SavedPostsPage(),
         '/settings':            (context) => const SettingsPage(),
-        // ── Admin-only (dev build + admin email required) ────────────────
-        '/lora-dataset':        (context) => const AdminGuard(child: LoraDatasetPage()), // ← CHANGED
-        // ── Liver health features ──────────────────────────────────────────
+        // ── Admin-only ───────────────────────────────────────────────
+        '/lora-dataset':        (context) => const AdminGuard(child: LoraDatasetPage()),
+        // ── Liver health features ────────────────────────────────────
         '/liver-hub':           (context) => const LiverHubPage(),
         '/liver-dashboard':     (context) => const LiverDashboardPage(),
         '/hydration-log':       (context) => const HydrationLogPage(),
@@ -542,7 +529,8 @@ class _MyAppState extends State<MyApp> {
         '/symptom-log':         (context) => const SymptomLogPage(),
         '/alcohol-log':         (context) => const AlcoholLogPage(),
         '/reset-password': (context) {
-          final session = ModalRoute.of(context)?.settings.arguments as Session?;
+          final session =
+              ModalRoute.of(context)?.settings.arguments as Session?;
           return ResetPasswordPage(session: session);
         },
       },
@@ -551,7 +539,6 @@ class _MyAppState extends State<MyApp> {
           AppConfig.debugPrint('Unknown route requested: ${settings.name}');
         }
 
-        // User-friendly 404 page
         return MaterialPageRoute(
           builder: (context) => Scaffold(
             appBar: AppBar(
