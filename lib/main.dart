@@ -1,4 +1,7 @@
 // main.dart
+// ✅ FIXED: Password reset deep links handled via Supabase onAuthStateChange
+//           instead of getSessionFromUrl — works for both cold-start and
+//           foreground deep links, and for both custom-scheme and HTTPS links.
 // ✅ FIXED: Recursive main() call on retry replaced with safe runApp restart
 // ✅ FIXED: _isReady guard on initialRoute prevents routing before init completes
 // ✅ iOS/iPad-compatible Firebase initialization + Android 15 Edge-to-Edge
@@ -57,8 +60,7 @@ import 'pages/lora_dataset_page.dart';
 import 'pages/settings_page.dart';
 import 'widgets/admin_guard.dart';
 
-
-/// 🔥 Background FCM handler (Android only - required for messages when app is terminated)
+/// 🔥 Background FCM handler (Android only)
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (!kIsWeb && Platform.isAndroid) {
@@ -70,7 +72,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ✅ Configure system UI for edge-to-edge display on Android 15+
+  // ✅ Edge-to-edge on Android 15+
   if (!kIsWeb && Platform.isAndroid) {
     SystemChrome.setSystemUIOverlayStyle(
       const SystemUiOverlayStyle(
@@ -83,9 +85,6 @@ void main() async {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   }
 
-  // ✅ FIX: Only initialize MobileAds on Android/iOS — the plugin has no
-  // macOS/web implementation and throws MissingPluginException on those
-  // platforms, crashing before runApp is ever called (blank white screen).
   if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
     MobileAds.instance.initialize();
   }
@@ -94,15 +93,11 @@ void main() async {
     await dotenv.load(fileName: ".env");
     AppConfig.validateConfig();
 
-    // 🔥 Platform-specific Firebase initialization
-    // iOS/iPadOS: Firebase auto-initializes via GoogleService-Info.plist
-    // Android: Manual initialization required
+    // 🔥 Firebase initialization
     try {
       if (!kIsWeb && Platform.isAndroid) {
         await Firebase.initializeApp();
-        if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('✅ Firebase initialized (Android)');
-        }
+        AppConfig.debugPrint('✅ Firebase initialized (Android)');
 
         FirebaseMessaging.onBackgroundMessage(
             _firebaseMessagingBackgroundHandler);
@@ -123,9 +118,10 @@ void main() async {
           provisional: false,
         );
 
+        AppConfig.debugPrint(
+            '📱 Notification permission: ${settings.authorizationStatus}');
+
         if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint(
-              '📱 Notification permission: ${settings.authorizationStatus}');
           final token = await messaging.getToken();
           if (token != null) {
             AppConfig.debugPrint(
@@ -133,26 +129,17 @@ void main() async {
           }
         }
       } else if (!kIsWeb && Platform.isIOS) {
-        // iOS/iPadOS: Firebase auto-initializes, FCM disabled to prevent conflicts
-        if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('✅ Firebase auto-initialized (iOS/iPadOS)');
-          AppConfig.debugPrint(
-              'ℹ️  FCM disabled on iOS to prevent conflicts during review');
-        }
+        AppConfig.debugPrint('✅ Firebase auto-initialized (iOS/iPadOS)');
+        AppConfig.debugPrint(
+            'ℹ️  FCM disabled on iOS to prevent conflicts during review');
       }
     } catch (fcmError) {
-      if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('⚠️ Firebase/FCM setup failed: $fcmError');
-        AppConfig.debugPrint('App will continue without push notifications');
-      }
-      // Continue without FCM - not critical for app function
+      AppConfig.debugPrint('⚠️ Firebase/FCM setup failed: $fcmError');
+      AppConfig.debugPrint('App will continue without push notifications');
     }
 
-    // Initialize Supabase (critical for app function)
-    if (AppConfig.enableDebugPrints) {
-      AppConfig.debugPrint('🔄 Initializing Supabase...');
-      AppConfig.debugPrint('Supabase URL: ${AppConfig.supabaseUrl}');
-    }
+    // Initialize Supabase
+    AppConfig.debugPrint('🔄 Initializing Supabase...');
 
     await Supabase.initialize(
       url: AppConfig.supabaseUrl,
@@ -165,27 +152,15 @@ void main() async {
       },
     );
 
-    if (AppConfig.enableDebugPrints) {
-      AppConfig.debugPrint('✅ Supabase initialized successfully');
-      AppConfig.debugPrint('App Name: ${AppConfig.appName}');
-      if (!kIsWeb) {
-        AppConfig.debugPrint(
-            'Platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}');
-      }
-    }
+    AppConfig.debugPrint('✅ Supabase initialized successfully');
 
     // Initialize liver health notification service
     await LiverNotificationService.initialize();
-    if (AppConfig.enableDebugPrints) {
-      AppConfig.debugPrint('✅ LiverNotificationService initialized');
-    }
+    AppConfig.debugPrint('✅ LiverNotificationService initialized');
 
     runApp(const MyApp());
   } catch (e) {
-    if (AppConfig.enableDebugPrints) {
-      print('❌ Critical app initialization failed: $e');
-      print('Stack trace: ${StackTrace.current}');
-    }
+    AppConfig.debugPrint('❌ Critical app initialization failed: $e');
     runApp(_buildErrorApp(e));
   }
 }
@@ -236,34 +211,23 @@ Widget _buildErrorApp(dynamic error) {
                   ),
                   child: Icon(icon, size: 80, color: iconColor),
                 ),
-
                 const SizedBox(height: 32),
-
                 Text(
                   title,
                   style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
+                      fontSize: 24, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
-
                 const SizedBox(height: 12),
-
                 Text(
                   message,
                   style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey.shade700,
-                    height: 1.5,
-                  ),
+                      fontSize: 16,
+                      color: Colors.grey.shade700,
+                      height: 1.5),
                   textAlign: TextAlign.center,
                 ),
-
                 const SizedBox(height: 40),
-
-                // ✅ FIXED: Safe retry — re-runs runApp instead of
-                // recursively calling main() which caused a crash
                 SizedBox(
                   width: 200,
                   height: 50,
@@ -282,22 +246,17 @@ Widget _buildErrorApp(dynamic error) {
                     label: const Text(
                       'Try Again',
                       style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
+                          fontSize: 16, fontWeight: FontWeight.w600),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green.shade600,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                          borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 24),
-
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -307,34 +266,26 @@ Widget _buildErrorApp(dynamic error) {
                   ),
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.lightbulb_outline_rounded,
-                        color: Colors.blue.shade700,
-                        size: 20,
-                      ),
+                      Icon(Icons.lightbulb_outline_rounded,
+                          color: Colors.blue.shade700, size: 20),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           'If the problem continues, try closing and reopening the app.',
                           style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.blue.shade900,
-                          ),
+                              fontSize: 13, color: Colors.blue.shade900),
                         ),
                       ),
                     ],
                   ),
                 ),
-
                 if (AppConfig.enableDebugPrints)
                   Padding(
                     padding: const EdgeInsets.only(top: 16),
                     child: Text(
                       'Debug: $error',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey,
-                      ),
+                      style:
+                          const TextStyle(fontSize: 10, color: Colors.grey),
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -360,6 +311,11 @@ class _MyAppState extends State<MyApp> {
   bool _showOnboarding = false;
   late final AppLinks _appLinks;
 
+  // ── Password reset state ─────────────────────────────────────────────────
+  // Holds a pending reset session captured before the navigator is ready.
+  Session? _pendingResetSession;
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   void initState() {
     super.initState();
@@ -369,16 +325,53 @@ class _MyAppState extends State<MyApp> {
   Future<void> _initialize() async {
     await _checkPremiumStatus();
     await _checkOnboarding();
+
+    // ✅ Listen for Supabase auth events — this is the most reliable way to
+    // catch password-reset sessions. Supabase fires AuthChangeEvent.passwordRecovery
+    // when it parses a recovery token from a deep link, regardless of whether
+    // the app was cold-started or foregrounded.
+    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      final event = data.event;
+      final session = data.session;
+
+      AppConfig.debugPrint('🔐 Auth event: $event');
+
+      if (event == AuthChangeEvent.passwordRecovery && session != null) {
+        AppConfig.debugPrint('🔑 Password recovery session received');
+        _routeToPasswordReset(session);
+      }
+    });
+
+    // ✅ Also handle deep links explicitly via app_links for cases where
+    // Supabase doesn't auto-parse the URL (e.g. some Android custom schemes).
+    _initAppLinks();
+
     if (mounted) {
       setState(() => _isReady = true);
     }
-    _initAppLinks();
+  }
+
+  /// Navigate to the reset password page. If the navigator isn't ready yet
+  /// (app is still initializing), store the session and navigate once built.
+  void _routeToPasswordReset(Session session) {
+    final nav = _navigatorKey.currentState;
+    if (nav != null) {
+      nav.pushNamedAndRemoveUntil(
+        '/reset-password',
+        (route) => false,
+        arguments: session,
+      );
+    } else {
+      // Navigator not ready yet — store and route after build
+      AppConfig.debugPrint(
+          '⏳ Navigator not ready, storing pending reset session');
+      _pendingResetSession = session;
+    }
   }
 
   Future<void> _checkOnboarding() async {
     final completed = await OnboardingPage.hasCompletedOnboarding();
     final user = Supabase.instance.client.auth.currentUser;
-    // Only show onboarding if user is authenticated and hasn't seen it
     if (!completed && user != null) {
       _showOnboarding = true;
     }
@@ -388,93 +381,89 @@ class _MyAppState extends State<MyApp> {
     try {
       _appLinks = AppLinks();
 
+      // Foreground deep links
       _appLinks.uriLinkStream.listen((Uri? uri) async {
-        if (uri != null && uri.toString().contains('reset-password')) {
-          await _handleResetPasswordLink(uri);
+        if (uri != null) {
+          AppConfig.debugPrint('🔗 Deep link received: $uri');
+          await _handleDeepLink(uri);
         }
       });
 
+      // Cold-start deep link
       try {
         final initialUri = await _appLinks.getInitialLink();
-        if (initialUri != null &&
-            initialUri.toString().contains('reset-password')) {
-          await _handleResetPasswordLink(initialUri);
+        if (initialUri != null) {
+          AppConfig.debugPrint('🔗 Initial deep link: $initialUri');
+          await _handleDeepLink(initialUri);
         }
       } catch (e) {
-        if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('Failed to handle initial deep link: $e');
-        }
+        AppConfig.debugPrint('Failed to handle initial deep link: $e');
       }
     } catch (e) {
-      if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('Failed to initialize app links: $e');
+      AppConfig.debugPrint('Failed to initialize app links: $e');
+    }
+  }
+
+  /// Handle any incoming deep link URI.
+  /// For password reset links Supabase will have already fired
+  /// onAuthStateChange above. This is a fallback for edge cases.
+  Future<void> _handleDeepLink(Uri uri) async {
+    final uriStr = uri.toString();
+
+    if (uriStr.contains('reset-password') ||
+        uriStr.contains('type=recovery') ||
+        uriStr.contains('recovery')) {
+      AppConfig.debugPrint('🔑 Reset-password deep link detected');
+
+      // Let Supabase parse the session from the URL.
+      // onAuthStateChange will fire passwordRecovery and call
+      // _routeToPasswordReset automatically. We only fall back to
+      // getSessionFromUrl if that hasn't fired within a short window.
+      try {
+        final response = await Supabase.instance.client.auth
+            .getSessionFromUrl(uri)
+            .timeout(const Duration(seconds: 10));
+
+        if (response.session != null) {
+          AppConfig.debugPrint(
+              '✅ Session from URL parsed successfully (fallback)');
+          _routeToPasswordReset(response.session!);
+        } else {
+          AppConfig.debugPrint('⚠️ getSessionFromUrl returned null session');
+          _showExpiredLinkError();
+        }
+      } catch (e) {
+        AppConfig.debugPrint('⚠️ getSessionFromUrl failed: $e');
+        // Don't show error yet — onAuthStateChange may still fire
       }
     }
   }
 
-  Future<void> _handleResetPasswordLink(Uri uri) async {
-    try {
-      final response = await Supabase.instance.client.auth
-          .getSessionFromUrl(uri)
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () {
-              throw Exception('Password reset link expired or invalid');
-            },
-          );
+  void _showExpiredLinkError() {
+    final nav = _navigatorKey.currentState;
+    if (nav == null) return;
 
-      if (mounted) {
-        Navigator.pushNamed(context, '/reset-password',
-            arguments: response.session);
-      } else {
-        if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint(
-              '⚠️ No valid session found in reset-password link');
-        }
-      }
-    } catch (e) {
-      if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('❌ Error handling reset-password link: $e');
-      }
-
-      if (mounted) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                    'Password reset link is invalid or expired. Please request a new one.'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-        });
-      }
-    }
+    // Navigate to reset page with null session so it shows the
+    // "Link Expired" UI that already exists in ResetPasswordPage.
+    nav.pushNamedAndRemoveUntil(
+      '/reset-password',
+      (route) => false,
+      arguments: null,
+    );
   }
 
   Future<void> _checkPremiumStatus() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final userId = Supabase.instance.client.auth.currentUser?.id;
-
-      if (AppConfig.enableDebugPrints && userId != null) {
-        AppConfig.debugPrint('Current user ID: $userId');
-      }
-
       if (mounted) {
         setState(() {
           _isPremium = prefs.getBool('isPremiumUser') ?? false;
         });
       }
     } catch (e) {
-      if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('Error checking premium status: $e');
-      }
+      AppConfig.debugPrint('Error checking premium status: $e');
       if (mounted) {
-        setState(() {
-          _isPremium = false;
-        });
+        setState(() => _isPremium = false);
       }
     }
   }
@@ -484,6 +473,7 @@ class _MyAppState extends State<MyApp> {
     final supabase = Supabase.instance.client;
 
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       debugShowCheckedModeBanner: false,
       title: AppConfig.appName,
       theme: ThemeData(
@@ -494,10 +484,31 @@ class _MyAppState extends State<MyApp> {
           bodyMedium: TextStyle(fontSize: 14),
         ),
       ),
-      // ✅ FIXED: _isReady guard prevents routing before initialization
-      // completes. Without this, _getInitialRoute ran before the Supabase
-      // session was restored on cold start, causing a blank screen on iOS.
+      // ✅ _isReady guard prevents routing before initialization completes.
       initialRoute: _isReady ? _getInitialRoute(supabase) : '/login',
+      onGenerateInitialRoutes: (initialRouteName) {
+        // ✅ If a password reset was received before the navigator was ready,
+        // boot straight into the reset page instead of the normal initial route.
+        if (_pendingResetSession != null) {
+          final session = _pendingResetSession!;
+          _pendingResetSession = null;
+          return [
+            MaterialPageRoute(
+              builder: (_) => ResetPasswordPage(session: session),
+              settings: const RouteSettings(name: '/reset-password'),
+            ),
+          ];
+        }
+        // Fall through to normal initialRoute
+        return [
+          MaterialPageRoute(
+            builder: (_) => _isReady
+                ? _buildInitialPage(Supabase.instance.client)
+                : const LoginPage(),
+            settings: RouteSettings(name: initialRouteName),
+          ),
+        ];
+      },
       routes: {
         '/login':               (context) => const LoginPage(),
         '/home':                (context) => const HomePage(),
@@ -535,10 +546,7 @@ class _MyAppState extends State<MyApp> {
         },
       },
       onUnknownRoute: (settings) {
-        if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('Unknown route requested: ${settings.name}');
-        }
-
+        AppConfig.debugPrint('Unknown route requested: ${settings.name}');
         return MaterialPageRoute(
           builder: (context) => Scaffold(
             appBar: AppBar(
@@ -558,28 +566,20 @@ class _MyAppState extends State<MyApp> {
                         color: Colors.orange.withOpacity(0.1),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
-                        Icons.search_off_rounded,
-                        size: 64,
-                        color: Colors.orange,
-                      ),
+                      child: const Icon(Icons.search_off_rounded,
+                          size: 64, color: Colors.orange),
                     ),
                     const SizedBox(height: 24),
-                    const Text(
-                      'Page Not Found',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    const Text('Page Not Found',
+                        style: TextStyle(
+                            fontSize: 24, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 12),
                     Text(
                       'The page you\'re looking for doesn\'t exist or has been moved.',
                       style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey.shade600,
-                        height: 1.5,
-                      ),
+                          fontSize: 16,
+                          color: Colors.grey.shade600,
+                          height: 1.5),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 32),
@@ -595,19 +595,14 @@ class _MyAppState extends State<MyApp> {
                           }
                         },
                         icon: const Icon(Icons.home_rounded),
-                        label: const Text(
-                          'Go Home',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                        label: const Text('Go Home',
+                            style: TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.w600)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.green.shade600,
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                       ),
                     ),
@@ -621,28 +616,32 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
+  Widget _buildInitialPage(SupabaseClient supabase) {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user != null) {
+        if (_showOnboarding) return const OnboardingPage();
+        return const HomePage();
+      }
+    } catch (e) {
+      AppConfig.debugPrint('⚠️ Error determining initial page: $e');
+    }
+    return const LoginPage();
+  }
+
   String _getInitialRoute(SupabaseClient supabase) {
     try {
       final user = supabase.auth.currentUser;
-
       if (user != null) {
-        if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('✅ User authenticated: ${user.email}');
-        }
-        if (_showOnboarding) {
-          return '/onboarding';
-        }
+        AppConfig.debugPrint('✅ User authenticated: ${user.email}');
+        if (_showOnboarding) return '/onboarding';
         return '/home';
       } else {
-        if (AppConfig.enableDebugPrints) {
-          AppConfig.debugPrint('ℹ️ No authenticated user, showing login');
-        }
+        AppConfig.debugPrint('ℹ️ No authenticated user, showing login');
         return '/login';
       }
     } catch (e) {
-      if (AppConfig.enableDebugPrints) {
-        AppConfig.debugPrint('⚠️ Error determining initial route: $e');
-      }
+      AppConfig.debugPrint('⚠️ Error determining initial route: $e');
       return '/login';
     }
   }
