@@ -1,8 +1,9 @@
-// lib/pages/messages_page.dart - FIXED: Badge refresh on page load + iOS badge clearing
+// lib/pages/messages_page.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:liver_wise/services/friends_service.dart';
 import 'package:liver_wise/services/messaging_service.dart';
+import 'package:liver_wise/services/sound_service.dart';
 import 'package:logger/logger.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,7 +20,8 @@ class MessagesPage extends StatefulWidget {
   _MessagesPageState createState() => _MessagesPageState();
 }
 
-class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderStateMixin {
+class _MessagesPageState extends State<MessagesPage>
+    with SingleTickerProviderStateMixin {
   final Logger _logger = Logger();
   late TabController _tabController;
   List<Map<String, dynamic>> _chats = [];
@@ -27,9 +29,13 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
   bool _isLoadingChats = true;
   bool _isLoadingRequests = true;
 
-  // ✅ NEW: Platform channel for clearing iOS badge
+  // Track previous unread total so we only chime on genuinely new messages
+  int _previousUnreadTotal = 0;
+
   static const platform = MethodChannel('com.liverwise/badge');
-  
+  static const Duration _chatsCacheDuration = Duration(minutes: 1);
+  static const Duration _requestsCacheDuration = Duration(minutes: 2);
+
   Future<void> _clearIOSBadge() async {
     try {
       await platform.invokeMethod('clearBadge');
@@ -39,21 +45,16 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     }
   }
 
-  // Cache configuration
-  static const Duration _chatsCacheDuration = Duration(minutes: 1);
-  static const Duration _requestsCacheDuration = Duration(minutes: 2);
+  // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    
-    // ✅ CRITICAL FIX: Refresh badge AND clear iOS badge when entering messages page
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _clearIOSBadge();
       await MessagingService.refreshUnreadBadge();
     });
-    
     _loadData();
   }
 
@@ -63,27 +64,21 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     super.dispose();
   }
 
-  // ========== CACHING HELPERS ==========
+  // ── Cache helpers ─────────────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>?> _getCachedChats() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final cached = prefs.getString('user_chats');
-      
       if (cached == null) return null;
-      
       final data = json.decode(cached);
       final timestamp = data['_cached_at'] as int?;
-      
       if (timestamp == null) return null;
-      
       final age = DateTime.now().millisecondsSinceEpoch - timestamp;
       if (age > _chatsCacheDuration.inMilliseconds) return null;
-      
       final chats = (data['chats'] as List)
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
-      
       _logger.d('📦 Using cached chats (${chats.length} found)');
       return chats;
     } catch (e) {
@@ -120,21 +115,15 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     try {
       final prefs = await SharedPreferences.getInstance();
       final cached = prefs.getString('friend_requests');
-      
       if (cached == null) return null;
-      
       final data = json.decode(cached);
       final timestamp = data['_cached_at'] as int?;
-      
       if (timestamp == null) return null;
-      
       final age = DateTime.now().millisecondsSinceEpoch - timestamp;
       if (age > _requestsCacheDuration.inMilliseconds) return null;
-      
       final requests = (data['requests'] as List)
           .map((e) => Map<String, dynamic>.from(e))
           .toList();
-      
       _logger.d('📦 Using cached friend requests (${requests.length} found)');
       return requests;
     } catch (e) {
@@ -143,7 +132,8 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     }
   }
 
-  Future<void> _cacheFriendRequests(List<Map<String, dynamic>> requests) async {
+  Future<void> _cacheFriendRequests(
+      List<Map<String, dynamic>> requests) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final cacheData = {
@@ -167,7 +157,16 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     }
   }
 
-  // ========== LOAD FUNCTIONS WITH CACHING ==========
+  static Future<void> invalidateChatsCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('user_chats');
+    } catch (e) {
+      print('Error invalidating chats cache: $e');
+    }
+  }
+
+  // ── Load ──────────────────────────────────────────────────────────────────
 
   Future<void> _loadData({bool forceRefresh = false}) async {
     await Future.wait([
@@ -178,14 +177,12 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
 
   Future<void> _loadChats({bool forceRefresh = false}) async {
     setState(() => _isLoadingChats = true);
-    
+
     try {
       _logger.d('📨 Loading chat list...');
-      
-      // Try cache first unless force refresh
+
       if (!forceRefresh) {
         final cachedChats = await _getCachedChats();
-        
         if (cachedChats != null) {
           if (mounted) {
             setState(() {
@@ -197,19 +194,15 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
         }
       }
 
-      // Cache miss or force refresh, fetch from database
       final chats = await MessagingService.getChatList();
-      
-      // Sort chats by last message timestamp (newest first)
+
       chats.sort((a, b) {
         try {
           final timeA = a['lastMessage']?['created_at'];
           final timeB = b['lastMessage']?['created_at'];
-          
           if (timeA == null && timeB == null) return 0;
           if (timeA == null) return 1;
           if (timeB == null) return -1;
-          
           final dateA = DateTime.parse(timeA);
           final dateB = DateTime.parse(timeB);
           return dateB.compareTo(dateA);
@@ -217,20 +210,28 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
           return 0;
         }
       });
-      
-      // Cache the results
+
       await _cacheChats(chats);
-      
+
+      // 🔔 Play chime if unread total has increased since last load
+      final newUnreadTotal = chats.fold<int>(
+          0, (sum, c) => sum + ((c['unreadCount'] ?? 0) as int));
+      if (newUnreadTotal > _previousUnreadTotal) {
+        await SoundService.playMessageChime();
+      }
+      _previousUnreadTotal = newUnreadTotal;
+
       _logger.i('✅ Loaded ${chats.length} chats');
-      
-      setState(() {
-        _chats = chats;
-        _isLoadingChats = false;
-      });
+
+      if (mounted) {
+        setState(() {
+          _chats = chats;
+          _isLoadingChats = false;
+        });
+      }
     } catch (e) {
       _logger.e('❌ Error loading chats: $e');
-      
-      // Try to use stale cache on error
+
       if (!forceRefresh) {
         final staleChats = await _getCachedChats();
         if (staleChats != null && mounted) {
@@ -241,13 +242,12 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
           return;
         }
       }
-      
-      setState(() => _isLoadingChats = false);
-      
+
       if (mounted) {
+        setState(() => _isLoadingChats = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Unable to load messages'),
+            content: const Text('Unable to load messages'),
             backgroundColor: Colors.red,
             action: SnackBarAction(
               label: 'Retry',
@@ -262,14 +262,12 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
 
   Future<void> _loadFriendRequests({bool forceRefresh = false}) async {
     setState(() => _isLoadingRequests = true);
-    
+
     try {
       _logger.d('👥 Loading friend requests...');
-      
-      // Try cache first unless force refresh
+
       if (!forceRefresh) {
         final cachedRequests = await _getCachedFriendRequests();
-        
         if (cachedRequests != null) {
           if (mounted) {
             setState(() {
@@ -281,22 +279,20 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
         }
       }
 
-      // Cache miss or force refresh, fetch from database
       final requests = await FriendsService.getFriendRequests();
-      
-      // Cache the results
       await _cacheFriendRequests(requests);
-      
+
       _logger.i('✅ Loaded ${requests.length} friend requests');
-      
-      setState(() {
-        _friendRequests = requests;
-        _isLoadingRequests = false;
-      });
+
+      if (mounted) {
+        setState(() {
+          _friendRequests = requests;
+          _isLoadingRequests = false;
+        });
+      }
     } catch (e) {
       _logger.e('❌ Error loading friend requests: $e');
-      
-      // Try to use stale cache on error
+
       if (!forceRefresh) {
         final staleRequests = await _getCachedFriendRequests();
         if (staleRequests != null && mounted) {
@@ -307,13 +303,12 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
           return;
         }
       }
-      
-      setState(() => _isLoadingRequests = false);
-      
+
       if (mounted) {
+        setState(() => _isLoadingRequests = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Unable to load friend requests'),
+            content: const Text('Unable to load friend requests'),
             backgroundColor: Colors.red,
             action: SnackBarAction(
               label: 'Retry',
@@ -326,32 +321,33 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     }
   }
 
+  // ── Friend request actions ────────────────────────────────────────────────
+
   Future<void> _acceptFriendRequest(String requestId) async {
     try {
       _logger.d('✅ Accepting friend request: $requestId');
       await FriendsService.acceptFriendRequest(requestId);
-      
-      // Invalidate both caches (new friend = new chat possibility)
       await _invalidateRequestsCache();
       await _invalidateChatsCache();
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Friend request accepted!'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      
-      // Refresh both tabs with force refresh
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Friend request accepted!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
       _loadData(forceRefresh: true);
     } catch (e) {
       _logger.e('❌ Error accepting request: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error accepting request: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error accepting request: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -359,45 +355,36 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     try {
       _logger.d('❌ Declining friend request: $requestId');
       await FriendsService.declineFriendRequest(requestId);
-      
-      // Invalidate requests cache
       await _invalidateRequestsCache();
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Friend request declined'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      
-      // Refresh requests tab with force refresh
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Friend request declined'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
       _loadFriendRequests(forceRefresh: true);
     } catch (e) {
       _logger.e('❌ Error declining request: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error declining request: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error declining request: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
-  /// Invalidate chats cache when returning from chat (new message sent)
-  static Future<void> invalidateChatsCache() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('user_chats');
-    } catch (e) {
-      print('Error invalidating chats cache: $e');
-    }
-  }
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Messages'),
+        title: const Text('Messages'),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         bottom: TabBar(
@@ -406,32 +393,27 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
           unselectedLabelColor: Colors.white70,
           indicatorColor: Colors.white,
           tabs: [
-            Tab(
-              text: 'Chats',
-              icon: Icon(Icons.chat),
-            ),
+            const Tab(text: 'Chats', icon: Icon(Icons.chat)),
             Tab(
               text: 'Requests',
               icon: Stack(
                 children: [
-                  Icon(Icons.person_add),
+                  const Icon(Icons.person_add),
                   if (_friendRequests.isNotEmpty)
                     Positioned(
                       right: 0,
                       top: 0,
                       child: Container(
-                        padding: EdgeInsets.all(2),
+                        padding: const EdgeInsets.all(2),
                         decoration: BoxDecoration(
                           color: Colors.red,
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        constraints: BoxConstraints(
-                          minWidth: 16,
-                          minHeight: 16,
-                        ),
+                        constraints: const BoxConstraints(
+                            minWidth: 16, minHeight: 16),
                         child: Text(
                           '${_friendRequests.length}',
-                          style: TextStyle(
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
@@ -447,28 +429,27 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.person_search),
+            icon: const Icon(Icons.person_search),
+            tooltip: 'Find Friends',
             onPressed: () async {
               final result = await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => SearchUsersPage()),
+                MaterialPageRoute(builder: (_) => const SearchUsersPage()),
               );
               if (result == true) {
-                // Friend request sent, invalidate requests cache
                 await _invalidateRequestsCache();
                 _loadFriendRequests(forceRefresh: true);
               }
             },
-            tooltip: 'Find Friends',
           ),
           IconButton(
-            icon: Icon(Icons.refresh),
-            onPressed: () => _loadData(forceRefresh: true),
+            icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
+            onPressed: () => _loadData(forceRefresh: true),
           ),
         ],
       ),
-      drawer: AppDrawer(currentPage: 'messages'),
+      drawer: const AppDrawer(currentPage: 'messages'),
       body: TabBarView(
         controller: _tabController,
         children: [
@@ -479,14 +460,13 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     );
   }
 
+  // ── Tabs ──────────────────────────────────────────────────────────────────
+
   Widget _buildChatsTab() {
     if (_isLoadingChats) {
-      return Center(child: CircularProgressIndicator());
+      return const Center(child: CircularProgressIndicator());
     }
-
-    if (_chats.isEmpty) {
-      return _buildEmptyChatsState();
-    }
+    if (_chats.isEmpty) return _buildEmptyChatsState();
 
     return RefreshIndicator(
       onRefresh: () => _loadChats(forceRefresh: true),
@@ -497,9 +477,9 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
           final friend = chat['friend'];
           final lastMessage = chat['lastMessage'];
           final unreadCount = chat['unreadCount'] ?? 0;
-          
+
           return Card(
-            margin: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: ListTile(
               leading: Stack(
                 children: [
@@ -509,8 +489,12 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                         : null,
                     child: friend['avatar_url'] == null
                         ? Text(
-                            (friend['username'] ?? friend['email'] ?? 'U')[0].toUpperCase(),
-                            style: TextStyle(fontWeight: FontWeight.bold),
+                            (friend['username'] ??
+                                    friend['email'] ??
+                                    'U')[0]
+                                .toUpperCase(),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold),
                           )
                         : null,
                   ),
@@ -519,19 +503,18 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                       right: 0,
                       top: 0,
                       child: Container(
-                        padding: EdgeInsets.all(4),
+                        padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
                           color: Colors.red,
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 2),
+                          border:
+                              Border.all(color: Colors.white, width: 2),
                         ),
-                        constraints: BoxConstraints(
-                          minWidth: 18,
-                          minHeight: 18,
-                        ),
+                        constraints: const BoxConstraints(
+                            minWidth: 18, minHeight: 18),
                         child: Text(
                           unreadCount > 9 ? '9+' : '$unreadCount',
-                          style: TextStyle(
+                          style: const TextStyle(
                             color: Colors.white,
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
@@ -545,7 +528,9 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
               title: Text(
                 friend['username'] ?? friend['email'] ?? 'Unknown User',
                 style: TextStyle(
-                  fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.w600,
+                  fontWeight: unreadCount > 0
+                      ? FontWeight.bold
+                      : FontWeight.w600,
                 ),
               ),
               subtitle: lastMessage != null
@@ -554,8 +539,12 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: unreadCount > 0 ? Colors.black : Colors.grey[600],
-                        fontWeight: unreadCount > 0 ? FontWeight.w600 : FontWeight.normal,
+                        color: unreadCount > 0
+                            ? Colors.black
+                            : Colors.grey[600],
+                        fontWeight: unreadCount > 0
+                            ? FontWeight.w600
+                            : FontWeight.normal,
                       ),
                     )
                   : Text(
@@ -573,22 +562,27 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                     Text(
                       _formatMessageTime(lastMessage['created_at']),
                       style: TextStyle(
-                        color: unreadCount > 0 ? Colors.blue : Colors.grey[500],
+                        color: unreadCount > 0
+                            ? Colors.blue
+                            : Colors.grey[500],
                         fontSize: 12,
-                        fontWeight: unreadCount > 0 ? FontWeight.bold : FontWeight.normal,
+                        fontWeight: unreadCount > 0
+                            ? FontWeight.bold
+                            : FontWeight.normal,
                       ),
                     ),
                   if (unreadCount > 0)
                     Container(
-                      margin: EdgeInsets.only(top: 4),
-                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      margin: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                         color: Colors.red,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
                         unreadCount > 9 ? '9+' : '$unreadCount',
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
@@ -600,23 +594,24 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
               onTap: () async {
                 // ✅ CRITICAL: Invalidate badge BEFORE opening chat
                 await MenuIconWithBadge.invalidateCache();
-                
+
                 final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => ChatPage(
                       friendId: friend['id'],
-                      friendName: friend['username'] ?? friend['email'] ?? 'Unknown',
+                      friendName: friend['username'] ??
+                          friend['email'] ??
+                          'Unknown',
                       friendAvatar: friend['avatar_url'],
                     ),
                   ),
                 );
-                
+
                 // ✅ CRITICAL: Refresh badge AFTER returning from chat
                 await MessagingService.refreshUnreadBadge();
-                
+
                 if (result == true) {
-                  // Message sent, invalidate cache and reload
                   await _invalidateChatsCache();
                   _loadChats(forceRefresh: true);
                 }
@@ -630,12 +625,9 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
 
   Widget _buildRequestsTab() {
     if (_isLoadingRequests) {
-      return Center(child: CircularProgressIndicator());
+      return const Center(child: CircularProgressIndicator());
     }
-
-    if (_friendRequests.isEmpty) {
-      return _buildEmptyRequestsState();
-    }
+    if (_friendRequests.isEmpty) return _buildEmptyRequestsState();
 
     return RefreshIndicator(
       onRefresh: () => _loadFriendRequests(forceRefresh: true),
@@ -644,9 +636,9 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
         itemBuilder: (context, index) {
           final request = _friendRequests[index];
           final sender = request['sender'];
-          
+
           return Card(
-            margin: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: ListTile(
               leading: CircleAvatar(
                 backgroundImage: sender['avatar_url'] != null
@@ -654,27 +646,35 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                     : null,
                 child: sender['avatar_url'] == null
                     ? Text(
-                        (sender['username'] ?? sender['email'] ?? 'U')[0].toUpperCase(),
-                        style: TextStyle(fontWeight: FontWeight.bold),
+                        (sender['username'] ??
+                                sender['email'] ??
+                                'U')[0]
+                            .toUpperCase(),
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold),
                       )
                     : null,
               ),
               title: Text(
-                sender['username'] ?? sender['email'] ?? 'Unknown User',
-                style: TextStyle(fontWeight: FontWeight.w600),
+                sender['username'] ??
+                    sender['email'] ??
+                    'Unknown User',
+                style: const TextStyle(fontWeight: FontWeight.w600),
               ),
-              subtitle: Text('Wants to be friends'),
+              subtitle: const Text('Wants to be friends'),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
-                    icon: Icon(Icons.check, color: Colors.green),
-                    onPressed: () => _acceptFriendRequest(request['id']),
+                    icon: const Icon(Icons.check, color: Colors.green),
+                    onPressed: () =>
+                        _acceptFriendRequest(request['id']),
                     tooltip: 'Accept',
                   ),
                   IconButton(
-                    icon: Icon(Icons.close, color: Colors.red),
-                    onPressed: () => _declineFriendRequest(request['id']),
+                    icon: const Icon(Icons.close, color: Colors.red),
+                    onPressed: () =>
+                        _declineFriendRequest(request['id']),
                     tooltip: 'Decline',
                   ),
                 ],
@@ -686,19 +686,18 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     );
   }
 
+  // ── Empty states ──────────────────────────────────────────────────────────
+
   Widget _buildEmptyChatsState() {
     return Center(
       child: Padding(
-        padding: EdgeInsets.all(32),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.chat_bubble_outline,
-              size: 80,
-              color: Colors.grey[400],
-            ),
-            SizedBox(height: 24),
+            Icon(Icons.chat_bubble_outline,
+                size: 80, color: Colors.grey[400]),
+            const SizedBox(height: 24),
             Text(
               'No conversations yet',
               style: TextStyle(
@@ -707,7 +706,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                 color: Colors.grey[600],
               ),
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             Text(
               'Add friends and start chatting!\nAll messaging features are completely free.',
               textAlign: TextAlign.center,
@@ -717,7 +716,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                 height: 1.4,
               ),
             ),
-            SizedBox(height: 32),
+            const SizedBox(height: 32),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -725,29 +724,32 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                   onPressed: () async {
                     final result = await Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => SearchUsersPage()),
+                      MaterialPageRoute(
+                          builder: (_) => const SearchUsersPage()),
                     );
                     if (result == true) {
                       await _invalidateRequestsCache();
                       _loadData(forceRefresh: true);
                     }
                   },
-                  icon: Icon(Icons.person_search),
-                  label: Text('Find Friends'),
+                  icon: const Icon(Icons.person_search),
+                  label: const Text('Find Friends'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue,
                     foregroundColor: Colors.white,
-                    padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12),
                   ),
                 ),
-                SizedBox(width: 12),
+                const SizedBox(width: 12),
                 Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: Colors.green,
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Text(
+                  child: const Text(
                     'FREE',
                     style: TextStyle(
                       color: Colors.white,
@@ -767,16 +769,13 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
   Widget _buildEmptyRequestsState() {
     return Center(
       child: Padding(
-        padding: EdgeInsets.all(32),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.person_add_outlined,
-              size: 80,
-              color: Colors.grey[400],
-            ),
-            SizedBox(height: 24),
+            Icon(Icons.person_add_outlined,
+                size: 80, color: Colors.grey[400]),
+            const SizedBox(height: 24),
             Text(
               'No friend requests',
               style: TextStyle(
@@ -785,7 +784,7 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                 color: Colors.grey[600],
               ),
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
             Text(
               'When someone sends you a friend request,\nit will appear here.',
               textAlign: TextAlign.center,
@@ -795,24 +794,26 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
                 height: 1.4,
               ),
             ),
-            SizedBox(height: 32),
+            const SizedBox(height: 32),
             ElevatedButton.icon(
               onPressed: () async {
                 final result = await Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => SearchUsersPage()),
+                  MaterialPageRoute(
+                      builder: (_) => const SearchUsersPage()),
                 );
                 if (result == true) {
                   await _invalidateRequestsCache();
                   _loadFriendRequests(forceRefresh: true);
                 }
               },
-              icon: Icon(Icons.person_search),
-              label: Text('Find Friends to Connect'),
+              icon: const Icon(Icons.person_search),
+              label: const Text('Find Friends to Connect'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blue,
                 foregroundColor: Colors.white,
-                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 24, vertical: 12),
               ),
             ),
           ],
@@ -821,30 +822,27 @@ class _MessagesPageState extends State<MessagesPage> with SingleTickerProviderSt
     );
   }
 
+  // ── Time formatting ───────────────────────────────────────────────────────
+
   String _formatMessageTime(String? timestamp) {
     if (timestamp == null) return '';
-    
     try {
       final utcDateTime = DateTime.parse(timestamp);
       final localDateTime = utcDateTime.toLocal();
-      
       final now = DateTime.now();
       final difference = now.difference(localDateTime);
-      
+
       if (difference.inDays == 0 && localDateTime.day == now.day) {
         return DateFormat('h:mm a').format(localDateTime);
-      }
-      else if (difference.inDays == 1 || 
-               (localDateTime.day == now.day - 1 && localDateTime.month == now.month)) {
+      } else if (difference.inDays == 1 ||
+          (localDateTime.day == now.day - 1 &&
+              localDateTime.month == now.month)) {
         return 'Yesterday';
-      }
-      else if (difference.inDays < 7) {
+      } else if (difference.inDays < 7) {
         return DateFormat('EEE').format(localDateTime);
-      }
-      else if (localDateTime.year == now.year) {
+      } else if (localDateTime.year == now.year) {
         return DateFormat('MMM d').format(localDateTime);
-      }
-      else {
+      } else {
         return DateFormat('MMM d, y').format(localDateTime);
       }
     } catch (e) {

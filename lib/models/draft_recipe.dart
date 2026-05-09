@@ -3,7 +3,6 @@
 // iOS 14 Compatible | Production Ready | Uses NutritionInfo
 
 import 'nutrition_info.dart';
-import '../liverhealthbar.dart';
 
 class DraftRecipe {
   final String? id; // UUID from database

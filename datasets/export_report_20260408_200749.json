@@ -1,0 +1,24 @@
+{
+  "exported_at": "2026-04-08T20:07:49.321061+00:00",
+  "mode": "all",
+  "worker_endpoint": "https://shrill-paper-a8ce.terryd0612.workers.dev/query",
+  "auth_present": true,
+  "stats": {
+    "positive": {
+      "total_fetched": 132,
+      "pairs_written": 132,
+      "skipped_duplicates": 0,
+      "skipped_compliance": 0,
+      "output_file": "/Users/terrydodson/Projects/barcode_scanner_app/datasets/recipes_v1_20260408_200749.jsonl",
+      "note": "nutrition estimated from ingredient names — no nutrition field in recipes table"
+    },
+    "negative": {
+      "total_pairs": 300,
+      "output_file": "/Users/terrydodson/Projects/barcode_scanner_app/datasets/negative_examples_v1_20260408_200749.jsonl"
+    },
+    "ingredient_matrix": {
+      "total_entries": 32,
+      "output_file": "/Users/terrydodson/Projects/barcode_scanner_app/datasets/ingredient_matrix_v1_20260408_200749.jsonl"
+    }
+  }
+}

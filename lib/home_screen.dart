@@ -31,6 +31,12 @@ import 'package:liver_wise/services/feed_posts_service.dart';
 import 'package:liver_wise/models/draft_recipe.dart';
 import 'package:liver_wise/services/draft_recipes_service.dart';
 import 'services/picture_service.dart';
+import 'package:liver_wise/widgets/tutorial_overlay.dart';
+import '../models/tracker_entry.dart';   
+import 'package:liver_wise/services/presence_service.dart';
+import 'package:liver_wise/widgets/friends_online_bar.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'widgets/health_summary_card.dart';
 
 class Recipe {
   final String title;
@@ -280,6 +286,7 @@ class _HomePageState extends State<HomePage>
   List<FavoriteRecipe> _favoriteRecipes = [];
   bool _showInitialView = true;
   NutritionInfo? _currentNutrition;
+  bool _showTutorial = false;
 
   String _defaultPostVisibility = 'public'; // Default visibility for new posts
 
@@ -288,10 +295,17 @@ class _HomePageState extends State<HomePage>
   bool _hasMorePosts = true;
   int _currentFeedOffset = 0;
   static const int _postsPerPage = 10;
-  
+
   // Scroll controller for feed
   final ScrollController _feedScrollController = ScrollController();
 
+  // Like state tracking
+  final Map<String, bool> _postLikeStatus = {};
+  final Map<String, int> _postLikeCounts = {};
+  final Map<String, bool> _expandedComments = {};
+  final Map<String, List<Map<String, dynamic>>> _postComments = {};
+  final Map<String, bool> _savedPosts = {};
+  final Map<String, TextEditingController> _commentControllers = {};
 
 
 
@@ -319,6 +333,12 @@ class _HomePageState extends State<HomePage>
   int _currentRecipeIndex = 0;
   static const int _recipesPerPage = 2;
 
+  // NEW: GlobalKeys for tutorial highlights
+  final GlobalKey _autoButtonKey = GlobalKey();
+  final GlobalKey _scanButtonKey = GlobalKey();
+  final GlobalKey _manualButtonKey = GlobalKey();
+  final GlobalKey _lookupButtonKey = GlobalKey();
+
   // NEW: Feed state
   List<Map<String, dynamic>> _feedPosts = [];
   bool _isLoadingFeed = false;
@@ -334,7 +354,6 @@ class _HomePageState extends State<HomePage>
     _checkDay7Achievement();
     _loadFeed();
     _feedScrollController.addListener(_onFeedScroll);
-
   }
 
   bool _didPrecache = false;
@@ -390,13 +409,17 @@ class _HomePageState extends State<HomePage>
   }
 
   @override
+
   void dispose() {
     _isDisposed = true;
     _premiumController.removeListener(_onPremiumStateChanged);
     _interstitialAd?.dispose();
     _rewardedAd?.dispose();
     _searchController.dispose();
-    _feedScrollController.dispose(); // 🔥 NEW
+    _feedScrollController.dispose();
+    for (var controller in _commentControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -451,40 +474,83 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _initializeAsync() async {
     try {
-      await Future.delayed(const Duration(milliseconds: 100));
-      
-      if (!mounted || _isDisposed) return;
-      
-      await _premiumController.refresh();
-      
       if (AppConfig.enableDebugPrints) {
-        print("🔐 Premium status after refresh: $_isPremium");
+        print("🏠 HOME: Starting initialization...");
       }
-      
+
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      if (!mounted || _isDisposed) return;
+
+      final currentUserId = AuthService.currentUserId;
+      if (currentUserId == null) {
+        if (AppConfig.enableDebugPrints) {
+          print("⚠️ HOME: No user session found, skipping favorite load");
+        }
+
+        if (mounted && !_isDisposed) {
+          setState(() => _favoriteRecipes = []);
+        }
+
+        if (!_isPremium) {
+          _loadInterstitialAd();
+          _loadRewardedAd();
+        }
+
+        return;
+      }
+
+      if (AppConfig.enableDebugPrints) {
+        print("✅ HOME: Session found: $currentUserId");
+      }
+
+      if (!mounted || _isDisposed) return;
+
+      try {
+        await _premiumController.refresh();
+        if (AppConfig.enableDebugPrints) {
+          print("🔐 HOME: Premium status: $_isPremium");
+        }
+      } catch (e) {
+        if (AppConfig.enableDebugPrints) {
+          print("⚠️ HOME: Premium check failed (non-critical): $e");
+        }
+      }
+
+      if (!mounted || _isDisposed) return;
+
       if (!_isPremium) {
         if (AppConfig.enableDebugPrints) {
-          print("📺 Loading ads for FREE user");
+          print("📺 HOME: Loading ads for FREE user");
         }
         _loadInterstitialAd();
         _loadRewardedAd();
-      } else {
-        if (AppConfig.enableDebugPrints) {
-          print("🚫 Skipping ads for PREMIUM user");
-        }
       }
-      
-      await _loadFavoriteRecipes();
-      await _syncFavoritesFromDatabase();
 
+      if (!mounted || _isDisposed) return;
+
+      _loadFavoriteRecipes().then((_) {
+        if (AppConfig.enableDebugPrints) {
+          print("✅ HOME: Favorites loaded successfully");
+        }
+      }).catchError((e) {
+        if (AppConfig.enableDebugPrints) {
+          print("⚠️ HOME: Failed to load favorites (non-critical): $e");
+        }
+        if (mounted && !_isDisposed) {
+          setState(() => _favoriteRecipes = []);
+        }
+      });
+
+      if (AppConfig.enableDebugPrints) {
+        print("✅ HOME: Initialization complete");
+      }
     } catch (e) {
-      if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.initializationError,
-          showSnackBar: true,
-          customMessage: 'Failed to initialize home screen',
-        );
+      if (AppConfig.enableDebugPrints) {
+        print("❌ HOME: Initialization error: $e");
+      }
+      if (mounted && !_isDisposed) {
+        setState(() => _favoriteRecipes = []);
       }
     }
   }
@@ -493,6 +559,14 @@ class _HomePageState extends State<HomePage>
     if (_isDisposed || _isPremium) {
       if (AppConfig.enableDebugPrints && _isPremium) {
         print("🚫 Not loading interstitial - user is PREMIUM");
+      }
+      return;
+    }
+
+    // google_mobile_ads only has a plugin on Android/iOS — skip on macOS/web/desktop
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      if (AppConfig.enableDebugPrints) {
+        print("🚫 Skipping interstitial ad - not supported on this platform");
       }
       return;
     }
@@ -533,6 +607,14 @@ class _HomePageState extends State<HomePage>
     if (_isDisposed || _isPremium) {
       if (AppConfig.enableDebugPrints && _isPremium) {
         print("🚫 Not loading rewarded ad - user is PREMIUM");
+      }
+      return;
+    }
+
+    // google_mobile_ads only has a plugin on Android/iOS — skip on macOS/web/desktop
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      if (AppConfig.enableDebugPrints) {
+        print("🚫 Skipping rewarded ad - not supported on this platform");
       }
       return;
     }
@@ -740,22 +822,30 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _loadFavoriteRecipes() async {
-    try {
-      final recipes = await FavoriteRecipesService.getFavoriteRecipes();
+    final userId = AuthService.currentUserId;
+    if (userId == null) {
+      if (AppConfig.enableDebugPrints) {
+        print('⚠️ Cannot load favorites: No user ID');
+      }
+      if (mounted && !_isDisposed) {
+        setState(() => _favoriteRecipes = []);
+      }
+      return;
+    }
 
+    try {
+      AppConfig.debugPrint('📖 HOME: Loading favorite recipes for user: $userId');
+      final recipes = await FavoriteRecipesService.getFavoriteRecipes();
+      AppConfig.debugPrint('✅ HOME: Loaded ${recipes.length} favorite recipes');
       if (mounted && !_isDisposed) {
         setState(() => _favoriteRecipes = recipes);
       }
     } catch (e) {
-      if (mounted) {
-        await ErrorHandlingService.handleError(
-          context: context,
-          error: e,
-          category: ErrorHandlingService.databaseError,
-          showSnackBar: true,
-          customMessage: 'Failed to load favorite recipes',
-        );
+      AppConfig.debugPrint('❌ HOME: Error loading favorites: $e');
+      if (mounted && !_isDisposed) {
+        setState(() => _favoriteRecipes = []);
       }
+      // Silent fail — no error dialog on home screen load
     }
   }
 
@@ -1540,10 +1630,10 @@ class _HomePageState extends State<HomePage>
                           Navigator.pop(context);
                           _resetToHome();
                         },
-                        child: Text('Cancel'),
                         style: TextButton.styleFrom(
                           padding: EdgeInsets.symmetric(vertical: 14),
                         ),
+                        child: Text('Cancel'),
                       ),
                     ),
                   ],
@@ -1570,7 +1660,6 @@ class _HomePageState extends State<HomePage>
 
       if (mounted && !_isDisposed) {
         setState(() {
-          _nutritionText = _buildNutritionDisplay(nutrition!);
           _liverHealthScore = score;
           _showLiverBar = true;
           _isLoading = false;
@@ -1621,14 +1710,6 @@ class _HomePageState extends State<HomePage>
         );
       }
     }
-  }
-
-  String _buildNutritionDisplay(NutritionInfo nutrition) {
-    return "Product: ${nutrition.productName}\n"
-          "Energy: ${nutrition.calories.toStringAsFixed(1)} kcal/100g\n"
-          "Fat: ${nutrition.fat.toStringAsFixed(1)} g/100g\n"
-          "Sugar: ${nutrition.sugar.toStringAsFixed(1)} g/100g\n"
-          "Sodium: ${nutrition.sodium.toStringAsFixed(1)} mg/100g";
   }
 
   // 🔥 NEW: Show photo upload dialog with camera/gallery options
@@ -1995,7 +2076,8 @@ class _HomePageState extends State<HomePage>
             AppConfig.debugPrint('📍 Reached end of feed');
           }
         });
-        
+        // Load like data for new posts
+        await _loadLikeDataForPosts(posts);  // <-- ADD THIS LINE
         AppConfig.debugPrint('✅ Feed state updated with ${_feedPosts.length} total posts');
       }
     } catch (e) {
@@ -2017,6 +2099,327 @@ class _HomePageState extends State<HomePage>
       }
     }
   }
+
+  /// Load like status and counts for a list of posts
+  Future<void> _loadLikeDataForPosts(List<Map<String, dynamic>> posts) async {
+    try {
+      for (final post in posts) {
+        final postId = post['id']?.toString();
+        if (postId == null) continue;
+
+        // Load like status and count in parallel
+        final results = await Future.wait([
+          FeedPostsService.hasUserLikedPost(postId),
+          FeedPostsService.getPostLikeCount(postId),
+        ]);
+
+        if (mounted) {
+          setState(() {
+            _postLikeStatus[postId] = results[0] as bool;
+            _postLikeCounts[postId] = results[1] as int;
+          });
+        }
+      }
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error loading like data: $e');
+    }
+  }
+
+  /// Toggle like/unlike for a post
+  Future<void> _toggleLike(String postId) async {
+    try {
+      final isCurrentlyLiked = _postLikeStatus[postId] ?? false;
+      final currentCount = _postLikeCounts[postId] ?? 0;
+
+      // Optimistic update
+      setState(() {
+        _postLikeStatus[postId] = !isCurrentlyLiked;
+        _postLikeCounts[postId] = isCurrentlyLiked 
+          ? (currentCount - 1).clamp(0, 999999) 
+          : currentCount + 1;
+      });
+
+      // Perform the actual like/unlike
+      if (isCurrentlyLiked) {
+        await FeedPostsService.unlikePost(postId);
+      } else {
+        await FeedPostsService.likePost(postId);
+      }
+
+      // Refresh the actual count from server
+      final actualCount = await FeedPostsService.getPostLikeCount(postId);
+      if (mounted) {
+        setState(() {
+          _postLikeCounts[postId] = actualCount;
+        });
+      }
+
+    } catch (e) {
+      // Revert optimistic update on error
+      final isCurrentlyLiked = _postLikeStatus[postId] ?? false;
+      final currentCount = _postLikeCounts[postId] ?? 0;
+      
+      setState(() {
+        _postLikeStatus[postId] = !isCurrentlyLiked;
+        _postLikeCounts[postId] = isCurrentlyLiked 
+          ? currentCount + 1 
+          : (currentCount - 1).clamp(0, 999999);
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update like: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleComments(String postId) async {
+    final isCurrentlyExpanded = _expandedComments[postId] ?? false;
+    
+    if (!isCurrentlyExpanded) {
+      await _loadComments(postId);
+    }
+    
+    setState(() {
+      _expandedComments[postId] = !isCurrentlyExpanded;
+    });
+  }
+
+  Future<void> _loadComments(String postId) async {
+    try {
+      final comments = await FeedPostsService.getPostComments(postId);
+      
+      if (mounted) {
+        setState(() {
+          _postComments[postId] = comments;
+        });
+      }
+    } catch (e) {
+      AppConfig.debugPrint('❌ Error loading comments: $e');
+    }
+  }
+
+  Future<void> _postComment(String postId) async {
+    final controller = _commentControllers[postId];
+    if (controller == null || controller.text.trim().isEmpty) return;
+
+    try {
+      await FeedPostsService.addComment(
+        postId: postId,
+        content: controller.text.trim(),
+      );
+
+      controller.clear();
+      await _loadComments(postId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Comment posted!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to post comment: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleSavePost(String postId) async {
+    try {
+      final isCurrentlySaved = _savedPosts[postId] ?? false;
+
+      setState(() {
+        _savedPosts[postId] = !isCurrentlySaved;
+      });
+
+      if (isCurrentlySaved) {
+        await FeedPostsService.unsavePost(postId);
+      } else {
+        await FeedPostsService.savePost(postId);
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(isCurrentlySaved ? 'Post unsaved' : 'Post saved!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      final isCurrentlySaved = _savedPosts[postId] ?? false;
+      
+      setState(() {
+        _savedPosts[postId] = !isCurrentlySaved;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save post: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _buildCommentsSection(String postId) {
+    final comments = _postComments[postId] ?? [];
+    _commentControllers.putIfAbsent(postId, () => TextEditingController());
+    final controller = _commentControllers[postId]!;
+
+    return Container(
+      color: Colors.grey.shade50,
+      padding: EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (comments.isEmpty)
+            Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: Text(
+                  'No comments yet. Be the first!',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                ),
+              ),
+            )
+          else
+            ...comments.map((comment) => _buildCommentItem(comment, postId)),
+          
+          Divider(),
+          
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  decoration: InputDecoration(
+                    hintText: 'Write a comment...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                  maxLines: null,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _postComment(postId),
+                ),
+              ),
+              SizedBox(width: 8),
+              IconButton(
+                icon: Icon(Icons.send, color: Colors.green),
+                onPressed: () => _postComment(postId),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCommentItem(Map<String, dynamic> comment, String postId) {
+    final currentUserId = AuthService.currentUserId;
+    final isOwnComment = comment['user_id'] == currentUserId;
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 14,
+                backgroundColor: Colors.green.shade100,
+                child: Icon(Icons.person, size: 16, color: Colors.green.shade700),
+              ),
+              SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      comment['username'] ?? 'Anonymous',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    Text(
+                      _formatPostTime(comment['created_at']),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isOwnComment)
+                IconButton(
+                  icon: Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                  onPressed: () => _deleteComment(postId, comment['id'].toString()),
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(),
+                ),
+            ],
+          ),
+          SizedBox(height: 6),
+          Text(
+            comment['content'] ?? '',
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade800),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _deleteComment(String postId, String commentId) async {
+    try {
+      await FeedPostsService.deleteComment(commentId);
+      await _loadComments(postId);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Comment deleted'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to delete comment'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
 
   Future<void> _loadMorePosts() async {
     if (_isLoadingMorePosts || !_hasMorePosts) return;
@@ -2045,7 +2448,8 @@ class _HomePageState extends State<HomePage>
             AppConfig.debugPrint('📍 Reached end of feed');
           }
         });
-        
+        // Load like status and counts for new posts
+        await _loadLikeDataForPosts(newPosts);  // <-- ADD THIS LINE
         AppConfig.debugPrint('✅ Total posts now: ${_feedPosts.length}');
       }
     } catch (e) {
@@ -2380,21 +2784,283 @@ class _HomePageState extends State<HomePage>
       ),
     );
   }
-  // 🔥 NEW: Show share recipe dialog
-  void _showShareRecipeDialog() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Share a recipe from your Favorites or Cookbook!'),
-        backgroundColor: Colors.blue,
-        action: SnackBarAction(
-          label: 'Go to Favorites',
-          textColor: Colors.white,
-          onPressed: () {
-            Navigator.pushNamed(context, '/favorite-recipes');
-          },
+  // 🔥 FIXED: Show recipe selection dialog with highlight and share
+  Future<void> _showShareRecipeDialog() async {
+    // Load favorite recipes
+    final recipes = await FavoriteRecipesService.getFavoriteRecipes();
+    
+    if (recipes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No favorite recipes yet. Add some recipes first!'),
+          backgroundColor: Colors.orange,
+          action: SnackBarAction(
+            label: 'Go to Favorites',
+            textColor: Colors.white,
+            onPressed: () {
+              Navigator.pushNamed(context, '/favorite-recipes');
+            },
+          ),
+        ),
+      );
+      return;
+    }
+
+    FavoriteRecipe? selectedRecipe;
+    String selectedVisibility = _defaultPostVisibility;
+    TextEditingController captionController = TextEditingController();
+    bool isPosting = false;
+
+    final posted = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.restaurant, color: Colors.green),
+              SizedBox(width: 8),
+              Text('Share Recipe'),
+            ],
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Select a recipe:',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                  SizedBox(height: 12),
+                  
+                  // Recipe list
+                  Container(
+                    constraints: BoxConstraints(maxHeight: 200),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: recipes.length,
+                      itemBuilder: (context, index) {
+                        final recipe = recipes[index];
+                        final isSelected = selectedRecipe?.id == recipe.id;
+                        
+                        return InkWell(
+                          onTap: () {
+                            setState(() {
+                              selectedRecipe = recipe;
+                            });
+                          },
+                          child: Container(
+                            padding: EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isSelected 
+                                ? Colors.green.shade50 
+                                : Colors.transparent,
+                              border: Border(
+                                bottom: BorderSide(
+                                  color: Colors.grey.shade200,
+                                  width: 1,
+                                ),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  isSelected 
+                                    ? Icons.check_circle 
+                                    : Icons.circle_outlined,
+                                  color: isSelected 
+                                    ? Colors.green 
+                                    : Colors.grey.shade400,
+                                  size: 20,
+                                ),
+                                SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    recipe.recipeName,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: isSelected 
+                                        ? FontWeight.bold 
+                                        : FontWeight.normal,
+                                      color: isSelected 
+                                        ? Colors.green.shade900 
+                                        : Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  
+                  // Caption field (only shows when recipe selected)
+                  if (selectedRecipe != null) ...[
+                    SizedBox(height: 16),
+                    TextField(
+                      controller: captionController,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        hintText: "Add a caption (optional)...",
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.green, width: 2),
+                        ),
+                      ),
+                    ),
+                  ],
+                  
+                  SizedBox(height: 16),
+                  
+                  // Visibility dropdown
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          selectedVisibility == 'public' ? Icons.public : Icons.people,
+                          size: 20,
+                          color: Colors.grey.shade700,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Visible to:',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: DropdownButton<String>(
+                            value: selectedVisibility,
+                            isExpanded: true,
+                            underline: SizedBox(),
+                            items: [
+                              DropdownMenuItem(
+                                value: 'public',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.public, size: 18, color: Colors.blue),
+                                    SizedBox(width: 8),
+                                    Text('Everyone (Public)'),
+                                  ],
+                                ),
+                              ),
+                              DropdownMenuItem(
+                                value: 'friends',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.people, size: 18, color: Colors.green),
+                                    SizedBox(width: 8),
+                                    Text('Friends Only'),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              if (value != null) {
+                                setState(() => selectedVisibility = value);
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isPosting ? null : () => Navigator.pop(context, false),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: (selectedRecipe == null || isPosting)
+                  ? null
+                  : () async {
+                      setState(() => isPosting = true);
+
+                      try {
+                        await FeedPostsService.shareRecipeToFeed(
+                          recipeName: selectedRecipe!.recipeName,
+                          description: captionController.text.trim(),
+                          ingredients: selectedRecipe!.ingredients,
+                          directions: selectedRecipe!.directions,
+                          visibility: selectedVisibility,
+                        );
+
+                        _defaultPostVisibility = selectedVisibility;
+
+                        Navigator.pop(context, true);
+
+                      } catch (e) {
+                        setState(() => isPosting = false);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to share recipe: ${e.toString()}'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: selectedRecipe == null 
+                  ? Colors.grey 
+                  : Colors.green,
+                foregroundColor: Colors.white,
+              ),
+              child: isPosting
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Text('Share'),
+            ),
+          ],
         ),
       ),
     );
+
+    if (posted == true && mounted) {
+      await _loadFeed(isRefresh: true);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Recipe shared successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 
   // 🔥 NEW: Post Composer Widget
@@ -3121,8 +3787,13 @@ class _HomePageState extends State<HomePage>
     required String label,
     required Color color,
     required VoidCallback? onPressed,
+    BorderRadius? borderRadius,
+    GlobalKey? key,
   }) {
+    final effectiveRadius = borderRadius ?? BorderRadius.circular(12);
+
     return Column(
+      key: key,
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
@@ -3130,7 +3801,7 @@ class _HomePageState extends State<HomePage>
           height: 56,
           decoration: BoxDecoration(
             color: onPressed == null ? Colors.grey : color,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: effectiveRadius,
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.1),
@@ -3139,9 +3810,15 @@ class _HomePageState extends State<HomePage>
               ),
             ],
           ),
-          child: IconButton(
-            icon: Icon(icon, color: Colors.white, size: 28),
-            onPressed: onPressed,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: effectiveRadius,
+              onTap: onPressed,
+              child: Center(
+                child: Icon(icon, color: Colors.white, size: 28),
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 8),
@@ -3300,11 +3977,29 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _deletePost(Map<String, dynamic> post) async {
+    final postId = post['id']?.toString();
+    
+    if (postId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Invalid post ID'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Post'),
-        content: const Text('Are you sure you want to delete this post?'),
+        title: Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange),
+            SizedBox(width: 12),
+            Text('Delete Post'),
+          ],
+        ),
+        content: Text('Are you sure you want to delete this post? This action cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -3322,15 +4017,81 @@ class _HomePageState extends State<HomePage>
     if (confirmed != true) return;
 
     try {
-      await FeedPostsService.deletePost(post['id']);
-      setState(() {
-        // Trigger rebuild to refresh feed
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to delete post')),
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(
+          child: Container(
+            padding: EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Deleting post...'),
+              ],
+            ),
+          ),
+        ),
       );
+
+      // Delete the post
+      await FeedPostsService.deletePost(postId);
+
+      // Close loading dialog
+      if (mounted) Navigator.pop(context);
+
+      // Remove post from local list
+      setState(() {
+        _feedPosts.removeWhere((p) => p['id']?.toString() == postId);
+      });
+
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 12),
+                Text('Post deleted successfully'),
+              ],
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      // Close loading dialog if still open
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.error, color: Colors.white),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Failed to delete post: ${e.toString().replaceFirst("Exception: ", "")}',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
     }
   }
 
@@ -3338,6 +4099,12 @@ class _HomePageState extends State<HomePage>
     final currentUserId = AuthService.currentUserId;
     final isOwnPost = post['user_id'] == currentUserId;
     final visibility = post['visibility']?.toString() ?? 'public';
+    final postId = post['id']?.toString();
+    final isLiked = _postLikeStatus[postId] ?? false;
+    final likeCount = _postLikeCounts[postId] ?? 0;
+    final isExpanded = _expandedComments[postId] ?? false;
+    final comments = _postComments[postId] ?? [];
+    final isSaved = _savedPosts[postId] ?? false;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -3355,68 +4122,80 @@ class _HomePageState extends State<HomePage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── Header ──────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
+                // Avatar
                 CircleAvatar(
                   radius: 20,
                   backgroundColor: Colors.green.shade100,
-                  backgroundImage: post['avatar_url'] != null && post['avatar_url'].toString().isNotEmpty
+                  backgroundImage: post['avatar_url'] != null &&
+                          post['avatar_url'].toString().isNotEmpty
                       ? NetworkImage(post['avatar_url'])
                       : null,
-                  child: (post['avatar_url'] == null || post['avatar_url'].toString().isEmpty)
+                  child: (post['avatar_url'] == null ||
+                          post['avatar_url'].toString().isEmpty)
                       ? Icon(Icons.person, color: Colors.green.shade700)
                       : null,
                 ),
                 const SizedBox(width: 12),
+                // Username + badge + timestamp — takes all remaining space
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Username row with badge
                       Row(
                         children: [
-                          Text(
-                            post['username'] ?? 'Anonymous',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
+                          Flexible(
+                            child: Text(
+                              post['username'] ?? 'Anonymous',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           SizedBox(width: 8),
-                          // Visibility badge
                           Container(
-                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: visibility == 'public' 
-                                ? Colors.blue.shade50 
-                                : Colors.green.shade50,
+                              color: visibility == 'public'
+                                  ? Colors.blue.shade50
+                                  : Colors.green.shade50,
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color: visibility == 'public' 
-                                  ? Colors.blue.shade200 
-                                  : Colors.green.shade200,
+                                color: visibility == 'public'
+                                    ? Colors.blue.shade200
+                                    : Colors.green.shade200,
                               ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
-                                  visibility == 'public' ? Icons.public : Icons.people,
+                                  visibility == 'public'
+                                      ? Icons.public
+                                      : Icons.people,
                                   size: 10,
-                                  color: visibility == 'public' 
-                                    ? Colors.blue.shade700 
-                                    : Colors.green.shade700,
+                                  color: visibility == 'public'
+                                      ? Colors.blue.shade700
+                                      : Colors.green.shade700,
                                 ),
-                                SizedBox(width: 3),
+                                const SizedBox(width: 3),
                                 Text(
                                   visibility == 'public' ? 'Public' : 'Friends',
                                   style: TextStyle(
                                     fontSize: 9,
                                     fontWeight: FontWeight.w600,
-                                    color: visibility == 'public' 
-                                      ? Colors.blue.shade700 
-                                      : Colors.green.shade700,
+                                    color: visibility == 'public'
+                                        ? Colors.blue.shade700
+                                        : Colors.green.shade700,
                                   ),
                                 ),
                               ],
@@ -3424,6 +4203,8 @@ class _HomePageState extends State<HomePage>
                           ),
                         ],
                       ),
+                      const SizedBox(height: 2),
+                      // Timestamp
                       Text(
                         _formatPostTime(post['created_at']),
                         style: TextStyle(
@@ -3434,21 +4215,19 @@ class _HomePageState extends State<HomePage>
                     ],
                   ),
                 ),
+                // Three-dot menu
                 PopupMenuButton<String>(
                   icon: Icon(Icons.more_horiz, color: Colors.grey.shade600),
                   onSelected: (value) {
-                    if (value == 'report') {
-                      _reportPost(post);
-                    } else if (value == 'delete') {
-                      _deletePost(post);
-                    }
+                    if (value == 'report') _reportPost(post);
+                    if (value == 'delete') _deletePost(post);
                   },
                   itemBuilder: (context) => [
                     if (!isOwnPost)
-                      PopupMenuItem(
+                      const PopupMenuItem(
                         value: 'report',
                         child: Row(
-                          children: const [
+                          children: [
                             Icon(Icons.flag, color: Colors.red, size: 20),
                             SizedBox(width: 8),
                             Text('Report Post'),
@@ -3456,10 +4235,10 @@ class _HomePageState extends State<HomePage>
                         ),
                       ),
                     if (isOwnPost)
-                      PopupMenuItem(
+                      const PopupMenuItem(
                         value: 'delete',
                         child: Row(
-                          children: const [
+                          children: [
                             Icon(Icons.delete, color: Colors.red, size: 20),
                             SizedBox(width: 8),
                             Text('Delete Post'),
@@ -3471,14 +4250,15 @@ class _HomePageState extends State<HomePage>
               ],
             ),
           ),
-          
+
+          // ── Body: text content + photo ───────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Caption text
-                if (post['content'] != null && post['content'].toString().isNotEmpty)
+                if (post['content'] != null &&
+                    post['content'].toString().isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12),
                     child: Text(
@@ -3489,9 +4269,8 @@ class _HomePageState extends State<HomePage>
                       ),
                     ),
                   ),
-                
-                // 🔥 NEW: Photo display
-                if (post['photo_url'] != null && post['photo_url'].toString().isNotEmpty)
+                if (post['photo_url'] != null &&
+                    post['photo_url'].toString().isNotEmpty)
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Image.network(
@@ -3513,25 +4292,25 @@ class _HomePageState extends State<HomePage>
                           ),
                         );
                       },
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          height: 200,
-                          color: Colors.grey.shade200,
-                          child: Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.broken_image, size: 48, color: Colors.grey.shade400),
-                                SizedBox(height: 8),
-                                Text(
-                                  'Failed to load image',
-                                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-                                ),
-                              ],
-                            ),
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        height: 200,
+                        color: Colors.grey.shade200,
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.broken_image,
+                                  size: 48, color: Colors.grey.shade400),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Failed to load image',
+                                style: TextStyle(
+                                    color: Colors.grey.shade600, fontSize: 12),
+                              ),
+                            ],
                           ),
-                        );
-                      },
+                        ),
+                      ),
                     ),
                   ),
               ],
@@ -3540,30 +4319,109 @@ class _HomePageState extends State<HomePage>
 
           const SizedBox(height: 12),
 
+          // ── Action bar: like / comment / save ────────────────────
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
-                _buildFeedActionButton(
-                  icon: Icons.favorite_border,
-                  label: 'Like',
-                  onPressed: () {},
+                // Like
+                InkWell(
+                  onTap: () => _toggleLike(postId!),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 4, vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isLiked ? Icons.favorite : Icons.favorite_border,
+                          size: 20,
+                          color:
+                              isLiked ? Colors.green : Colors.grey.shade700,
+                        ),
+                        const SizedBox(width: 4),
+                        if (likeCount > 0)
+                          Text(
+                            likeCount.toString(),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isLiked
+                                  ? Colors.green
+                                  : Colors.grey.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 16),
-                _buildFeedActionButton(
-                  icon: Icons.comment_outlined,
-                  label: 'Comment',
-                  onPressed: () {},
+                // Comment
+                InkWell(
+                  onTap: () => _toggleComments(postId!),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 4, vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(Icons.comment_outlined,
+                            size: 20, color: Colors.grey.shade700),
+                        const SizedBox(width: 4),
+                        Text(
+                          comments.isNotEmpty
+                              ? '${comments.length}'
+                              : 'Comment',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 16),
-                _buildFeedActionButton(
-                  icon: Icons.bookmark_border,
-                  label: 'Save',
-                  onPressed: () {},
+                // Save
+                InkWell(
+                  onTap: () => _toggleSavePost(postId!),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 4, vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isSaved
+                              ? Icons.bookmark
+                              : Icons.bookmark_border,
+                          size: 20,
+                          color:
+                              isSaved ? Colors.blue : Colors.grey.shade700,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Save',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isSaved
+                                ? Colors.blue
+                                : Colors.grey.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
+
+          // ── Comments section (expanded) ──────────────────────────
+          if (isExpanded) _buildCommentsSection(postId!),
         ],
       ),
     );
@@ -3593,6 +4451,39 @@ class _HomePageState extends State<HomePage>
     );
   }
 
+  Widget _buildFeedLikeButton(Map<String, dynamic> post) {
+    final postId = post['id']?.toString();
+    if (postId == null) {
+      return SizedBox.shrink();
+    }
+
+    final isLiked = _postLikeStatus[postId] ?? false;
+    final likeCount = _postLikeCounts[postId] ?? 0;
+
+    return InkWell(
+      onTap: () => _toggleLike(postId),
+      child: Row(
+        children: [
+          Icon(
+            isLiked ? Icons.favorite : Icons.favorite_border,
+            size: 20,
+            color: isLiked ? Colors.green : Colors.grey.shade700,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            likeCount > 0 ? likeCount.toString() : '',
+            style: TextStyle(
+              fontSize: 12,
+              color: isLiked ? Colors.green : Colors.grey.shade700,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
   String _formatPostTime(dynamic timestamp) {
     try {
       final DateTime postTime = timestamp is String 
@@ -3611,6 +4502,286 @@ class _HomePageState extends State<HomePage>
     }
   }
 
+  Widget _buildAppFeatureChip(IconData icon, String label) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        decoration: BoxDecoration(
+          color: Colors.green.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.green.shade200),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 14, color: Colors.green.shade700),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.green.shade800,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNutritionSnapshot() {
+    // Load today's tracker entry nutrition totals from cache if available
+    // This is a lightweight display — full detail is in the Tracker page
+    final userId = AuthService.currentUserId;
+    if (userId == null) return const SizedBox.shrink();
+
+    return FutureBuilder<TrackerEntry?>(
+      future: TrackerService.getEntryForDate(
+        userId,
+        DateTime.now().toString().split(' ')[0],
+      ),
+      builder: (context, snapshot) {
+        final entry = snapshot.data;
+        if (entry == null || entry.meals.isEmpty) return const SizedBox.shrink();
+
+        final totals = TrackerService.calculateNutritionTotals(entry.meals);
+        final status = TrackerService.getNutritionStatus(entry.meals);
+        final targets = TrackerService.dailyTargets;
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white.withAlpha((0.95 * 255).toInt()),
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.today, color: Colors.teal.shade700, size: 20),
+                  const SizedBox(width: 8),
+                  const Text(
+                    "Today's Nutrition",
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: () => Navigator.pushNamed(context, '/tracker'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.teal.shade700,
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 0),
+                    ),
+                    child: const Text('Full Detail →',
+                        style: TextStyle(fontSize: 12)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _buildSnapshotNutrient(
+                    'Calories',
+                    totals['calories'] ?? 0,
+                    targets['calories']!,
+                    'kcal',
+                    status['calories'] ?? 'low',
+                  ),
+                  const SizedBox(width: 8),
+                  _buildSnapshotNutrient(
+                    'Protein',
+                    totals['protein'] ?? 0,
+                    targets['protein']!,
+                    'g',
+                    status['protein'] ?? 'low',
+                  ),
+                  const SizedBox(width: 8),
+                  _buildSnapshotNutrient(
+                    'Fiber',
+                    totals['fiber'] ?? 0,
+                    targets['fiber']!,
+                    'g',
+                    status['fiber'] ?? 'low',
+                  ),
+                  const SizedBox(width: 8),
+                  _buildSnapshotNutrient(
+                    'Sodium',
+                    totals['sodium'] ?? 0,
+                    targets['sodium']!,
+                    'mg',
+                    status['sodium'] ?? 'good',
+                  ),
+                ],
+              ),
+              if (entry.supplements.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Icon(Icons.medication, size: 14, color: Colors.indigo.shade600),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${entry.supplements.length} supplement${entry.supplements.length == 1 ? '' : 's'} logged today',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.indigo.shade700,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildLiverHealthCard() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.green.shade800, Colors.green.shade600],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.green.shade900.withOpacity(0.25),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => Navigator.pushNamed(context, '/liver-hub'),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.favorite_rounded,
+                      color: Colors.white, size: 24),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Liver Health Hub',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Hydration · Supplements · Symptoms · Progress',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios_rounded,
+                    color: Colors.white54, size: 16),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSnapshotNutrient(
+    String label,
+    double current,
+    double target,
+    String unit,
+    String status,
+  ) {
+    Color color;
+    switch (status) {
+      case 'over':
+        color = Colors.red.shade600;
+        break;
+      case 'low':
+        color = Colors.orange.shade700;
+        break;
+      default:
+        color = Colors.green.shade600;
+    }
+
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 3),
+            Text(
+              current >= 100
+                  ? current.toStringAsFixed(0)
+                  : current.toStringAsFixed(1),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+            Text(
+              unit,
+              style: TextStyle(fontSize: 9, color: Colors.grey.shade500),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+
   Widget _buildInitialView() {
     return Container(
       decoration: BoxDecoration(
@@ -3628,6 +4799,8 @@ class _HomePageState extends State<HomePage>
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+
+            // ── Search bar ───────────────────────────────────────────
             Container(
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
@@ -3646,7 +4819,7 @@ class _HomePageState extends State<HomePage>
                 decoration: InputDecoration(
                   hintText: 'Search users...',
                   hintStyle: TextStyle(color: Colors.grey.shade600),
-                  prefixIcon: Icon(Icons.person_search, color: Colors.green),
+                  prefixIcon: const Icon(Icons.person_search, color: Colors.green),
                   suffixIcon: IconButton(
                     icon: const Icon(Icons.search, color: Colors.green),
                     onPressed: () => _searchUsers(_searchController.text),
@@ -3657,43 +4830,79 @@ class _HomePageState extends State<HomePage>
                   ),
                   filled: true,
                   fillColor: Colors.transparent,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 16),
                 ),
-                onSubmitted: (value) => _searchUsers(value),
+                onSubmitted: _searchUsers,
               ),
             ),
 
+            // ── Welcome card ─────────────────────────────────────────
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withAlpha((0.9 * 255).toInt()),
+                color: Colors.white.withAlpha((0.95 * 255).toInt()),
                 borderRadius: BorderRadius.circular(15),
               ),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Welcome to Liverwise',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
+                  Row(
+                    children: [
+                      Icon(Icons.favorite_rounded,
+                          color: Colors.green.shade700, size: 20),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Welcome to LiverWise',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 10),
                   Text(
-                    'Scan products, look up foods, and get nutrition insights!',
+                    'LiverWise helps you eat better for your liver. '
+                    'Scan any food barcode to see how liver-friendly it is, '
+                    'log your meals to track daily nutrition, and discover '
+                    'recipes designed around a liver-healthy diet.',
                     style: TextStyle(
                       fontSize: 13,
-                      color: Colors.grey.shade600,
+                      color: Colors.grey.shade700,
+                      height: 1.5,
                     ),
-                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      _buildAppFeatureChip(Icons.qr_code_scanner, 'Scan Labels'),
+                      const SizedBox(width: 8),
+                      _buildAppFeatureChip(Icons.bar_chart, 'Track Meals'),
+                      const SizedBox(width: 8),
+                      _buildAppFeatureChip(Icons.restaurant, 'Get Recipes'),
+                    ],
                   ),
                 ],
               ),
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
 
+            // ── Friends online ───────────────────────────────────────
+            const FriendsOnlineBar(),
+
+            // ── Health summary (score, water, streak) ────────────────
+            const HealthSummaryCard(),
+
+            // ── Today's nutrition snapshot ───────────────────────────
+            _buildNutritionSnapshot(),
+
+            // ── Liver health hub entry point ─────────────────────────
+            _buildLiverHealthCard(),
+
+            // ── Scan buttons card ────────────────────────────────────
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -3709,6 +4918,8 @@ class _HomePageState extends State<HomePage>
               ),
               child: Column(
                 children: [
+
+                  // Free scan counter / rewarded ad banner
                   if (!_isPremium)
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -3724,62 +4935,144 @@ class _HomePageState extends State<HomePage>
                               : Colors.blue.shade200,
                         ),
                       ),
-                      child: Row(
+                      child: Column(
                         children: [
-                          Icon(
-                            _hasUsedAllFreeScans
-                                ? Icons.warning_rounded
-                                : Icons.info_outline,
-                            color: _hasUsedAllFreeScans
-                                ? Colors.red.shade700
-                                : Colors.blue.shade700,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              _hasUsedAllFreeScans
-                                  ? 'Daily free scans used. Upgrade for unlimited!'
-                                  : '$_remainingScans free scan${_remainingScans == 1 ? '' : 's'} remaining today',
-                              style: TextStyle(
+                          Row(
+                            children: [
+                              Icon(
+                                _hasUsedAllFreeScans
+                                    ? Icons.warning_rounded
+                                    : Icons.info_outline,
                                 color: _hasUsedAllFreeScans
-                                    ? Colors.red.shade900
-                                    : Colors.blue.shade900,
-                                fontWeight: FontWeight.w600,
+                                    ? Colors.red.shade700
+                                    : Colors.blue.shade700,
                               ),
-                            ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  _hasUsedAllFreeScans
+                                      ? 'Daily free scans used.'
+                                      : '$_remainingScans free scan${_remainingScans == 1 ? '' : 's'} remaining today',
+                                  style: TextStyle(
+                                    color: _hasUsedAllFreeScans
+                                        ? Colors.red.shade900
+                                        : Colors.blue.shade900,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
+                          if (_hasUsedAllFreeScans) ...[
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: _showRewardedAdForFreeScan,
+                                    icon: const Icon(
+                                        Icons.play_circle_outline, size: 20),
+                                    label: const Text(
+                                      'Watch Ad for Free Scan',
+                                      style: TextStyle(fontSize: 13),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.orange.shade600,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 10),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: () => Navigator.pushNamed(
+                                        context, '/purchase'),
+                                    icon: const Icon(Icons.star, size: 20),
+                                    label: const Text(
+                                      'Go Premium',
+                                      style: TextStyle(fontSize: 13),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.green.shade600,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 10),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),
 
+                  // 4 scan action buttons
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       _buildActionButton(
+                        key: _autoButtonKey,
                         icon: Icons.qr_code_scanner,
                         label: 'Auto',
                         color: Colors.purple.shade600,
                         onPressed: _isScanning ? null : _autoScanBarcode,
+                        borderRadius: BorderRadius.circular(16),
                       ),
                       _buildActionButton(
+                        key: _scanButtonKey,
                         icon: Icons.camera_alt,
                         label: 'Scan',
                         color: Colors.green.shade600,
                         onPressed: _isScanning ? null : _takePhoto,
+                        borderRadius: BorderRadius.circular(16),
                       ),
                       _buildActionButton(
+                        key: _manualButtonKey,
                         icon: Icons.edit_outlined,
                         label: 'Code',
                         color: Colors.blue.shade600,
-                        onPressed: () => Navigator.pushNamed(context, '/manual-barcode-entry'),
+                        onPressed: () => Navigator.pushNamed(
+                            context, '/manual-barcode-entry'),
+                        borderRadius: BorderRadius.circular(16),
                       ),
                       _buildActionButton(
+                        key: _lookupButtonKey,
                         icon: Icons.search,
                         label: 'Search',
                         color: Colors.orange.shade800,
-                        onPressed: () => Navigator.pushNamed(context, '/nutrition-search'),
+                        onPressed: () => Navigator.pushNamed(
+                            context, '/nutrition-search'),
+                        borderRadius: BorderRadius.circular(16),
                       ),
                     ],
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Tutorial button
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      _feedScrollController.animateTo(
+                        0,
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOut,
+                      );
+                      setState(() => _showTutorial = true);
+                    },
+                    icon: const Icon(Icons.help_outline),
+                    label: const Text('Tutorial'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue.shade700,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(25),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -3787,7 +5080,10 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 30),
 
-            // 🔥 UPDATED: Feed Section with Infinite Scroll
+            // ── Community Feed ───────────────────────────────────────
+            // ✅ FIXED: Added constraints matching BariWise to prevent
+            // the feed section from causing layout issues on iOS that
+            // resulted in a blank screen.
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -3797,12 +5093,14 @@ class _HomePageState extends State<HomePage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+
+                  // Feed header
                   Row(
                     children: [
-                      Icon(Icons.public, color: Colors.green, size: 24),
+                      const Icon(Icons.public, color: Colors.green, size: 24),
                       const SizedBox(width: 12),
                       const Text(
-                        "Community Feed",
+                        'Community Feed',
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -3810,7 +5108,8 @@ class _HomePageState extends State<HomePage>
                       ),
                       const Spacer(),
                       Container(
-                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: Colors.blue.shade50,
                           borderRadius: BorderRadius.circular(12),
@@ -3819,8 +5118,9 @@ class _HomePageState extends State<HomePage>
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.public, size: 14, color: Colors.blue.shade700),
-                            SizedBox(width: 4),
+                            Icon(Icons.public,
+                                size: 14, color: Colors.blue.shade700),
+                            const SizedBox(width: 4),
                             Text(
                               'Public',
                               style: TextStyle(
@@ -3834,13 +5134,15 @@ class _HomePageState extends State<HomePage>
                       ),
                     ],
                   ),
+
                   const SizedBox(height: 16),
-                  
-                  // Post Composer
+
+                  // Post composer
                   _buildPostComposer(),
+
                   const SizedBox(height: 16),
-                  
-                  // 🔥 NEW: Feed with infinite scroll
+
+                  // Feed posts
                   if (_isLoadingFeed && _feedPosts.isEmpty)
                     const Center(
                       child: Padding(
@@ -3854,61 +5156,53 @@ class _HomePageState extends State<HomePage>
                         padding: const EdgeInsets.all(20),
                         child: Column(
                           children: [
-                            Icon(Icons.rss_feed, size: 64, color: Colors.grey.shade400),
+                            Icon(Icons.rss_feed,
+                                size: 64, color: Colors.grey.shade400),
                             const SizedBox(height: 12),
                             Text(
                               'No posts yet',
                               style: TextStyle(
-                                fontSize: 16,
-                                color: Colors.grey.shade600,
-                              ),
+                                  fontSize: 16, color: Colors.grey.shade600),
                             ),
                             const SizedBox(height: 8),
                             Text(
                               'Be the first to share something!',
                               style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey.shade500,
-                              ),
+                                  fontSize: 14, color: Colors.grey.shade500),
                             ),
                           ],
                         ),
                       ),
                     )
                   else
-                    // 🔥 Feed list with scroll controller
                     ListView.builder(
                       shrinkWrap: true,
-                      physics: NeverScrollableScrollPhysics(), // Parent scrolls
+                      physics: const NeverScrollableScrollPhysics(),
                       itemCount: _feedPosts.length + (_hasMorePosts ? 1 : 0),
                       itemBuilder: (context, index) {
-                        // Show loading indicator at bottom if loading more
                         if (index == _feedPosts.length) {
                           return Center(
                             child: Padding(
                               padding: const EdgeInsets.all(16),
                               child: _isLoadingMorePosts
-                                  ? CircularProgressIndicator()
-                                  : SizedBox.shrink(),
+                                  ? const CircularProgressIndicator()
+                                  : const SizedBox.shrink(),
                             ),
                           );
                         }
-                        
                         return _buildFeedPost(_feedPosts[index]);
                       },
                     ),
-                    
-                  // End of feed indicator
+
+                  // End-of-feed indicator
                   if (!_hasMorePosts && _feedPosts.isNotEmpty)
                     Center(
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Text(
-                          '✨ You\'ve seen all posts',
+                          "✨ You've seen all posts",
                           style: TextStyle(
-                            color: Colors.grey.shade600,
-                            fontSize: 14,
-                          ),
+                              color: Colors.grey.shade600, fontSize: 14),
                         ),
                       ),
                     ),
@@ -3918,12 +5212,13 @@ class _HomePageState extends State<HomePage>
 
             const SizedBox(height: 30),
 
+            // ── Scanned recipe suggestions (only when present) ───────
             if (_scannedRecipes.isNotEmpty)
               PremiumGate(
                 feature: PremiumFeature.viewRecipes,
-                featureName: "Recipe Details",
+                featureName: 'Recipe Details',
                 featureDescription:
-                    "View full recipe details with ingredients and directions.",
+                    'View full recipe details with ingredients and directions.',
                 child: Column(
                   children: [
                     Container(
@@ -3932,12 +5227,13 @@ class _HomePageState extends State<HomePage>
                         color: Colors.white.withAlpha((0.9 * 255).toInt()),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Row(
-                        children: const [
-                          Icon(Icons.restaurant, color: Colors.green, size: 24),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.restaurant,
+                              color: Colors.green, size: 24),
                           SizedBox(width: 12),
                           Text(
-                            "Recipe Suggestions",
+                            'Recipe Suggestions',
                             style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
@@ -3947,11 +5243,12 @@ class _HomePageState extends State<HomePage>
                       ),
                     ),
                     const SizedBox(height: 16),
-                    ..._scannedRecipes.map((recipe) =>
-                        _buildScannedRecipeCard(recipe)),
+                    ..._scannedRecipes
+                        .map((recipe) => _buildScannedRecipeCard(recipe)),
                   ],
                 ),
               ),
+
           ],
         ),
       ),
@@ -4027,7 +5324,7 @@ class _HomePageState extends State<HomePage>
                     ),
                   const SizedBox(width: 8),
 
-                  if (_currentNutrition != null && _nutritionText.isNotEmpty)
+                  if (_currentNutrition != null)
                     ElevatedButton.icon(
                       onPressed: _saveCurrentIngredient,
                       icon: const Icon(Icons.bookmark_add),
@@ -4038,9 +5335,8 @@ class _HomePageState extends State<HomePage>
                       ),
                     ),
                   const SizedBox(width: 8),
-
-                  if (_nutritionText.isNotEmpty)
-                    ElevatedButton.icon(
+                    if (_currentNutrition != null)                    
+                      ElevatedButton.icon(
                       onPressed: _addNutritionToGroceryList,
                       icon: const Icon(Icons.add_shopping_cart),
                       label: const Text("Grocery List"),
@@ -4094,23 +5390,15 @@ class _HomePageState extends State<HomePage>
                 ),
               ),
 
-            if (_nutritionText.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade700,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  _nutritionText,
-                  style: const TextStyle(color: Colors.white),
-                ),
+            if (_currentNutrition != null && _liverHealthScore != null)
+              ScanResultsCard(
+                productName: _currentNutrition!.productName,
+                fat: _currentNutrition!.fat,
+                sodium: _currentNutrition!.sodium,
+                sugar: _currentNutrition!.sugar,
+                calories: _currentNutrition!.calories,
+                liverScore: _liverHealthScore!,
               ),
-
-            const SizedBox(height: 20),
-
-            if (_showLiverBar && _liverHealthScore != null)
-              LiverHealthBar(healthScore: _liverHealthScore!),
 
             const SizedBox(height: 20),
 
@@ -4501,31 +5789,46 @@ class _HomePageState extends State<HomePage>
       }
     }
   }
-
+  
   @override
   Widget build(BuildContext context) {
-    super.build(context);
-
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
+    
     return Scaffold(
-      drawerEnableOpenDragGesture: false,
       appBar: AppBar(
+        title: const Text('LiverWise'),
+        backgroundColor: Colors.green,
         leading: Builder(
           builder: (context) => IconButton(
             icon: MenuIconWithBadge(key: MenuIconWithBadge.globalKey),
             onPressed: () => Scaffold.of(context).openDrawer(),
           ),
         ),
-        title: const Text('Home'),
-        backgroundColor: Colors.green,
-        foregroundColor: Colors.white,
       ),
-      drawer: AppDrawer(
-        key: AppDrawer.globalKey,
-        currentPage: 'home',
+      drawer: const AppDrawer(currentPage: 'home'),
+      body: Stack(
+        children: [
+          // Main content - show initial view or scanning view
+          _showInitialView ? _buildInitialView() : _buildScanningView(),
+
+          // Tutorial overlay on top when active
+          if (_showTutorial)
+            TutorialOverlay(
+              autoButtonKey: _autoButtonKey,
+              scanButtonKey: _scanButtonKey,
+              manualButtonKey: _manualButtonKey,
+              lookupButtonKey: _lookupButtonKey,
+              onComplete: () {
+                setState(() {
+                  _showTutorial = false;
+                });
+              },
+            ),
+        ],
       ),
-      body: _showInitialView ? _buildInitialView() : _buildScanningView(),
     );
   }
+
   Future<void> _saveRecipeAsTemplate(Recipe recipe) async {
     try {
       final userId = AuthService.currentUserId;
@@ -4755,5 +6058,127 @@ class _HomePageState extends State<HomePage>
       'unit': unit,
       'name': name.trim(),
     };
+  }
+  /// Show rewarded ad to grant user a bonus free scan
+  Future<void> _showRewardedAdForFreeScan() async {
+    // Check if premium (shouldn't happen, but safety check)
+    if (_premiumController.isPremium) {
+      if (AppConfig.enableDebugPrints) {
+        AppConfig.debugPrint('🚫 Premium user tried to watch ad - blocking');
+      }
+      return;
+    }
+
+    // Check if ad is ready
+    if (!_isRewardedAdReady || _rewardedAd == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.white),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text('Ad not ready yet. Please try again in a moment.'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      
+      // Try to load ad again
+      _loadRewardedAd();
+      return;
+    }
+
+    if (AppConfig.enableDebugPrints) {
+      AppConfig.debugPrint('📺 Showing rewarded ad for free scan');
+    }
+
+    // Set up ad callbacks
+    _rewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
+      onAdShowedFullScreenContent: (ad) {
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('📺 Rewarded ad displayed');
+        }
+      },
+      onAdDismissedFullScreenContent: (ad) {
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('📺 Rewarded ad dismissed');
+        }
+        ad.dispose();
+        
+        // Load next rewarded ad
+        if (!_premiumController.isPremium) {
+          _loadRewardedAd();
+        }
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('❌ Rewarded ad failed to show: $error');
+        }
+        ad.dispose();
+        
+        // Load next rewarded ad
+        if (!_premiumController.isPremium) {
+          _loadRewardedAd();
+        }
+        
+        // Show error to user
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to load ad. Please try again.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      },
+    );
+
+    // Show the ad
+    _rewardedAd!.show(
+      onUserEarnedReward: (ad, reward) async {
+        if (AppConfig.enableDebugPrints) {
+          AppConfig.debugPrint('🎁 User earned reward: ${reward.amount} ${reward.type}');
+        }
+
+        // Grant the bonus scan
+        await _premiumController.grantBonusScan();
+        
+        // Update UI
+        if (mounted && !_isDisposed) {
+          setState(() {
+            _remainingScans = _premiumController.remainingScans;
+            _hasUsedAllFreeScans = _premiumController.hasUsedAllFreeScans;
+          });
+          
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '✨ You earned 1 free scan! You now have $_remainingScans scan${_remainingScans == 1 ? '' : 's'} remaining.',
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      },
+    );
+    
+    // Mark ad as not ready
+    _isRewardedAdReady = false;
   }
 }

@@ -1,0 +1,19 @@
+# scripts/requirements_train.txt
+# Dependencies for train_lora.py and serve_lora.py
+#
+# Install with:
+#   source scripts/.venv/bin/activate
+#   pip install -r scripts/requirements_train.txt
+#
+# Note: 'requests' is already installed from the pipeline setup.
+# These are the additional packages needed for LoRA training.
+
+# Core ML stack
+torch>=2.1.0
+transformers>=4.40.0
+peft>=0.10.0
+datasets>=2.18.0
+accelerate>=0.28.0
+
+# Already installed (listed for completeness)
+requests>=2.31.0

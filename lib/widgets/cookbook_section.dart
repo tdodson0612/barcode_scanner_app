@@ -1,7 +1,6 @@
 // lib/widgets/cookbook_section.dart - COMPLETE WITH NUTRITION TABS
 import 'package:flutter/material.dart';
 import 'package:liver_wise/widgets/nutrition_facts_label.dart';
-import 'package:liver_wise/models/nutrition_info.dart';
 import '../models/cookbook_recipe.dart';
 import '../services/cookbook_service.dart';
 import '../config/app_config.dart';

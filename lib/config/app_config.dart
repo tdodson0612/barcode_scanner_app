@@ -1,7 +1,10 @@
 // lib/config/app_config.dart
 // Complete configuration for LiverWise app
 // Uses environment variables from .env file for sensitive data
+// ✅ FIXED: Platform-specific ad unit IDs (was always using Android IDs on iOS)
 
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class AppConfig {
@@ -19,10 +22,10 @@ class AppConfig {
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imptbnd5emVhcm5uZGhsaXRydXl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ0MTc4MTMsImV4cCI6MjA2OTk5MzgxM30.i1_79Ew1co2wIsZTyai_t6KucM-fH_NuKBIhqEuY-44';
 
   // ============================================================
-  // CLOUDFLARE WORKER CONFIGURATION (Database + Storage)
+  // CLOUDFLARE WORKER CONFIGURATION (Single Worker)
   // ============================================================
   
-  /// Base Cloudflare Worker URL (no trailing slash)
+  /// Cloudflare Worker URL
   static String get cloudflareWorkerUrl => 
       dotenv.env['CLOUDFLARE_WORKER_URL'] ?? 
       'https://shrill-paper-a8ce.terryd0612.workers.dev';
@@ -99,14 +102,22 @@ class AppConfig {
       'ca-app-pub-3940256099942544/1712485313';
 
   // ============================================================
-  // AD HELPERS
+  // AD HELPERS — ✅ FIXED: Now platform-aware
   // ============================================================
   
   /// Get platform-specific interstitial ad ID
-  static String get interstitialAdId => androidInterstitialAdId;
+  static String get interstitialAdId {
+    if (kIsWeb) return androidInterstitialAdId;
+    if (Platform.isIOS || Platform.isMacOS) return iosInterstitialAdId;
+    return androidInterstitialAdId;
+  }
   
   /// Get platform-specific rewarded ad ID
-  static String get rewardedAdId => androidRewardedAdId;
+  static String get rewardedAdId {
+    if (kIsWeb) return androidRewardedAdId;
+    if (Platform.isIOS || Platform.isMacOS) return iosRewardedAdId;
+    return androidRewardedAdId;
+  }
 
   // ============================================================
   // TRACKER SETTINGS
@@ -176,8 +187,14 @@ class AppConfig {
     if (enableDebugPrints) {
       debugPrint('✅ AppConfig validated successfully');
       debugPrint('🔧 Environment: ${isProduction ? "PRODUCTION" : "DEVELOPMENT"}');
+      debugPrint('🔧 Worker: $cloudflareWorkerUrl');
       debugPrint('🏥 Disease tracking: ${enableDiseaseTracking ? "ENABLED" : "DISABLED"}');
       debugPrint('⚖️ Weight tracking: ${enableWeightTracking ? "ENABLED" : "DISABLED"}');
+      if (!kIsWeb) {
+        debugPrint('📱 Platform: ${Platform.operatingSystem}');
+        debugPrint('📺 Interstitial Ad ID: $interstitialAdId');
+        debugPrint('🎁 Rewarded Ad ID: $rewardedAdId');
+      }
     }
   }
 }

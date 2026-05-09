@@ -130,6 +130,19 @@ class RecipeComplianceService {
   // ============================================================
 
   /// Approve a recipe submission
+  ///
+  /// LORA_INTEGRATION_POINT: When a submission is approved here, it becomes
+  /// eligible for the next training data export run. The Python pipeline
+  /// (scripts/export_training_data.py) queries recipe_submissions where
+  /// status = 'approved' and converts them into positive training pairs
+  /// written to datasets/recipes_v1_<timestamp>.jsonl.
+  ///
+  /// To trigger a training data refresh after approvals:
+  ///   ./scripts/run_pipeline.sh --mode recipes
+  ///
+  /// Future automation: approveSubmission() could call a backend webhook
+  /// to trigger an incremental dataset export automatically. The endpoint
+  /// pattern would match AppConfig.cloudflareWorkerQueryEndpoint.
   static Future<void> approveSubmission(
     String submissionId, {
     String? notes,
