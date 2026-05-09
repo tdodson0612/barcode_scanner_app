@@ -1,5 +1,7 @@
 // lib/pages/reset_password_page.dart
-// ✅ Sets session from deep link BEFORE calling updatePassword
+//
+// ✅ Works with onAuthStateChange password recovery flow in main.dart
+// ✅ Session is already active when this page opens — no setSession needed
 // ✅ Handles expired/invalid links gracefully (no black screen)
 // ✅ Signs user out after reset so they log in fresh
 // ✅ Matches app green theme
@@ -10,6 +12,9 @@ import '../services/auth_service.dart';
 import '../config/app_config.dart';
 
 class ResetPasswordPage extends StatefulWidget {
+  // Session is passed in for reference but Supabase has already applied
+  // it via onAuthStateChange before this page is pushed. A null session
+  // means the link was invalid or expired.
   final Session? session;
 
   const ResetPasswordPage({super.key, this.session});
@@ -53,16 +58,10 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
     setState(() => _loading = true);
 
     try {
-      // CRITICAL: Set the session from the deep link BEFORE calling
-      // updatePassword. Without this the user has no active session and
-      // AuthService.updatePassword() will throw "No user session found".
-      if (widget.session != null) {
-        await Supabase.instance.client.auth.setSession(
-          widget.session!.refreshToken!,
-        );
-        AppConfig.debugPrint('✅ Session set from deep link');
-      }
-
+      // The session was already set by Supabase's onAuthStateChange
+      // (passwordRecovery event) in main.dart before this page was pushed.
+      // We just call updatePassword directly — no setSession needed.
+      AppConfig.debugPrint('🔑 Submitting new password...');
       await AuthService.updatePassword(password);
       AppConfig.debugPrint('✅ Password updated successfully');
 
@@ -84,7 +83,8 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
     } catch (e) {
       AppConfig.debugPrint('❌ Password reset error: $e');
       _showError(
-          'Failed to reset password. Your link may have expired — please request a new one.');
+        'Failed to reset password. Your link may have expired — please request a new one.',
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -176,8 +176,11 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
             color: Colors.green.shade50,
             shape: BoxShape.circle,
           ),
-          child:
-              Icon(Icons.check_circle_rounded, size: 72, color: Colors.green.shade600),
+          child: Icon(
+            Icons.check_circle_rounded,
+            size: 72,
+            color: Colors.green.shade600,
+          ),
         ),
         const SizedBox(height: 24),
         const Text(
@@ -188,7 +191,11 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
         const SizedBox(height: 12),
         Text(
           'Your password has been changed successfully. Redirecting you to sign in...',
-          style: TextStyle(fontSize: 14, color: Colors.grey.shade600, height: 1.5),
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey.shade600,
+            height: 1.5,
+          ),
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 24),
@@ -211,8 +218,11 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
             color: Colors.orange.shade50,
             shape: BoxShape.circle,
           ),
-          child:
-              Icon(Icons.link_off_rounded, size: 72, color: Colors.orange.shade600),
+          child: Icon(
+            Icons.link_off_rounded,
+            size: 72,
+            color: Colors.orange.shade600,
+          ),
         ),
         const SizedBox(height: 24),
         const Text(
@@ -224,7 +234,11 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
         Text(
           'This password reset link has expired or is no longer valid. '
           'Please go back and request a new one.',
-          style: TextStyle(fontSize: 14, color: Colors.grey.shade600, height: 1.5),
+          style: TextStyle(
+            fontSize: 14,
+            color: Colors.grey.shade600,
+            height: 1.5,
+          ),
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 28),
@@ -241,8 +255,9 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green.shade600,
               foregroundColor: Colors.white,
-              shape:
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
           ),
         ),
@@ -257,8 +272,11 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Icon(Icons.lock_reset_rounded,
-            size: isTablet ? 72 : 60, color: Colors.green.shade600),
+        Icon(
+          Icons.lock_reset_rounded,
+          size: isTablet ? 72 : 60,
+          color: Colors.green.shade600,
+        ),
         SizedBox(height: isTablet ? 24 : 16),
         Text(
           'Create New Password',
@@ -288,13 +306,16 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
             labelText: 'New Password',
             prefixIcon: const Icon(Icons.lock_outline),
             suffixIcon: IconButton(
-              icon: Icon(_obscurePassword
-                  ? Icons.visibility_outlined
-                  : Icons.visibility_off_outlined),
+              icon: Icon(
+                _obscurePassword
+                    ? Icons.visibility_outlined
+                    : Icons.visibility_off_outlined,
+              ),
               onPressed: () =>
                   setState(() => _obscurePassword = !_obscurePassword),
             ),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            border:
+                OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             filled: true,
             fillColor: Colors.grey.shade50,
           ),
@@ -313,13 +334,16 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
             labelText: 'Confirm Password',
             prefixIcon: const Icon(Icons.lock_outline),
             suffixIcon: IconButton(
-              icon: Icon(_obscureConfirm
-                  ? Icons.visibility_outlined
-                  : Icons.visibility_off_outlined),
+              icon: Icon(
+                _obscureConfirm
+                    ? Icons.visibility_outlined
+                    : Icons.visibility_off_outlined,
+              ),
               onPressed: () =>
                   setState(() => _obscureConfirm = !_obscureConfirm),
             ),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+            border:
+                OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             filled: true,
             fillColor: Colors.grey.shade50,
           ),
@@ -336,7 +360,8 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
               foregroundColor: Colors.white,
               disabledBackgroundColor: Colors.grey.shade300,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+                borderRadius: BorderRadius.circular(12),
+              ),
               elevation: 2,
             ),
             child: _loading
@@ -347,18 +372,26 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2),
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
                       ),
                       SizedBox(width: 12),
-                      Text('Updating...',
-                          style: TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w600)),
+                      Text(
+                        'Updating...',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ],
                   )
                 : const Text(
                     'Reset Password',
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
           ),
         ),
@@ -370,7 +403,9 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
           child: Text(
             'Back to Sign In',
             style: TextStyle(
-                color: Colors.green.shade600, fontWeight: FontWeight.w600),
+              color: Colors.green.shade600,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ],

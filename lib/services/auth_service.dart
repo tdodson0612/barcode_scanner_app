@@ -4,6 +4,8 @@
 // ✅ Proper session handling for iOS and Android
 // ✅ Non-blocking profile setup
 // ✅ FCM only on Android (iOS disabled)
+// ✅ FIXED: resetPassword redirectTo scheme updated to match
+//           AndroidManifest package (com.wiseapps.liverwise)
 //
 // 🔧 FIX (login loop): Removed _clearExistingSession() from signIn().
 //    Calling signOut() before login when there is no active session
@@ -132,7 +134,6 @@ class AuthService {
       throw _createUserFriendlyAuthError(e);
     } catch (e) {
       AppConfig.debugPrint('❌ Login error: $e');
-      // Only wrap if not already user-friendly
       if (e is Exception) rethrow;
       throw _createUserFriendlyAuthError(e);
     }
@@ -264,11 +265,17 @@ class AuthService {
   // PASSWORD RESET
   // --------------------------------------------------------
 
+  /// Sends a password reset email.
+  ///
+  /// The redirectTo scheme MUST match:
+  ///   - AndroidManifest.xml  → android:scheme="com.wiseapps.liverwise"
+  ///   - Supabase Dashboard   → Authentication → URL Config → Redirect URLs
+  ///                            add: com.wiseapps.liverwise://reset-password
   static Future<void> resetPassword(String email) async {
     try {
       await _supabase.auth.resetPasswordForEmail(
         email,
-        redirectTo: 'com.terrydodson.liverWiseApp://reset-password',
+        redirectTo: 'com.wiseapps.liverwise://reset-password',
       );
       AppConfig.debugPrint('✅ Password reset email sent to: $email');
     } catch (e) {

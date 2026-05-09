@@ -9,6 +9,11 @@
 //    were routed through _handleAuthError(), which showed "Hmm, who are you?"
 //    even when the real problem was a database profile-creation failure.
 //
+// 🔧 FIX: _sendPasswordResetEmail no longer uses authError category.
+//    A failed reset email is NOT an auth error — using authError caused
+//    the "Hmm, who are you?" dialog to appear when the user tapped
+//    "Forgot your password?".
+//
 // 🐛 TEMP: Debug test button added (_runDebugTest) — REMOVE before Play Store upload.
 
 import 'dart:async';
@@ -385,10 +390,15 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (e) {
       if (mounted) {
+        // ✅ FIXED: Use unknownError not authError.
+        // A failed password reset email is NOT an auth error — using
+        // authError caused "Hmm, who are you?" to appear here.
         await ErrorHandlingService.handleError(
           context: context,
           error: e,
-          category: ErrorHandlingService.authError,
+          category: ErrorHandlingService.unknownError,
+          showSnackBar: true,
+          showDialog: false,
           customMessage:
               'Unable to send password reset email. Please try again.',
           onRetry: _sendPasswordResetEmail,

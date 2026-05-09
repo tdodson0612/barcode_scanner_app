@@ -56,23 +56,29 @@
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize"
             android:enableOnBackInvokedCallback="true">
-            
-            <!-- Deep Link for Password Reset -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="com.terrydodson.liverWiseApp"
-                    android:host="reset-password"
-                    android:pathPrefix="/" />
-            </intent-filter>
-            
+
             <!-- Launcher -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!--
+                Deep Link for Password Reset
+                ✅ Scheme matches:
+                   - auth_service.dart  → redirectTo: 'com.wiseapps.liverwise://reset-password'
+                   - Supabase Dashboard → Authentication → URL Config → Redirect URLs
+                                          com.wiseapps.liverwise://reset-password
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="com.wiseapps.liverwise"
+                    android:host="reset-password" />
+            </intent-filter>
+            
         </activity>
         
         <!-- Flutter metadata -->
